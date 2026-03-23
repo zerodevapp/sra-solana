@@ -1,0 +1,30 @@
+[package]
+name = "sra-handler"
+version = "0.1.0"
+description = "SRA Handler — bridge-agnostic, mint-agnostic source + destination handler"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "sra_handler"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+
+[dependencies]
+anchor-lang = "0.32.1"
+anchor-spl = "0.32.1"
+sra-common = { path = "../../crates/sra-common" }
+
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
