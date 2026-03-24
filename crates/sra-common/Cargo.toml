@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "Shared types, constants, and ABI encoding for SRA Solana programs"
 edition = "2021"
 
+[features]
+idl-build = ["anchor-lang/idl-build"]
+
 [dependencies]
 anchor-lang = "0.32.1"
 

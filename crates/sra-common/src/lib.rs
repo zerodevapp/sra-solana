@@ -7,3 +7,4 @@ declare_id!("Gte7LViTnE2UixBF59Xfu2sSqcmHhMNANj42yUkYpkdo");
 
 pub mod constants;
 pub mod errors;
+pub mod types;
