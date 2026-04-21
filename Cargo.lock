@@ -2683,6 +2683,7 @@ name = "sra-common"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "solana-keccak-hasher",
 ]
 
 [[package]]
