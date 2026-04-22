@@ -58,21 +58,16 @@ pub fn config_hash(
 /// Compute the config_hash for a destination route PDA.
 /// PDA seeds: ["sra_route", owner, config_hash, salt]
 /// config_hash = keccak256(borsh(owner, source_chain_id, expected_mint, app_id, action_config))
-///
-/// Panics if `action_config.len() > MAX_ACTION_IDXS`. Callers must enforce
-/// the same bound as `SolanaSraRoute.action_config`.
 pub fn route_config_hash(
     owner: &Pubkey,
     source_chain_id: u64,
     expected_mint: &Pubkey,
     app_id: &[u8; 32],
     action_config: &[SolanaAction],
-) -> [u8; 32] {
-    assert!(
+) -> Result<[u8; 32]> {
+    require!(
         action_config.len() <= crate::constants::MAX_ACTION_IDXS,
-        "action_config length {} exceeds MAX_ACTION_IDXS ({})",
-        action_config.len(),
-        crate::constants::MAX_ACTION_IDXS,
+        crate::errors::SraError::TooManyActionIdxs,
     );
     let mut data = Vec::with_capacity(32 + 8 + 32 + 32 + 4 + action_config.len() * 35);
     data.extend_from_slice(owner.as_ref());
@@ -84,7 +79,7 @@ pub fn route_config_hash(
         .try_to_vec()
         .expect("SolanaAction serialization should not fail");
     data.extend_from_slice(&serialized);
-    keccak_hash(&data).to_bytes()
+    Ok(keccak_hash(&data).to_bytes())
 }
 
 #[cfg(test)]
@@ -174,10 +169,12 @@ mod tests {
         }];
         let h1 = route_config_hash(
             &test_owner(), 42161, &mint, &test_app_id(), &actions,
-        );
+        )
+        .unwrap();
         let h2 = route_config_hash(
             &test_owner(), 42161, &mint, &test_app_id(), &actions,
-        );
+        )
+        .unwrap();
         assert_eq!(h1, h2);
         assert_ne!(h1, [0u8; 32]);
     }
@@ -188,10 +185,12 @@ mod tests {
         let actions = vec![];
         let h1 = route_config_hash(
             &test_owner(), 42161, &mint, &test_app_id(), &actions,
-        );
+        )
+        .unwrap();
         let h2 = route_config_hash(
             &test_owner(), 10, &mint, &test_app_id(), &actions,
-        );
+        )
+        .unwrap();
         assert_ne!(h1, h2);
     }
 
@@ -208,10 +207,12 @@ mod tests {
         }];
         let h1 = route_config_hash(
             &test_owner(), 42161, &mint, &test_app_id(), &actions1,
-        );
+        )
+        .unwrap();
         let h2 = route_config_hash(
             &test_owner(), 42161, &mint, &test_app_id(), &actions2,
-        );
+        )
+        .unwrap();
         assert_ne!(h1, h2);
     }
 
@@ -220,7 +221,8 @@ mod tests {
         let mint = Pubkey::new_from_array([10u8; 32]);
         let h1 = route_config_hash(
             &test_owner(), 42161, &mint, &test_app_id(), &[],
-        );
+        )
+        .unwrap();
         assert_ne!(h1, [0u8; 32]);
     }
 
@@ -258,7 +260,8 @@ mod tests {
         let mint = Pubkey::new_from_array([10u8; 32]);
         let h = route_config_hash(
             &test_owner(), 42161, &mint, &test_app_id(), &[],
-        );
+        )
+        .unwrap();
         assert_eq!(h, expected, "route_config_hash (empty) golden vector mismatch");
     }
 
@@ -280,7 +283,8 @@ mod tests {
         }];
         let h = route_config_hash(
             &test_owner(), 42161, &mint, &test_app_id(), &actions,
-        );
+        )
+        .unwrap();
         assert_eq!(h, expected, "route_config_hash (1 action) golden vector mismatch");
     }
 
@@ -300,8 +304,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "exceeds MAX_ACTION_IDXS")]
-    fn route_config_hash_too_many_actions_panics() {
+    fn route_config_hash_too_many_actions_does_not_panic() {
         let mint = Pubkey::new_from_array([10u8; 32]);
         let actions: Vec<SolanaAction> = (0..=crate::constants::MAX_ACTION_IDXS)
             .map(|i| SolanaAction::SplTransfer {
@@ -309,6 +312,35 @@ mod tests {
                 amount_bps: 5000,
             })
             .collect();
-        let _ = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions);
+
+        let result = std::panic::catch_unwind(|| {
+            let _ = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions);
+        });
+
+        assert!(
+            result.is_ok(),
+            "oversized action_config should return an error, not panic"
+        );
+    }
+
+    #[test]
+    fn route_config_hash_too_many_actions_returns_too_many_action_idxs() {
+        let mint = Pubkey::new_from_array([10u8; 32]);
+        let actions: Vec<SolanaAction> = (0..=crate::constants::MAX_ACTION_IDXS)
+            .map(|i| SolanaAction::SplTransfer {
+                recipient: Pubkey::new_from_array([i as u8; 32]),
+                amount_bps: 5000,
+            })
+            .collect();
+
+        let err = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions)
+            .unwrap_err();
+
+        match err {
+            anchor_lang::error::Error::AnchorError(anchor_err) => {
+                assert_eq!(anchor_err.error_name, "TooManyActionIdxs");
+            }
+            other => panic!("expected AnchorError, got {other:?}"),
+        }
     }
 }
