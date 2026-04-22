@@ -34,14 +34,15 @@ every file.
 ## Regenerating
 
 The source of truth is `script/GoldenVectorGenerator.s.sol` in
-[sra-stx](https://github.com/zerodevapp/sra-stx). To regenerate (for
-example after adding a new vector or changing the Solidity `Message`
-shape):
+[sra-stx](https://github.com/zerodevapp/sra-stx). Its `OUT_DIR` and the
+foundry `fs_permissions` entry write directly into this directory, so
+regeneration is one command:
 
 ```bash
 cd /path/to/sra-stx
 forge script script/GoldenVectorGenerator.s.sol
-cp golden-vectors/*.json /path/to/sra-solana/crates/sra-common/tests/fixtures/golden-vectors/
 ```
 
-Then run `cargo test -p sra-common` here; any byte divergence will fail.
+This assumes `sra-stx` and `sra-solana` are checked out as sibling
+directories (the generator writes to `../sra-solana/...`). Then run
+`cargo test -p sra-common` here; any byte divergence will fail.
