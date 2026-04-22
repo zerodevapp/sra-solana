@@ -71,40 +71,44 @@ pub enum AbiError {
 // Word writers / primitive encoders
 // ---------------------------------------------------------------------------
 
-fn u256_from_usize(v: usize) -> [u8; 32] {
-    let mut r = [0u8; 32];
+/// Size of an EVM ABI word in bytes. Every head slot, length prefix, and
+/// dynamic-tail entry is padded to this boundary.
+const WORD: usize = 32;
+
+fn u256_from_usize(v: usize) -> [u8; WORD] {
+    let mut r = [0u8; WORD];
     let bytes = (v as u64).to_be_bytes();
-    r[32 - bytes.len()..].copy_from_slice(&bytes);
+    r[WORD - bytes.len()..].copy_from_slice(&bytes);
     r
 }
 
-fn u256_from_u64(v: u64) -> [u8; 32] {
-    let mut r = [0u8; 32];
-    r[24..].copy_from_slice(&v.to_be_bytes());
+fn u256_from_u64(v: u64) -> [u8; WORD] {
+    let mut r = [0u8; WORD];
+    r[WORD - 8..].copy_from_slice(&v.to_be_bytes());
     r
 }
 
-fn address_word(addr: &[u8; 20]) -> [u8; 32] {
-    let mut r = [0u8; 32];
-    r[12..].copy_from_slice(addr);
+fn address_word(addr: &[u8; 20]) -> [u8; WORD] {
+    let mut r = [0u8; WORD];
+    r[WORD - 20..].copy_from_slice(addr);
     r
 }
 
-/// Encode a Solidity `bytes` value: 32-byte length + data + zero padding to a
-/// 32-byte boundary. Zero-length input produces exactly 32 zero bytes.
+/// Encode a Solidity `bytes` value: one-word length + data + zero padding to a
+/// word boundary. Zero-length input produces exactly one zero word.
 fn encode_bytes_dynamic(data: &[u8]) -> Vec<u8> {
-    let pad = (32 - data.len() % 32) % 32;
-    let mut out = Vec::with_capacity(32 + data.len() + pad);
+    let pad = (WORD - data.len() % WORD) % WORD;
+    let mut out = Vec::with_capacity(WORD + data.len() + pad);
     out.extend_from_slice(&u256_from_usize(data.len()));
     out.extend_from_slice(data);
     out.extend(std::iter::repeat(0u8).take(pad));
     out
 }
 
-/// Encode a Solidity `uint256[]`: 32-byte length followed by each entry as a
-/// full 32-byte word.
+/// Encode a Solidity `uint256[]`: one-word length followed by each entry as a
+/// full word.
 fn encode_uint256_array_dynamic(arr: &[[u8; 32]]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(32 + arr.len() * 32);
+    let mut out = Vec::with_capacity(WORD + arr.len() * WORD);
     out.extend_from_slice(&u256_from_usize(arr.len()));
     for e in arr {
         out.extend_from_slice(e);
@@ -131,7 +135,7 @@ fn encode_token_param_static(tp: &TokenParam) -> [u8; 64] {
 /// encoded `extra`. Offsets are relative to the start of this blob.
 fn encode_deposit_info(di: &DepositInfo) -> Vec<u8> {
     const HEAD_WORDS: usize = 6;
-    let head_size = HEAD_WORDS * 32;
+    let head_size = HEAD_WORDS * WORD;
 
     let tail = encode_bytes_dynamic(&di.extra);
 
@@ -150,7 +154,7 @@ fn encode_deposit_info(di: &DepositInfo) -> Vec<u8> {
 /// relative to the start of this blob.
 fn encode_message(msg: &Message) -> Vec<u8> {
     const HEAD_WORDS: usize = 5;
-    let head_size = HEAD_WORDS * 32;
+    let head_size = HEAD_WORDS * WORD;
 
     let init_code_enc = encode_bytes_dynamic(&msg.init_code);
     let deposit_info_enc = encode_deposit_info(&msg.deposit_info);
@@ -190,7 +194,7 @@ pub fn abi_encode_sra_message(
     message: &Message,
 ) -> Vec<u8> {
     const HEAD_WORDS: usize = 4;
-    let head_size = HEAD_WORDS * 32;
+    let head_size = HEAD_WORDS * WORD;
 
     let message_enc = encode_message(message);
     let mut out = Vec::with_capacity(head_size + message_enc.len());
@@ -215,7 +219,7 @@ pub fn abi_encode_sra_message(
 /// plus the dynamic `Message` offset (always `2 * 32 = 64`).
 pub fn abi_encode_for_replay(source_chain_id: &[u8; 32], message: &Message) -> Vec<u8> {
     const HEAD_WORDS: usize = 2;
-    let head_size = HEAD_WORDS * 32;
+    let head_size = HEAD_WORDS * WORD;
 
     let message_enc = encode_message(message);
     let mut out = Vec::with_capacity(head_size + message_enc.len());
@@ -240,16 +244,16 @@ pub fn replay_hash(source_chain_id: &[u8; 32], message: &Message) -> [u8; 32] {
 /// (length 0) — 96 bytes total.
 pub fn build_extra_envelope(target_adapter: &[u8; 20], nonce: u64) -> Vec<u8> {
     // Inner abi.encode(nonce, bytes(""))
-    let mut inner = Vec::with_capacity(3 * 32);
+    let mut inner = Vec::with_capacity(3 * WORD);
     inner.extend_from_slice(&u256_from_u64(nonce));
-    inner.extend_from_slice(&u256_from_usize(2 * 32)); // offset to empty bytes
-    inner.extend_from_slice(&[0u8; 32]); // empty bytes length
+    inner.extend_from_slice(&u256_from_usize(2 * WORD)); // offset to empty bytes
+    inner.extend_from_slice(&[0u8; WORD]); // empty bytes length
 
     // Outer abi.encode(address, bytes)
     let bytes_tail = encode_bytes_dynamic(&inner);
-    let mut out = Vec::with_capacity(2 * 32 + bytes_tail.len());
+    let mut out = Vec::with_capacity(2 * WORD + bytes_tail.len());
     out.extend_from_slice(&address_word(target_adapter));
-    out.extend_from_slice(&u256_from_usize(2 * 32)); // offset to bytes
+    out.extend_from_slice(&u256_from_usize(2 * WORD)); // offset to bytes
     out.extend(bytes_tail);
     out
 }
