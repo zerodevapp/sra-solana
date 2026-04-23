@@ -2,7 +2,7 @@ use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
 use litesvm::LiteSVM;
 use solana_sdk::{
     instruction::Instruction, message::Message, pubkey::Pubkey, signature::Keypair, signer::Signer,
-    transaction::Transaction,
+    transaction::{Transaction, TransactionError},
 };
 use solana_system_interface::program as system_program;
 use sra_common::{seeds::SEED_SRA, types::SraConfig};
@@ -10,6 +10,7 @@ use sra_handler::instructions::source::initialize_sra::SraInitConfig;
 use std::{fs, path::PathBuf};
 
 pub const PROGRAM_ID: Pubkey = sra_handler::ID;
+pub const SOL: u64 = 1_000_000_000;
 
 fn program_so_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/sra_handler.so")
@@ -69,12 +70,42 @@ pub fn initialize_sra_ix(
     }
 }
 
+pub fn update_adapters_ix(
+    payer: &Pubkey,
+    owner: &Pubkey,
+    sra_config: &Pubkey,
+    adapters: Vec<Pubkey>,
+) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::UpdateAdapters {
+            payer: *payer,
+            owner: *owner,
+            sra_config: *sra_config,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::UpdateAdapters { adapters }.data(),
+    }
+}
+
+/// Initialize a default SraConfig and return its PDA. Uses fixed salt `[0x11; 32]`.
+pub fn init_sra(svm: &mut LiteSVM, payer: &Keypair, owner: &Keypair) -> Pubkey {
+    let config = sample_config();
+    let salt = [0x11u8; 32];
+    let (pda, _) = derive_sra_pda(&owner.pubkey(), &config, &salt);
+    let ix = initialize_sra_ix(&payer.pubkey(), &owner.pubkey(), &pda, config, salt);
+    send_ix(svm, ix, payer, &[owner]).expect("initialize_sra should succeed");
+    pda
+}
+
 pub fn send_ix(
     svm: &mut LiteSVM,
     ix: Instruction,
     payer: &Keypair,
     signers: &[&Keypair],
 ) -> Result<(), Box<litesvm::types::FailedTransactionMetadata>> {
+    svm.expire_blockhash();
     let blockhash = svm.latest_blockhash();
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
@@ -82,6 +113,16 @@ pub fn send_ix(
     all_signers.extend_from_slice(signers);
     tx.sign(&all_signers, blockhash);
     svm.send_transaction(tx).map(|_| ()).map_err(Box::new)
+}
+
+pub fn send_ix_expect_err(
+    svm: &mut LiteSVM,
+    ix: Instruction,
+    payer: &Keypair,
+    signers: &[&Keypair],
+    msg: &str,
+) -> TransactionError {
+    send_ix(svm, ix, payer, signers).expect_err(msg).err.clone()
 }
 
 pub fn fetch_sra_config(svm: &LiteSVM, pda: &Pubkey) -> SraConfig {
