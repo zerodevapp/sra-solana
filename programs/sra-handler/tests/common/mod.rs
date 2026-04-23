@@ -9,18 +9,26 @@ use solana_sdk::{
     system_program,
     transaction::Transaction,
 };
+use std::{fs, path::PathBuf};
 use sra_common::{seeds::SEED_SRA, types::SraConfig};
 use sra_handler::instructions::source::initialize_sra::SraInitConfig;
 
 pub const PROGRAM_ID: Pubkey = sra_handler::ID;
 
+fn program_so_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/sra_handler.so")
+}
+
 pub fn setup_svm() -> LiteSVM {
     let mut svm = LiteSVM::new();
-    let so = include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../target/deploy/sra_handler.so"
-    ));
-    svm.add_program(PROGRAM_ID, so).unwrap();
+    let so_path = program_so_path();
+    let so = fs::read(&so_path).unwrap_or_else(|err| {
+        panic!(
+            "failed to read program binary at {}: {err}. Run `anchor build` first.",
+            so_path.display()
+        )
+    });
+    svm.add_program(PROGRAM_ID, so.as_slice()).unwrap();
     svm
 }
 
