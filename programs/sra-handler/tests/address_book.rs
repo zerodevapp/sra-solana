@@ -148,3 +148,56 @@ fn register_duplicate_rejected() {
     let result = send_ix(&mut svm, ix, &payer, &[&admin]);
     assert!(result.is_err(), "duplicate register must fail");
 }
+
+#[test]
+fn deactivate_non_admin_rejected() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let admin = funded_keypair(&mut svm, SOL);
+    let attacker = funded_keypair(&mut svm, SOL);
+    let fee_config = seed_fee_config(&mut svm, &admin.pubkey());
+    let (adapter, mint, target_chain_id, target_token) = sample_address_book_args();
+    let (address_book_entry, _) =
+        derive_address_book_pda(&adapter, &mint, target_chain_id, &target_token);
+
+    let register_ix = register_address_book_ix(
+        &payer.pubkey(),
+        &admin.pubkey(),
+        &fee_config,
+        &address_book_entry,
+        adapter,
+        mint,
+        target_chain_id,
+        target_token,
+    );
+    send_ix(&mut svm, register_ix, &payer, &[&admin]).expect("register should succeed");
+
+    let deactivate_ix = deactivate_address_book_ix(
+        &payer.pubkey(),
+        &attacker.pubkey(),
+        &fee_config,
+        &address_book_entry,
+        adapter,
+        mint,
+        target_chain_id,
+        target_token,
+    );
+    let err = send_ix_expect_err(
+        &mut svm,
+        deactivate_ix,
+        &payer,
+        &[&attacker],
+        "non-admin must not deactivate an address book entry",
+    );
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(ErrorCode::ConstraintHasOne as u32),
+        )
+    );
+
+    let stored = fetch_address_book_entry(&svm, &address_book_entry);
+    assert!(stored.active);
+}
