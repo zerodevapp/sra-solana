@@ -1,0 +1,26 @@
+{
+  "address": "Gte7LViTnE2UixBF59Xfu2sSqcmHhMNANj42yUkYpkdo",
+  "metadata": {
+    "name": "sra_handler",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "SRA Handler — bridge-agnostic, mint-agnostic source + destination handler"
+  },
+  "instructions": [
+    {
+      "name": "initialize",
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [],
+      "args": []
+    }
+  ]
+}

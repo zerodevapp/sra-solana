@@ -1,0 +1,26 @@
+{
+  "address": "8n167Xs4Xx7zEq5fuyCDVgYd3vUjFmHAkGTdK2SCpmXD",
+  "metadata": {
+    "name": "sra_across_adapter",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "SRA Across Adapter — Across-specific source deposit + destination fill verification"
+  },
+  "instructions": [
+    {
+      "name": "initialize",
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [],
+      "args": []
+    }
+  ]
+}

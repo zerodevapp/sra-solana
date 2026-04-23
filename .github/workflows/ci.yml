@@ -1,0 +1,160 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOLANA_VERSION: "3.1.11"
+  ANCHOR_VERSION: "0.32.1"
+  NODE_VERSION: "20"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust-checks:
+    name: Rust (fmt, clippy, check, audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.89.0
+          components: rustfmt, clippy
+
+      - name: Cache Rust build (host target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-host
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo check
+        run: cargo check --workspace --all-targets
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: cargo audit (advisory check, warn-only)
+        continue-on-error: true
+        run: cargo audit --deny warnings
+
+  anchor:
+    name: Anchor (build, test, verify-idl)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.89.0
+
+      - name: Cache Rust build (BPF target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-bpf
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Cache Solana + Anchor toolchain
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/solana
+            ~/.avm
+            ~/.cargo/bin/avm
+            ~/.cargo/bin/anchor
+          key: toolchain-solana-${{ env.SOLANA_VERSION }}-anchor-${{ env.ANCHOR_VERSION }}-v1
+
+      - name: Install Solana CLI
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
+
+      - name: Add Solana to PATH
+        run: echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Install avm + Anchor
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor --tag v${ANCHOR_VERSION} avm --force
+          avm install ${ANCHOR_VERSION}
+          avm use ${ANCHOR_VERSION}
+
+      - name: Verify tool versions
+        run: |
+          solana --version
+          anchor --version
+          rustc --version
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: yarn
+
+      - name: Install yarn deps
+        run: yarn install --frozen-lockfile
+
+      - name: Generate local keypair
+        run: |
+          mkdir -p ~/.config/solana
+          solana-keygen new --no-bip39-passphrase --force --silent --outfile ~/.config/solana/id.json
+
+      - name: anchor build
+        run: anchor build
+
+      - name: Verify IDL drift
+        run: |
+          set -e
+          fail=0
+          for program in sra_handler sra_across_adapter; do
+            committed="idl/${program}.json"
+            fresh="target/idl/${program}.json"
+            if [ ! -f "$committed" ]; then
+              echo "::error::Missing committed IDL: $committed"
+              fail=1
+              continue
+            fi
+            if ! diff -u <(jq --sort-keys . "$committed") <(jq --sort-keys . "$fresh"); then
+              echo "::error::IDL drift for ${program}. Regenerate with 'anchor build' and commit target/idl/${program}.json to idl/${program}.json"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: anchor test
+        run: anchor test --skip-build
+
+  ts:
+    name: TypeScript (prettier)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: yarn
+
+      - name: Install deps
+        run: yarn install --frozen-lockfile
+
+      - name: Prettier check
+        run: yarn lint
