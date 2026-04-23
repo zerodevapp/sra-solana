@@ -1,7 +1,15 @@
+// Each integration-test binary (initialize_sra, update_adapters, ...) pulls in this module
+// but only uses a subset of its helpers. Silence per-binary dead_code warnings on the shared set.
+#![allow(dead_code)]
+
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
 use litesvm::LiteSVM;
 use solana_sdk::{
-    instruction::Instruction, message::Message, pubkey::Pubkey, signature::Keypair, signer::Signer,
+    instruction::Instruction,
+    message::Message,
+    pubkey::Pubkey,
+    signature::Keypair,
+    signer::Signer,
     transaction::{Transaction, TransactionError},
 };
 use solana_system_interface::program as system_program;
