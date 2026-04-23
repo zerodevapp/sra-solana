@@ -49,8 +49,8 @@ impl VerifiedFillData {
             return Err(error!(crate::errors::SraError::InvalidFill));
         }
         let mut slice = &data[8..];
-        let result =
-            Self::deserialize(&mut slice).map_err(|_| error!(crate::errors::SraError::InvalidFill))?;
+        let result = Self::deserialize(&mut slice)
+            .map_err(|_| error!(crate::errors::SraError::InvalidFill))?;
         // Reject accounts with trailing bytes — exact layout match required.
         // Without this, a larger adapter-owned account with a matching prefix
         // would pass, masking handler/adapter schema drift.

@@ -108,7 +108,7 @@ fn encode_bytes_dynamic(data: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(WORD + data.len() + pad);
     out.extend_from_slice(&u256_from_usize(data.len()));
     out.extend_from_slice(data);
-    out.extend(std::iter::repeat(0u8).take(pad));
+    out.extend(std::iter::repeat_n(0u8, pad));
     out
 }
 
@@ -331,7 +331,11 @@ mod tests {
     #[test]
     fn encode_bytes_dynamic_pads_to_word_boundary() {
         let out = encode_bytes_dynamic(b"abc");
-        assert_eq!(out.len(), 64, "3 bytes -> length word (32) + padded data (32)");
+        assert_eq!(
+            out.len(),
+            64,
+            "3 bytes -> length word (32) + padded data (32)"
+        );
         assert_eq!(out[31], 3); // length
         assert_eq!(&out[32..35], b"abc");
         assert_eq!(&out[35..], &[0u8; 29]); // right-padding
@@ -389,9 +393,15 @@ mod tests {
             account,
             init_code: vec![],
             deposit_info: DepositInfo {
-                deposit_param: TokenParam { token: [0x44; 20], amount: amount_dep },
+                deposit_param: TokenParam {
+                    token: [0x44; 20],
+                    amount: amount_dep,
+                },
                 target_chain_id: target_chain,
-                target_param: TokenParam { token: usdc_arb, amount: amount_tgt },
+                target_param: TokenParam {
+                    token: usdc_arb,
+                    amount: amount_tgt,
+                },
                 extra: vec![],
             },
             action_idxs: vec![],

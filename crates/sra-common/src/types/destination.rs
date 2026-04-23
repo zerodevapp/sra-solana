@@ -88,7 +88,10 @@ mod tests {
 
     #[test]
     fn execution_status_variants() {
-        assert_ne!(ExecutionStatus::Finalized, ExecutionStatus::ActionsSucceeded);
+        assert_ne!(
+            ExecutionStatus::Finalized,
+            ExecutionStatus::ActionsSucceeded
+        );
         assert_ne!(ExecutionStatus::ActionsFailed, ExecutionStatus::Recovered);
     }
 }
