@@ -17,4 +17,8 @@ pub mod sra_handler {
     ) -> Result<()> {
         instructions::source::initialize_sra::handler(ctx, config, salt)
     }
+
+    pub fn update_adapters(ctx: Context<UpdateAdapters>, adapters: Vec<Pubkey>) -> Result<()> {
+        instructions::source::update_adapters::handler(ctx, adapters)
+    }
 }

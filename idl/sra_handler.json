@@ -81,6 +81,49 @@
           }
         }
       ]
+    },
+    {
+      "name": "update_adapters",
+      "discriminator": [
+        214,
+        16,
+        245,
+        127,
+        109,
+        143,
+        222,
+        149
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "sra_config"
+          ]
+        },
+        {
+          "name": "sra_config",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "adapters",
+          "type": {
+            "vec": "pubkey"
+          }
+        }
+      ]
     }
   ],
   "accounts": [

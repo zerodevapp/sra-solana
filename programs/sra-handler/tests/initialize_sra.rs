@@ -6,8 +6,6 @@ use solana_sdk::signer::Signer;
 use solana_sdk::{instruction::InstructionError, transaction::TransactionError};
 use sra_common::seeds::config_hash;
 
-const SOL: u64 = 1_000_000_000;
-
 #[test]
 fn initialize_sra_happy_path() {
     let mut svm = setup_svm();
@@ -85,7 +83,6 @@ fn initialize_sra_duplicate_rejected() {
 
     // Second call with same seeds should fail (account already exists).
     let ix2 = initialize_sra_ix(&payer.pubkey(), &owner.pubkey(), &pda, config, salt);
-    svm.expire_blockhash();
     let result = send_ix(&mut svm, ix2, &payer, &[&owner]);
     assert!(
         result.is_err(),
@@ -105,10 +102,13 @@ fn initialize_sra_rejects_mismatched_sra_pda() {
     let (wrong_pda, _) = derive_sra_pda(&owner.pubkey(), &config, &wrong_salt);
 
     let ix = initialize_sra_ix(&payer.pubkey(), &owner.pubkey(), &wrong_pda, config, salt);
-    let err = send_ix(&mut svm, ix, &payer, &[&owner])
-        .expect_err("initialize_sra should reject a PDA derived from different seeds")
-        .err
-        .clone();
+    let err = send_ix_expect_err(
+        &mut svm,
+        ix,
+        &payer,
+        &[&owner],
+        "initialize_sra should reject a PDA derived from different seeds",
+    );
 
     assert_eq!(
         err,
