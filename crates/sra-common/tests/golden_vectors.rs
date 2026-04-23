@@ -18,8 +18,9 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 use sra_common::abi::{
-    abi_encode_sra_message, build_extra_envelope, bytes32_to_evm_address, evm_address_to_bytes32,
-    pubkey_to_bytes32, source_token_hash, AbiError, DepositInfo, Message, TokenParam,
+    abi_encode_for_replay, abi_encode_sra_message, build_extra_envelope, bytes32_to_evm_address,
+    evm_address_to_bytes32, pubkey_to_bytes32, replay_hash, source_token_hash, AbiError,
+    DepositInfo, Message, TokenParam,
 };
 
 // ---------------------------------------------------------------------------
@@ -169,6 +170,54 @@ fn every_vector_matches_solidity_abi_encode() {
                 name,
                 hex::encode(&expected),
                 hex::encode(&got),
+            );
+        }
+    }
+}
+
+#[test]
+fn every_vector_matches_solidity_abi_encode_for_replay() {
+    for name in load_index() {
+        let v = load_vector(&name);
+        let source_chain_id = dec_to_u256_be(v["sourceChainId"].as_str().unwrap());
+        let msg = message_from_json(&v);
+        let expected = parse_hex(v["encodedForReplay"].as_str().unwrap());
+
+        let got = abi_encode_for_replay(&source_chain_id, &msg);
+        assert_eq!(
+            got.len(),
+            expected.len(),
+            "vector '{}' encodedForReplay: length mismatch (got {}, expected {})",
+            name,
+            got.len(),
+            expected.len(),
+        );
+        if got != expected {
+            panic!(
+                "vector '{}' encodedForReplay: byte mismatch\n  expected: 0x{}\n       got: 0x{}",
+                name,
+                hex::encode(&expected),
+                hex::encode(&got),
+            );
+        }
+    }
+}
+
+#[test]
+fn every_vector_matches_solidity_replay_hash() {
+    for name in load_index() {
+        let v = load_vector(&name);
+        let source_chain_id = dec_to_u256_be(v["sourceChainId"].as_str().unwrap());
+        let msg = message_from_json(&v);
+        let expected = parse_hex_32(v["replayHash"].as_str().unwrap());
+
+        let got = replay_hash(&source_chain_id, &msg);
+        if got != expected {
+            panic!(
+                "vector '{}' replayHash: mismatch\n  expected: 0x{}\n       got: 0x{}",
+                name,
+                hex::encode(expected),
+                hex::encode(got),
             );
         }
     }

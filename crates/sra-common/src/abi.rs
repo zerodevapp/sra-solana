@@ -82,7 +82,14 @@ fn u256_from_usize(v: usize) -> [u8; WORD] {
     r
 }
 
-fn u256_from_u64(v: u64) -> [u8; WORD] {
+/// Encode a `u64` as a big-endian `uint256` word.
+///
+/// The rest of the codebase (e.g. `SraConfig.target_chain_id`,
+/// `MintNonce.nonce`, `SraMintRoute.action_idxs`) stores chain IDs, nonces,
+/// amounts, and action indexes as `u64`. Use this helper to widen them into
+/// the `[u8; 32]` representation the ABI structs require — it places the
+/// value in the correct (rightmost) bytes and zero-fills the upper 24.
+pub fn u256_from_u64(v: u64) -> [u8; WORD] {
     let mut r = [0u8; WORD];
     r[WORD - 8..].copy_from_slice(&v.to_be_bytes());
     r
