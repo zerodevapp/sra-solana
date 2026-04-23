@@ -1,7 +1,9 @@
 mod common;
 
+use anchor_lang::error::ErrorCode;
 use common::*;
 use solana_sdk::signer::Signer;
+use solana_sdk::{instruction::InstructionError, transaction::TransactionError};
 use sra_common::seeds::config_hash;
 
 const SOL: u64 = 1_000_000_000;
@@ -88,5 +90,31 @@ fn initialize_sra_duplicate_rejected() {
     assert!(
         result.is_err(),
         "second initialize_sra with same seeds must fail"
+    );
+}
+
+#[test]
+fn initialize_sra_rejects_mismatched_sra_pda() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+
+    let config = sample_config();
+    let salt = [0xDDu8; 32];
+    let wrong_salt = [0xEEu8; 32];
+    let (wrong_pda, _) = derive_sra_pda(&owner.pubkey(), &config, &wrong_salt);
+
+    let ix = initialize_sra_ix(&payer.pubkey(), &owner.pubkey(), &wrong_pda, config, salt);
+    let err = send_ix(&mut svm, ix, &payer, &[&owner])
+        .expect_err("initialize_sra should reject a PDA derived from different seeds")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(ErrorCode::ConstraintSeeds as u32),
+        )
     );
 }
