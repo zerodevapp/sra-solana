@@ -11,5 +11,9 @@ idl-build = ["anchor-lang/idl-build"]
 anchor-lang = "0.32.1"
 solana-keccak-hasher = "2.2.1"
 
+[dev-dependencies]
+serde_json = "1"
+hex = "0.4"
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

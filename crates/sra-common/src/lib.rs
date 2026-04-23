@@ -5,6 +5,7 @@ use anchor_lang::prelude::*;
 // handler-owned accounts.
 declare_id!("Gte7LViTnE2UixBF59Xfu2sSqcmHhMNANj42yUkYpkdo");
 
+pub mod abi;
 pub mod constants;
 pub mod errors;
 pub mod seeds;

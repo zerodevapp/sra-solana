@@ -1,0 +1,18 @@
+{
+  "vectors": [
+    "minimal",
+    "single_action_idx",
+    "two_action_idxs",
+    "max_action_idxs",
+    "nonzero_app_id",
+    "with_init_code",
+    "large_init_code",
+    "standard_across_extra",
+    "solana_account_recipient",
+    "large_amounts",
+    "init_code_len_1",
+    "init_code_len_33",
+    "kitchen_sink",
+    "source_chain_mainnet"
+  ]
+}
