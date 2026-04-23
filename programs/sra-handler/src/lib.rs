@@ -21,4 +21,36 @@ pub mod sra_handler {
     pub fn update_adapters(ctx: Context<UpdateAdapters>, adapters: Vec<Pubkey>) -> Result<()> {
         instructions::source::update_adapters::handler(ctx, adapters)
     }
+
+    pub fn register_address_book_entry(
+        ctx: Context<RegisterAddressBookEntry>,
+        adapter: Pubkey,
+        mint: Pubkey,
+        target_chain_id: u64,
+        target_token: [u8; 32],
+    ) -> Result<()> {
+        instructions::source::address_book::register_handler(
+            ctx,
+            adapter,
+            mint,
+            target_chain_id,
+            target_token,
+        )
+    }
+
+    pub fn deactivate_address_book_entry(
+        ctx: Context<DeactivateAddressBookEntry>,
+        adapter: Pubkey,
+        mint: Pubkey,
+        target_chain_id: u64,
+        target_token: [u8; 32],
+    ) -> Result<()> {
+        instructions::source::address_book::deactivate_handler(
+            ctx,
+            adapter,
+            mint,
+            target_chain_id,
+            target_token,
+        )
+    }
 }
