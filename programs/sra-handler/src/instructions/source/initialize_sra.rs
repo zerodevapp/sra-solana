@@ -48,11 +48,7 @@ pub struct InitializeSra<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(
-    ctx: Context<InitializeSra>,
-    config: SraInitConfig,
-    salt: [u8; 32],
-) -> Result<()> {
+pub fn handler(ctx: Context<InitializeSra>, config: SraInitConfig, salt: [u8; 32]) -> Result<()> {
     let sra_config = &mut ctx.accounts.sra_config;
     sra_config.owner = ctx.accounts.owner.key();
     sra_config.target_chain_id = config.target_chain_id;

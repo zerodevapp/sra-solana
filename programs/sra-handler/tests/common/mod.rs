@@ -1,17 +1,12 @@
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
 use litesvm::LiteSVM;
 use solana_sdk::{
-    instruction::Instruction,
-    message::Message,
-    pubkey::Pubkey,
-    signature::Keypair,
-    signer::Signer,
-    system_program,
-    transaction::Transaction,
+    instruction::Instruction, message::Message, pubkey::Pubkey, signature::Keypair, signer::Signer,
+    system_program, transaction::Transaction,
 };
-use std::{fs, path::PathBuf};
 use sra_common::{seeds::SEED_SRA, types::SraConfig};
 use sra_handler::instructions::source::initialize_sra::SraInitConfig;
+use std::{fs, path::PathBuf};
 
 pub const PROGRAM_ID: Pubkey = sra_handler::ID;
 
@@ -50,10 +45,7 @@ pub fn sample_config() -> SraInitConfig {
 
 pub fn derive_sra_pda(owner: &Pubkey, config: &SraInitConfig, salt: &[u8; 32]) -> (Pubkey, u8) {
     let config_hash = config.hash(owner);
-    Pubkey::find_program_address(
-        &[SEED_SRA, owner.as_ref(), &config_hash, salt],
-        &PROGRAM_ID,
-    )
+    Pubkey::find_program_address(&[SEED_SRA, owner.as_ref(), &config_hash, salt], &PROGRAM_ID)
 }
 
 pub fn initialize_sra_ix(
