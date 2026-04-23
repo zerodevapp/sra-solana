@@ -25,6 +25,10 @@ anchor-lang = "0.32.1"
 anchor-spl = "0.32.1"
 sra-common = { path = "../../crates/sra-common" }
 
+[dev-dependencies]
+litesvm = "0.7.1"
+solana-sdk = "2.3"
+
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
