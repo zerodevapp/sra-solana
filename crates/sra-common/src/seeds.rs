@@ -109,12 +109,20 @@ mod tests {
     #[test]
     fn config_hash_deterministic() {
         let h1 = config_hash(
-            &test_owner(), 42161, &test_handler(), &test_adapter(),
-            &test_recipient(), &test_app_id(),
+            &test_owner(),
+            42161,
+            &test_handler(),
+            &test_adapter(),
+            &test_recipient(),
+            &test_app_id(),
         );
         let h2 = config_hash(
-            &test_owner(), 42161, &test_handler(), &test_adapter(),
-            &test_recipient(), &test_app_id(),
+            &test_owner(),
+            42161,
+            &test_handler(),
+            &test_adapter(),
+            &test_recipient(),
+            &test_app_id(),
         );
         assert_eq!(h1, h2);
         assert_ne!(h1, [0u8; 32]);
@@ -123,12 +131,20 @@ mod tests {
     #[test]
     fn config_hash_different_chain_id() {
         let h1 = config_hash(
-            &test_owner(), 42161, &test_handler(), &test_adapter(),
-            &test_recipient(), &test_app_id(),
+            &test_owner(),
+            42161,
+            &test_handler(),
+            &test_adapter(),
+            &test_recipient(),
+            &test_app_id(),
         );
         let h2 = config_hash(
-            &test_owner(), 10, &test_handler(), &test_adapter(),
-            &test_recipient(), &test_app_id(),
+            &test_owner(),
+            10,
+            &test_handler(),
+            &test_adapter(),
+            &test_recipient(),
+            &test_app_id(),
         );
         assert_ne!(h1, h2);
     }
@@ -137,12 +153,20 @@ mod tests {
     fn config_hash_different_owner() {
         let owner2 = Pubkey::new_from_array([99u8; 32]);
         let h1 = config_hash(
-            &test_owner(), 42161, &test_handler(), &test_adapter(),
-            &test_recipient(), &test_app_id(),
+            &test_owner(),
+            42161,
+            &test_handler(),
+            &test_adapter(),
+            &test_recipient(),
+            &test_app_id(),
         );
         let h2 = config_hash(
-            &owner2, 42161, &test_handler(), &test_adapter(),
-            &test_recipient(), &test_app_id(),
+            &owner2,
+            42161,
+            &test_handler(),
+            &test_adapter(),
+            &test_recipient(),
+            &test_app_id(),
         );
         assert_ne!(h1, h2);
     }
@@ -150,12 +174,20 @@ mod tests {
     #[test]
     fn config_hash_different_app_id() {
         let h1 = config_hash(
-            &test_owner(), 42161, &test_handler(), &test_adapter(),
-            &test_recipient(), &test_app_id(),
+            &test_owner(),
+            42161,
+            &test_handler(),
+            &test_adapter(),
+            &test_recipient(),
+            &test_app_id(),
         );
         let h2 = config_hash(
-            &test_owner(), 42161, &test_handler(), &test_adapter(),
-            &test_recipient(), &[0u8; 32],
+            &test_owner(),
+            42161,
+            &test_handler(),
+            &test_adapter(),
+            &test_recipient(),
+            &[0u8; 32],
         );
         assert_ne!(h1, h2);
     }
@@ -167,14 +199,8 @@ mod tests {
             recipient: Pubkey::new_from_array([20u8; 32]),
             amount_bps: 10000,
         }];
-        let h1 = route_config_hash(
-            &test_owner(), 42161, &mint, &test_app_id(), &actions,
-        )
-        .unwrap();
-        let h2 = route_config_hash(
-            &test_owner(), 42161, &mint, &test_app_id(), &actions,
-        )
-        .unwrap();
+        let h1 = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions).unwrap();
+        let h2 = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions).unwrap();
         assert_eq!(h1, h2);
         assert_ne!(h1, [0u8; 32]);
     }
@@ -183,14 +209,8 @@ mod tests {
     fn route_config_hash_different_chain() {
         let mint = Pubkey::new_from_array([10u8; 32]);
         let actions = vec![];
-        let h1 = route_config_hash(
-            &test_owner(), 42161, &mint, &test_app_id(), &actions,
-        )
-        .unwrap();
-        let h2 = route_config_hash(
-            &test_owner(), 10, &mint, &test_app_id(), &actions,
-        )
-        .unwrap();
+        let h1 = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions).unwrap();
+        let h2 = route_config_hash(&test_owner(), 10, &mint, &test_app_id(), &actions).unwrap();
         assert_ne!(h1, h2);
     }
 
@@ -205,24 +225,15 @@ mod tests {
             recipient: Pubkey::new_from_array([20u8; 32]),
             amount_bps: 10000,
         }];
-        let h1 = route_config_hash(
-            &test_owner(), 42161, &mint, &test_app_id(), &actions1,
-        )
-        .unwrap();
-        let h2 = route_config_hash(
-            &test_owner(), 42161, &mint, &test_app_id(), &actions2,
-        )
-        .unwrap();
+        let h1 = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions1).unwrap();
+        let h2 = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions2).unwrap();
         assert_ne!(h1, h2);
     }
 
     #[test]
     fn route_config_hash_empty_actions() {
         let mint = Pubkey::new_from_array([10u8; 32]);
-        let h1 = route_config_hash(
-            &test_owner(), 42161, &mint, &test_app_id(), &[],
-        )
-        .unwrap();
+        let h1 = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &[]).unwrap();
         assert_ne!(h1, [0u8; 32]);
     }
 
@@ -235,14 +246,17 @@ mod tests {
         // owner=[1]*32, chain_id=42161 (LE), handler=[2]*32, adapter=[3]*32,
         // recipient=[4]*32, app_id=[5]*32
         let expected: [u8; 32] = [
-            0xed, 0x4f, 0x1d, 0x36, 0x26, 0x63, 0xa4, 0x4b,
-            0x4b, 0x8d, 0x74, 0x72, 0x83, 0x1a, 0x7d, 0x34,
-            0x3c, 0xa8, 0xc2, 0xc9, 0x43, 0x8a, 0x10, 0x2b,
-            0x0b, 0xc0, 0x22, 0xd2, 0x01, 0x38, 0x1b, 0xa5,
+            0xed, 0x4f, 0x1d, 0x36, 0x26, 0x63, 0xa4, 0x4b, 0x4b, 0x8d, 0x74, 0x72, 0x83, 0x1a,
+            0x7d, 0x34, 0x3c, 0xa8, 0xc2, 0xc9, 0x43, 0x8a, 0x10, 0x2b, 0x0b, 0xc0, 0x22, 0xd2,
+            0x01, 0x38, 0x1b, 0xa5,
         ];
         let h = config_hash(
-            &test_owner(), 42161, &test_handler(), &test_adapter(),
-            &test_recipient(), &test_app_id(),
+            &test_owner(),
+            42161,
+            &test_handler(),
+            &test_adapter(),
+            &test_recipient(),
+            &test_app_id(),
         );
         assert_eq!(h, expected, "config_hash golden vector mismatch");
     }
@@ -252,17 +266,16 @@ mod tests {
         // owner=[1]*32, chain_id=42161 (LE), mint=[10]*32, app_id=[5]*32,
         // actions=[] (borsh: u32 LE 0)
         let expected: [u8; 32] = [
-            0x2c, 0x8f, 0xf9, 0x4f, 0x33, 0xff, 0x37, 0x3c,
-            0x25, 0xc5, 0x33, 0xad, 0x96, 0x37, 0x46, 0x65,
-            0x8c, 0xf8, 0xc0, 0xa9, 0xac, 0x76, 0xbf, 0xd0,
-            0x95, 0x9b, 0x5e, 0x85, 0xee, 0x8c, 0xf7, 0x24,
+            0x2c, 0x8f, 0xf9, 0x4f, 0x33, 0xff, 0x37, 0x3c, 0x25, 0xc5, 0x33, 0xad, 0x96, 0x37,
+            0x46, 0x65, 0x8c, 0xf8, 0xc0, 0xa9, 0xac, 0x76, 0xbf, 0xd0, 0x95, 0x9b, 0x5e, 0x85,
+            0xee, 0x8c, 0xf7, 0x24,
         ];
         let mint = Pubkey::new_from_array([10u8; 32]);
-        let h = route_config_hash(
-            &test_owner(), 42161, &mint, &test_app_id(), &[],
-        )
-        .unwrap();
-        assert_eq!(h, expected, "route_config_hash (empty) golden vector mismatch");
+        let h = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &[]).unwrap();
+        assert_eq!(
+            h, expected,
+            "route_config_hash (empty) golden vector mismatch"
+        );
     }
 
     #[test]
@@ -271,21 +284,20 @@ mod tests {
         // actions=[SplTransfer { recipient=[20]*32, amount_bps=10000 }]
         // borsh: u32 LE 1 + u8 0 (variant disc) + [20]*32 + u16 LE 10000
         let expected: [u8; 32] = [
-            0x0e, 0xe0, 0x16, 0xda, 0xd3, 0xaf, 0xc7, 0x6e,
-            0xc1, 0xf2, 0x95, 0x60, 0xbb, 0x67, 0xb0, 0xfc,
-            0xe5, 0x45, 0x1c, 0x12, 0x4c, 0x5b, 0x01, 0x91,
-            0x1e, 0xf3, 0x00, 0xde, 0xdb, 0x5c, 0x79, 0xa9,
+            0x0e, 0xe0, 0x16, 0xda, 0xd3, 0xaf, 0xc7, 0x6e, 0xc1, 0xf2, 0x95, 0x60, 0xbb, 0x67,
+            0xb0, 0xfc, 0xe5, 0x45, 0x1c, 0x12, 0x4c, 0x5b, 0x01, 0x91, 0x1e, 0xf3, 0x00, 0xde,
+            0xdb, 0x5c, 0x79, 0xa9,
         ];
         let mint = Pubkey::new_from_array([10u8; 32]);
         let actions = vec![SolanaAction::SplTransfer {
             recipient: Pubkey::new_from_array([20u8; 32]),
             amount_bps: 10000,
         }];
-        let h = route_config_hash(
-            &test_owner(), 42161, &mint, &test_app_id(), &actions,
-        )
-        .unwrap();
-        assert_eq!(h, expected, "route_config_hash (1 action) golden vector mismatch");
+        let h = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions).unwrap();
+        assert_eq!(
+            h, expected,
+            "route_config_hash (1 action) golden vector mismatch"
+        );
     }
 
     // -- Bounds tests --
@@ -333,8 +345,8 @@ mod tests {
             })
             .collect();
 
-        let err = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions)
-            .unwrap_err();
+        let err =
+            route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions).unwrap_err();
 
         match err {
             anchor_lang::error::Error::AnchorError(anchor_err) => {
