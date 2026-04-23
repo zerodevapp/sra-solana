@@ -10,7 +10,7 @@ const SOL: u64 = 1_000_000_000;
 fn initialize_sra_happy_path() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
-    let owner = funded_keypair(&mut svm, 1 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
 
     let config = sample_config();
     let salt = [0xAAu8; 32];
@@ -36,7 +36,7 @@ fn initialize_sra_happy_path() {
 fn initialize_sra_config_hash_matches_expected() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
-    let owner = funded_keypair(&mut svm, 1 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
 
     let config = sample_config();
     let salt = [0xBBu8; 32];
@@ -72,7 +72,7 @@ fn initialize_sra_config_hash_matches_expected() {
 fn initialize_sra_duplicate_rejected() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
-    let owner = funded_keypair(&mut svm, 1 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
 
     let config = sample_config();
     let salt = [0xCCu8; 32];

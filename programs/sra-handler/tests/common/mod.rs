@@ -2,8 +2,9 @@ use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
 use litesvm::LiteSVM;
 use solana_sdk::{
     instruction::Instruction, message::Message, pubkey::Pubkey, signature::Keypair, signer::Signer,
-    system_program, transaction::Transaction,
+    transaction::Transaction,
 };
+use solana_system_interface::program as system_program;
 use sra_common::{seeds::SEED_SRA, types::SraConfig};
 use sra_handler::instructions::source::initialize_sra::SraInitConfig;
 use std::{fs, path::PathBuf};
@@ -73,14 +74,14 @@ pub fn send_ix(
     ix: Instruction,
     payer: &Keypair,
     signers: &[&Keypair],
-) -> Result<(), litesvm::types::FailedTransactionMetadata> {
+) -> Result<(), Box<litesvm::types::FailedTransactionMetadata>> {
     let blockhash = svm.latest_blockhash();
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     let mut all_signers: Vec<&Keypair> = vec![payer];
     all_signers.extend_from_slice(signers);
     tx.sign(&all_signers, blockhash);
-    svm.send_transaction(tx).map(|_| ())
+    svm.send_transaction(tx).map(|_| ()).map_err(Box::new)
 }
 
 pub fn fetch_sra_config(svm: &LiteSVM, pda: &Pubkey) -> SraConfig {
