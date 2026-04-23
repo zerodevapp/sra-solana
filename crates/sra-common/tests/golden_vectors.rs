@@ -230,13 +230,15 @@ fn build_extra_envelope_matches_standard_across_extra_vector() {
     // and the extra field is exactly abi.encode(adapter, abi.encode(nonce, bytes(""))).
     let v = load_vector("standard_across_extra");
     let expected_extra = parse_hex(v["extra"].as_str().unwrap());
-    assert!(!expected_extra.is_empty(), "standard_across_extra has empty extra?");
+    assert!(
+        !expected_extra.is_empty(),
+        "standard_across_extra has empty extra?"
+    );
 
     let target_adapter: [u8; 20] = [0x33; 20];
     let got = build_extra_envelope(&target_adapter, 42);
     assert_eq!(
-        got,
-        expected_extra,
+        got, expected_extra,
         "build_extra_envelope output differs from golden extra bytes"
     );
 }
@@ -301,5 +303,8 @@ fn u256_helpers_behave_consistently() {
     // Sanity: `dec_to_u256_be` matches `u256_from_u64` for small values.
     assert_eq!(dec_to_u256_be("42"), u256_from_u64(42));
     assert_eq!(dec_to_u256_be("0"), [0u8; 32]);
-    assert_eq!(dec_to_u256_be("1151111081099592"), u256_from_u64(1_151_111_081_099_592));
+    assert_eq!(
+        dec_to_u256_be("1151111081099592"),
+        u256_from_u64(1_151_111_081_099_592)
+    );
 }
