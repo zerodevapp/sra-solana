@@ -1,6 +1,8 @@
 // Each integration-test binary (initialize_sra, update_adapters, ...) pulls in this module
 // but only uses a subset of its helpers. Silence per-binary dead_code warnings on the shared set.
 #![allow(dead_code)]
+// IX builders mirror the on-chain accounts + args shape, which exceeds clippy's default.
+#![allow(clippy::too_many_arguments)]
 
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
 use litesvm::LiteSVM;
@@ -13,7 +15,10 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_system_interface::program as system_program;
-use sra_common::{seeds::SEED_SRA, types::SraConfig};
+use sra_common::{
+    seeds::{SEED_ADDRESS_BOOK, SEED_SRA},
+    types::{AddressBookEntry, SraConfig},
+};
 use sra_handler::instructions::source::initialize_sra::SraInitConfig;
 use std::{fs, path::PathBuf};
 
@@ -58,6 +63,22 @@ pub fn derive_sra_pda(owner: &Pubkey, config: &SraInitConfig, salt: &[u8; 32]) -
     Pubkey::find_program_address(&[SEED_SRA, owner.as_ref(), &config_hash, salt], &PROGRAM_ID)
 }
 
+pub fn derive_address_book_pda(
+    sra_config: &Pubkey,
+    target_chain_id: u64,
+    target_token: &[u8; 32],
+) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[
+            SEED_ADDRESS_BOOK,
+            sra_config.as_ref(),
+            &target_chain_id.to_le_bytes(),
+            target_token,
+        ],
+        &PROGRAM_ID,
+    )
+}
+
 pub fn initialize_sra_ix(
     payer: &Pubkey,
     owner: &Pubkey,
@@ -94,6 +115,34 @@ pub fn update_adapters_ix(
         }
         .to_account_metas(None),
         data: sra_handler::instruction::UpdateAdapters { adapters }.data(),
+    }
+}
+
+pub fn set_address_book_entry_ix(
+    payer: &Pubkey,
+    owner: &Pubkey,
+    sra_config: &Pubkey,
+    address_book_entry: &Pubkey,
+    target_chain_id: u64,
+    target_token: [u8; 32],
+    target_decimals: u8,
+) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::SetAddressBookEntry {
+            payer: *payer,
+            owner: *owner,
+            sra_config: *sra_config,
+            address_book_entry: *address_book_entry,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::SetAddressBookEntry {
+            target_chain_id,
+            target_token,
+            target_decimals,
+        }
+        .data(),
     }
 }
 
@@ -136,4 +185,11 @@ pub fn send_ix_expect_err(
 pub fn fetch_sra_config(svm: &LiteSVM, pda: &Pubkey) -> SraConfig {
     let acct = svm.get_account(pda).expect("sra_config account exists");
     SraConfig::try_deserialize(&mut acct.data.as_slice()).expect("valid SraConfig")
+}
+
+pub fn fetch_address_book_entry(svm: &LiteSVM, pda: &Pubkey) -> AddressBookEntry {
+    let acct = svm
+        .get_account(pda)
+        .expect("address_book_entry account exists");
+    AddressBookEntry::try_deserialize(&mut acct.data.as_slice()).expect("valid AddressBookEntry")
 }

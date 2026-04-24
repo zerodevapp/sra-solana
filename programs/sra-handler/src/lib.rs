@@ -21,4 +21,18 @@ pub mod sra_handler {
     pub fn update_adapters(ctx: Context<UpdateAdapters>, adapters: Vec<Pubkey>) -> Result<()> {
         instructions::source::update_adapters::handler(ctx, adapters)
     }
+
+    pub fn set_address_book_entry(
+        ctx: Context<SetAddressBookEntry>,
+        target_chain_id: u64,
+        target_token: [u8; 32],
+        target_decimals: u8,
+    ) -> Result<()> {
+        instructions::source::address_book::set_entry_handler(
+            ctx,
+            target_chain_id,
+            target_token,
+            target_decimals,
+        )
+    }
 }

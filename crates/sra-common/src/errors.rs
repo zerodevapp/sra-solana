@@ -15,6 +15,9 @@ pub enum SraError {
     #[msg("Address book entry is inactive or does not match")]
     InvalidAddressBook,
 
+    #[msg("target_token must be non-zero and target_decimals must be non-zero")]
+    InvalidTokenInfo,
+
     // -- Source: mint route --
     #[msg("action_idxs exceeds maximum allowed")]
     TooManyActionIdxs,

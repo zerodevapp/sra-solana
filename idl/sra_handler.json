@@ -83,6 +83,96 @@
       ]
     },
     {
+      "name": "set_address_book_entry",
+      "discriminator": [
+        231,
+        83,
+        113,
+        158,
+        150,
+        212,
+        228,
+        245
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "sra_config"
+          ]
+        },
+        {
+          "name": "sra_config"
+        },
+        {
+          "name": "address_book_entry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  100,
+                  114,
+                  101,
+                  115,
+                  115,
+                  95,
+                  98,
+                  111,
+                  111,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "sra_config"
+              },
+              {
+                "kind": "arg",
+                "path": "target_chain_id"
+              },
+              {
+                "kind": "arg",
+                "path": "target_token"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "target_chain_id",
+          "type": "u64"
+        },
+        {
+          "name": "target_token",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "target_decimals",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "update_adapters",
       "discriminator": [
         214,
@@ -128,6 +218,19 @@
   ],
   "accounts": [
     {
+      "name": "AddressBookEntry",
+      "discriminator": [
+        233,
+        204,
+        33,
+        29,
+        127,
+        207,
+        142,
+        91
+      ]
+    },
+    {
       "name": "SraConfig",
       "discriminator": [
         218,
@@ -142,6 +245,51 @@
     }
   ],
   "types": [
+    {
+      "name": "AddressBookEntry",
+      "docs": [
+        "Per-SRA owner-managed (chain, target_token) -> decimals registry.",
+        "`target_decimals = 0` is a tombstone/disabled entry, mirroring zeroed EVM TokenInfo.",
+        "PDA seeds: [\"address_book\", sra_config, chain_id.to_le_bytes(), target_token]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sra_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "target_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "target_token",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_decimals",
+            "docs": [
+              "Decimals of `target_token` on the target chain. Serves three roles:",
+              "(a) canonical record for downstream amount math, (b) EVM-parity",
+              "existence sentinel, (c) tombstone marker when `0`. Tokens with 0",
+              "real decimals are not representable here — not a concern for USDC",
+              "and other bridgeable tokens, but worth knowing."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
     {
       "name": "SraConfig",
       "docs": [
