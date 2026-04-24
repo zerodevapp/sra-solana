@@ -1,6 +1,8 @@
 // Each integration-test binary (initialize_sra, update_adapters, ...) pulls in this module
 // but only uses a subset of its helpers. Silence per-binary dead_code warnings on the shared set.
 #![allow(dead_code)]
+// IX builders mirror the on-chain accounts + args shape, which exceeds clippy's default.
+#![allow(clippy::too_many_arguments)]
 
 use anchor_lang::{
     prelude::{AccountSerialize, Space},

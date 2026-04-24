@@ -8,119 +8,6 @@
   },
   "instructions": [
     {
-      "name": "deactivate_address_book_entry",
-      "discriminator": [
-        49,
-        97,
-        24,
-        250,
-        254,
-        173,
-        118,
-        131
-      ],
-      "accounts": [
-        {
-          "name": "payer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "admin",
-          "signer": true,
-          "relations": [
-            "fee_config"
-          ]
-        },
-        {
-          "name": "fee_config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  102,
-                  101,
-                  101,
-                  95,
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "address_book_entry",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  97,
-                  100,
-                  100,
-                  114,
-                  101,
-                  115,
-                  115,
-                  95,
-                  98,
-                  111,
-                  111,
-                  107
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "adapter"
-              },
-              {
-                "kind": "arg",
-                "path": "mint"
-              },
-              {
-                "kind": "arg",
-                "path": "target_chain_id"
-              },
-              {
-                "kind": "arg",
-                "path": "target_token"
-              }
-            ]
-          }
-        }
-      ],
-      "args": [
-        {
-          "name": "adapter",
-          "type": "pubkey"
-        },
-        {
-          "name": "mint",
-          "type": "pubkey"
-        },
-        {
-          "name": "target_chain_id",
-          "type": "u64"
-        },
-        {
-          "name": "target_token",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        }
-      ]
-    },
-    {
       "name": "initialize_sra",
       "discriminator": [
         141,
@@ -309,6 +196,122 @@
               32
             ]
           }
+        },
+        {
+          "name": "target_decimals",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "set_address_book_entry_active",
+      "discriminator": [
+        35,
+        181,
+        204,
+        189,
+        108,
+        145,
+        244,
+        137
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "fee_config"
+          ]
+        },
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "address_book_entry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  100,
+                  114,
+                  101,
+                  115,
+                  115,
+                  95,
+                  98,
+                  111,
+                  111,
+                  107
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "adapter"
+              },
+              {
+                "kind": "arg",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "target_chain_id"
+              },
+              {
+                "kind": "arg",
+                "path": "target_token"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "adapter",
+          "type": "pubkey"
+        },
+        {
+          "name": "mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "target_chain_id",
+          "type": "u64"
+        },
+        {
+          "name": "target_token",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "active",
+          "type": "bool"
         }
       ]
     },
@@ -427,6 +430,10 @@
                 32
               ]
             }
+          },
+          {
+            "name": "target_decimals",
+            "type": "u8"
           },
           {
             "name": "active",
