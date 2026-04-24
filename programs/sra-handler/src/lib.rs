@@ -42,4 +42,15 @@ pub mod sra_handler {
     ) -> Result<()> {
         instructions::source::add_mint_route::handler(ctx, params)
     }
+
+    pub fn update_mint_route(
+        ctx: Context<UpdateMintRoute>,
+        params: UpdateMintRouteParams,
+    ) -> Result<()> {
+        instructions::source::update_mint_route::handler(ctx, params)
+    }
+
+    pub fn close_mint_route(ctx: Context<CloseMintRoute>) -> Result<()> {
+        instructions::source::close_mint_route::handler(ctx)
+    }
 }

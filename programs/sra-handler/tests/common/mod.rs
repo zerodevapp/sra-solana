@@ -31,6 +31,7 @@ use sra_common::{
 };
 use sra_handler::instructions::source::{
     add_mint_route::AddMintRouteParams, initialize_sra::SraInitConfig,
+    update_mint_route::UpdateMintRouteParams,
 };
 use std::{fs, path::PathBuf};
 
@@ -216,6 +217,12 @@ pub fn fetch_mint_nonce(svm: &LiteSVM, pda: &Pubkey) -> MintNonce {
     MintNonce::try_deserialize(&mut acct.data.as_slice()).expect("valid MintNonce")
 }
 
+pub fn mint_route_exists(svm: &LiteSVM, pda: &Pubkey) -> bool {
+    svm.get_account(pda)
+        .map(|a| !a.data.is_empty())
+        .unwrap_or(false)
+}
+
 // ---------------------------------------------------------------------------
 // PDA + ATA helpers
 // ---------------------------------------------------------------------------
@@ -298,6 +305,26 @@ pub fn create_ata(svm: &mut LiteSVM, payer: &Keypair, owner: &Pubkey, mint: &Pub
     );
     send_ix(svm, ix, payer, &[]).expect("create_associated_token_account should succeed");
     ata
+}
+
+pub fn mint_to(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    mint_authority: &Keypair,
+    mint: &Pubkey,
+    to: &Pubkey,
+    amount: u64,
+) {
+    let ix = spl_token::instruction::mint_to(
+        &TOKEN_PROGRAM_ID,
+        mint,
+        to,
+        &mint_authority.pubkey(),
+        &[],
+        amount,
+    )
+    .expect("mint_to instruction");
+    send_ix(svm, ix, payer, &[mint_authority]).expect("mint_to should succeed");
 }
 
 pub fn fetch_token_balance(svm: &LiteSVM, ata: &Pubkey) -> u64 {
@@ -401,6 +428,45 @@ pub fn add_mint_route_ix(
         }
         .to_account_metas(None),
         data: sra_handler::instruction::AddMintRoute { params }.data(),
+    }
+}
+
+pub fn update_mint_route_ix(
+    owner: &Pubkey,
+    sra_config: &Pubkey,
+    mint_route: &Pubkey,
+    address_book_entry: Option<&Pubkey>,
+    params: UpdateMintRouteParams,
+) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::UpdateMintRoute {
+            owner: *owner,
+            sra_config: *sra_config,
+            mint_route: *mint_route,
+            address_book_entry: address_book_entry.copied(),
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::UpdateMintRoute { params }.data(),
+    }
+}
+
+pub fn close_mint_route_ix(
+    owner: &Pubkey,
+    sra_config: &Pubkey,
+    mint_route: &Pubkey,
+    sra_vault: &Pubkey,
+) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::CloseMintRoute {
+            owner: *owner,
+            sra_config: *sra_config,
+            mint_route: *mint_route,
+            sra_vault: *sra_vault,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::CloseMintRoute {}.data(),
     }
 }
 
