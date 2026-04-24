@@ -8,6 +8,119 @@
   },
   "instructions": [
     {
+      "name": "deactivate_address_book_entry",
+      "discriminator": [
+        49,
+        97,
+        24,
+        250,
+        254,
+        173,
+        118,
+        131
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "fee_config"
+          ]
+        },
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "address_book_entry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  100,
+                  114,
+                  101,
+                  115,
+                  115,
+                  95,
+                  98,
+                  111,
+                  111,
+                  107
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "adapter"
+              },
+              {
+                "kind": "arg",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "target_chain_id"
+              },
+              {
+                "kind": "arg",
+                "path": "target_token"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "adapter",
+          "type": "pubkey"
+        },
+        {
+          "name": "mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "target_chain_id",
+          "type": "u64"
+        },
+        {
+          "name": "target_token",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "initialize_sra",
       "discriminator": [
         141,
@@ -83,6 +196,123 @@
       ]
     },
     {
+      "name": "register_address_book_entry",
+      "discriminator": [
+        242,
+        90,
+        47,
+        126,
+        237,
+        129,
+        248,
+        24
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "fee_config"
+          ]
+        },
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "address_book_entry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  100,
+                  114,
+                  101,
+                  115,
+                  115,
+                  95,
+                  98,
+                  111,
+                  111,
+                  107
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "adapter"
+              },
+              {
+                "kind": "arg",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "target_chain_id"
+              },
+              {
+                "kind": "arg",
+                "path": "target_token"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "adapter",
+          "type": "pubkey"
+        },
+        {
+          "name": "mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "target_chain_id",
+          "type": "u64"
+        },
+        {
+          "name": "target_token",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "update_adapters",
       "discriminator": [
         214,
@@ -128,6 +358,32 @@
   ],
   "accounts": [
     {
+      "name": "AddressBookEntry",
+      "discriminator": [
+        233,
+        204,
+        33,
+        29,
+        127,
+        207,
+        142,
+        91
+      ]
+    },
+    {
+      "name": "FeeConfig",
+      "discriminator": [
+        143,
+        52,
+        146,
+        187,
+        219,
+        123,
+        76,
+        155
+      ]
+    },
+    {
       "name": "SraConfig",
       "discriminator": [
         218,
@@ -142,6 +398,75 @@
     }
   ],
   "types": [
+    {
+      "name": "AddressBookEntry",
+      "docs": [
+        "Admin-managed (adapter, mint, chain, token) registry.",
+        "PDA seeds: [\"address_book\", adapter, mint, chain_id.to_le_bytes(), target_token]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "adapter",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "target_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "target_token",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "active",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeeConfig",
+      "docs": [
+        "Global fee config — used by destination finalize_fill.",
+        "PDA seeds: [\"fee_config\"]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "protocol_fee_recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
     {
       "name": "SraConfig",
       "docs": [

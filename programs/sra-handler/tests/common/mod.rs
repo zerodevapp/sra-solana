@@ -283,6 +283,5 @@ pub fn fetch_address_book_entry(svm: &LiteSVM, pda: &Pubkey) -> AddressBookEntry
     let acct = svm
         .get_account(pda)
         .expect("address_book_entry account exists");
-    AddressBookEntry::try_deserialize(&mut acct.data.as_slice())
-        .expect("valid AddressBookEntry")
+    AddressBookEntry::try_deserialize(&mut acct.data.as_slice()).expect("valid AddressBookEntry")
 }
