@@ -22,6 +22,10 @@ pub mod sra_handler {
         instructions::source::update_adapters::handler(ctx, adapters)
     }
 
+    pub fn update_slippage(ctx: Context<UpdateSlippage>, allowed_slippage_bps: u16) -> Result<()> {
+        instructions::source::update_slippage::handler(ctx, allowed_slippage_bps)
+    }
+
     pub fn set_address_book_entry(
         ctx: Context<SetAddressBookEntry>,
         target_chain_id: u64,
@@ -34,20 +38,5 @@ pub mod sra_handler {
             target_token,
             target_decimals,
         )
-    }
-
-    pub fn add_mint_route(ctx: Context<AddMintRoute>, params: AddMintRouteParams) -> Result<()> {
-        instructions::source::add_mint_route::handler(ctx, params)
-    }
-
-    pub fn update_mint_route(
-        ctx: Context<UpdateMintRoute>,
-        params: UpdateMintRouteParams,
-    ) -> Result<()> {
-        instructions::source::update_mint_route::handler(ctx, params)
-    }
-
-    pub fn close_mint_route(ctx: Context<CloseMintRoute>) -> Result<()> {
-        instructions::source::close_mint_route::handler(ctx)
     }
 }

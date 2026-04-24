@@ -1,8 +1,9 @@
 use anchor_lang::prelude::*;
 
-use crate::constants::{MAX_ACTION_IDXS, MAX_ADAPTERS};
+use crate::constants::MAX_ADAPTERS;
 
-/// One SRA per user per app. Per-mint routing via SraMintRoute child PDAs.
+/// One SRA per user per app. Source deposits are owner-signed, so mutable
+/// routing policy lives at account scope instead of in per-mint route PDAs.
 /// PDA seeds: ["sra", owner, config_hash, salt]
 /// config_hash = keccak256(borsh(owner, target_chain_id, target_handler, target_adapter, recipient, app_id))
 #[account]
@@ -20,30 +21,12 @@ pub struct SraConfig {
     // Mutable
     #[max_len(MAX_ADAPTERS)]
     pub allowed_adapters: Vec<Pubkey>,
-    pub bump: u8,
-}
-
-/// Per-mint routing config. One route per (SRA, mint) pair.
-/// PDA seeds: ["mint_route", sra_config, source_mint]
-#[account]
-#[derive(InitSpace)]
-pub struct SraMintRoute {
-    // Immutable
-    pub sra_config: Pubkey,
-    pub source_mint: Pubkey,
-    /// Source-side adapter bound to this route. A route always deposits
-    /// through the same adapter; switching adapters requires a close + re-add.
-    pub adapter_program: Pubkey,
-    #[max_len(MAX_ACTION_IDXS)]
-    pub action_idxs: Vec<u64>,
-    // Mutable (owner-gated)
-    pub target_token: [u8; 32],
     pub allowed_slippage_bps: u16,
-    pub paused: bool,
     pub bump: u8,
 }
 
-/// Persistent nonce. Never closed — survives route replacement.
+/// Persistent nonce per `(sra_config, source_mint)`. The owner-signed deposit
+/// flow will create it lazily and increment it per source-mint deposit.
 /// PDA seeds: ["mint_nonce", sra_config, source_mint]
 #[account]
 #[derive(InitSpace)]
@@ -86,18 +69,10 @@ mod tests {
     #[test]
     fn sra_config_init_space() {
         // 32 owner + 8 target_chain_id + 32 target_handler + 32 target_adapter
-        // + 32 recipient + 32 app_id + 32 salt + 4 + (32 * 8) allowed_adapters + 1 bump
-        // = 32 + 8 + 32 + 32 + 32 + 32 + 32 + 260 + 1 = 461
-        assert_eq!(SraConfig::INIT_SPACE, 461);
-    }
-
-    #[test]
-    fn sra_mint_route_init_space() {
-        // 32 sra_config + 32 source_mint + 32 adapter_program
-        // + 4 + (8 * 4) action_idxs + 32 target_token
-        // + 2 allowed_slippage_bps + 1 paused + 1 bump
-        // = 32 + 32 + 32 + 36 + 32 + 2 + 1 + 1 = 168
-        assert_eq!(SraMintRoute::INIT_SPACE, 168);
+        // + 32 recipient + 32 app_id + 32 salt + 4 + (32 * 8) allowed_adapters
+        // + 2 allowed_slippage_bps + 1 bump
+        // = 32 + 8 + 32 + 32 + 32 + 32 + 32 + 260 + 2 + 1 = 463
+        assert_eq!(SraConfig::INIT_SPACE, 463);
     }
 
     #[test]

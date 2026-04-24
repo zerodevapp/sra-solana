@@ -9,7 +9,6 @@ use crate::types::SolanaAction;
 
 // Source side (handler-owned)
 pub const SEED_SRA: &[u8] = b"sra";
-pub const SEED_MINT_ROUTE: &[u8] = b"mint_route";
 pub const SEED_MINT_NONCE: &[u8] = b"mint_nonce";
 pub const SEED_ADDRESS_BOOK: &[u8] = b"address_book";
 
