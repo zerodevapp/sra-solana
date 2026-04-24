@@ -72,4 +72,7 @@ pub enum SraError {
 
     #[msg("Arithmetic overflow")]
     ArithmeticOverflow,
+
+    #[msg("bytes32 value cannot be narrowed to a 20-byte EVM address")]
+    InvalidEvmAddress,
 }

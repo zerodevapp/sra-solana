@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 
+pub mod events;
 pub mod instructions;
 
 use instructions::*;
@@ -52,5 +53,12 @@ pub mod sra_handler {
 
     pub fn close_mint_route(ctx: Context<CloseMintRoute>) -> Result<()> {
         instructions::source::close_mint_route::handler(ctx)
+    }
+
+    pub fn validate_and_prepare(
+        ctx: Context<ValidateAndPrepare>,
+        params: PrepareParams,
+    ) -> Result<()> {
+        instructions::source::validate_and_prepare::handler(ctx, params)
     }
 }

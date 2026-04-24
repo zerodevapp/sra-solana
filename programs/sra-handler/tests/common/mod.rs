@@ -31,7 +31,7 @@ use sra_common::{
 };
 use sra_handler::instructions::source::{
     add_mint_route::AddMintRouteParams, initialize_sra::SraInitConfig,
-    update_mint_route::UpdateMintRouteParams,
+    update_mint_route::UpdateMintRouteParams, validate_and_prepare::PrepareParams,
 };
 use std::{fs, path::PathBuf};
 
@@ -69,6 +69,31 @@ pub fn sample_config() -> SraInitConfig {
         recipient: [0x33u8; 32],
         app_id: [0x44u8; 32],
     }
+}
+
+/// `sample_config`-shaped SraInitConfig whose `target_handler` /
+/// `target_adapter` are valid EVM-padded bytes32 values (upper 12 bytes zero).
+/// Required by `validate_and_prepare`, which converts them to 20-byte EVM
+/// addresses when building the canonical ABI message.
+pub fn evm_destination_config() -> SraInitConfig {
+    let mut target_handler = [0u8; 32];
+    target_handler[12..].copy_from_slice(&[0x11u8; 20]);
+    let mut target_adapter = [0u8; 32];
+    target_adapter[12..].copy_from_slice(&[0x22u8; 20]);
+    SraInitConfig {
+        target_chain_id: 42161,
+        target_handler,
+        target_adapter,
+        recipient: [0x33u8; 32],
+        app_id: [0x44u8; 32],
+    }
+}
+
+/// EVM-padded `target_token` (20 bytes of 0xAB, upper 12 bytes zero).
+pub fn evm_target_token() -> [u8; 32] {
+    let mut t = [0u8; 32];
+    t[12..].copy_from_slice(&[0xABu8; 20]);
+    t
 }
 
 pub fn derive_sra_pda(owner: &Pubkey, config: &SraInitConfig, salt: &[u8; 32]) -> (Pubkey, u8) {
@@ -539,4 +564,214 @@ impl MintRouteFixture {
         send_ix(svm, ix, &self.payer, &[&self.owner])
             .expect("add_mint_route default setup should succeed");
     }
+}
+
+// ---------------------------------------------------------------------------
+// validate_and_prepare helpers
+// ---------------------------------------------------------------------------
+
+pub fn validate_and_prepare_ix(
+    fee_payer: &Pubkey,
+    depositor: &Pubkey,
+    accounts: &MintRouteAccounts,
+    depositor_token_account: &Pubkey,
+    params: PrepareParams,
+) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::ValidateAndPrepare {
+            fee_payer: *fee_payer,
+            depositor: *depositor,
+            sra_config: accounts.sra_config,
+            mint_route: accounts.mint_route,
+            mint_nonce: accounts.mint_nonce,
+            source_mint: accounts.source_mint,
+            depositor_token_account: *depositor_token_account,
+            sra_vault: accounts.sra_vault,
+            adapter_authority: accounts.adapter_authority,
+            adapter_custody: accounts.adapter_custody,
+            adapter_program: accounts.adapter_program,
+            address_book_entry: accounts.address_book_entry,
+            token_program: TOKEN_PROGRAM_ID,
+            system_program: system_program::ID,
+            instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::ValidateAndPrepare { params }.data(),
+    }
+}
+
+/// Fully-wired deposit fixture: SRA initialized with an EVM-padded target
+/// config, adapter registered in `allowed_adapters`, route created, depositor
+/// holds `DEPOSITOR_STARTING_BALANCE` tokens.
+pub const DEPOSITOR_STARTING_BALANCE: u64 = 10_000_000;
+
+pub struct ValidatePrepareFixture {
+    pub payer: Keypair,
+    pub owner: Keypair,
+    pub depositor: Keypair,
+    pub config: SraInitConfig,
+    pub salt: [u8; 32],
+    pub sra_config: Pubkey,
+    pub source_mint: Pubkey,
+    pub target_chain_id: u64,
+    pub target_token: [u8; 32],
+    pub adapter_program: Pubkey,
+    pub accounts: MintRouteAccounts,
+    pub depositor_ata: Pubkey,
+    pub route_params: AddMintRouteParams,
+}
+
+impl ValidatePrepareFixture {
+    pub fn new(svm: &mut LiteSVM) -> Self {
+        Self::new_with(svm, 50, vec![3, 7])
+    }
+
+    pub fn new_with(
+        svm: &mut LiteSVM,
+        allowed_slippage_bps: u16,
+        action_idxs: Vec<u64>,
+    ) -> Self {
+        let payer = funded_keypair(svm, 100 * SOL);
+        let owner = funded_keypair(svm, SOL);
+        let depositor = funded_keypair(svm, SOL);
+
+        let config = evm_destination_config();
+        let salt = [0xABu8; 32];
+        let (sra_config, _) = derive_sra_pda(&owner.pubkey(), &config, &salt);
+        let ix = initialize_sra_ix(
+            &payer.pubkey(),
+            &owner.pubkey(),
+            &sra_config,
+            config.clone(),
+            salt,
+        );
+        send_ix(svm, ix, &payer, &[&owner]).expect("initialize_sra");
+
+        let source_mint = create_mint(svm, &payer, &payer.pubkey(), 6);
+        let target_chain_id = config.target_chain_id;
+        let target_token = evm_target_token();
+        setup_address_book_entry(
+            svm,
+            &payer,
+            &owner,
+            &sra_config,
+            target_chain_id,
+            target_token,
+            6,
+        );
+
+        let adapter_program = Pubkey::new_unique();
+        let ix = update_adapters_ix(
+            &payer.pubkey(),
+            &owner.pubkey(),
+            &sra_config,
+            vec![adapter_program],
+        );
+        send_ix(svm, ix, &payer, &[&owner]).expect("update_adapters");
+
+        let accounts = MintRouteAccounts::derive(
+            &sra_config,
+            &source_mint,
+            target_chain_id,
+            &target_token,
+            &adapter_program,
+        );
+        let route_params = AddMintRouteParams {
+            action_idxs,
+            target_token,
+            allowed_slippage_bps,
+        };
+        let ix = add_mint_route_ix(
+            &payer.pubkey(),
+            &owner.pubkey(),
+            &accounts,
+            route_params.clone(),
+        );
+        send_ix(svm, ix, &payer, &[&owner]).expect("add_mint_route");
+
+        let depositor_ata = create_ata(svm, &payer, &depositor.pubkey(), &source_mint);
+        mint_to(
+            svm,
+            &payer,
+            &payer,
+            &source_mint,
+            &depositor_ata,
+            DEPOSITOR_STARTING_BALANCE,
+        );
+
+        Self {
+            payer,
+            owner,
+            depositor,
+            config,
+            salt,
+            sra_config,
+            source_mint,
+            target_chain_id,
+            target_token,
+            adapter_program,
+            accounts,
+            depositor_ata,
+            route_params,
+        }
+    }
+
+    pub fn invoke(
+        &self,
+        svm: &mut LiteSVM,
+        params: PrepareParams,
+    ) -> Result<
+        litesvm::types::TransactionMetadata,
+        Box<litesvm::types::FailedTransactionMetadata>,
+    > {
+        let ix = validate_and_prepare_ix(
+            &self.payer.pubkey(),
+            &self.depositor.pubkey(),
+            &self.accounts,
+            &self.depositor_ata,
+            params,
+        );
+        svm.expire_blockhash();
+        let blockhash = svm.latest_blockhash();
+        let msg = Message::new(&[ix], Some(&self.payer.pubkey()));
+        let mut tx = Transaction::new_unsigned(msg);
+        tx.sign(&[&self.payer, &self.depositor], blockhash);
+        svm.send_transaction(tx).map_err(Box::new)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Anchor event extraction
+// ---------------------------------------------------------------------------
+
+/// Scan program logs for a `Program data: <base64>` line whose discriminator
+/// matches `DepositPrepared`, and borsh-deserialize the remainder.
+pub fn extract_deposit_prepared(
+    logs: &[String],
+) -> Option<sra_handler::events::DepositPrepared> {
+    use anchor_lang::{AnchorDeserialize, Discriminator};
+    use base64::Engine;
+
+    let engine = base64::engine::general_purpose::STANDARD;
+    let expected_disc: &[u8] =
+        <sra_handler::events::DepositPrepared as Discriminator>::DISCRIMINATOR.as_ref();
+
+    for log in logs {
+        let Some(b64) = log.strip_prefix("Program data: ") else {
+            continue;
+        };
+        let Ok(raw) = engine.decode(b64) else {
+            continue;
+        };
+        if raw.len() < expected_disc.len() || &raw[..expected_disc.len()] != expected_disc {
+            continue;
+        }
+        if let Ok(ev) =
+            sra_handler::events::DepositPrepared::try_from_slice(&raw[expected_disc.len()..])
+        {
+            return Some(ev);
+        }
+    }
+    None
 }
