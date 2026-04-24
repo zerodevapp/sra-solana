@@ -28,6 +28,7 @@ pub mod sra_handler {
         mint: Pubkey,
         target_chain_id: u64,
         target_token: [u8; 32],
+        target_decimals: u8,
     ) -> Result<()> {
         instructions::source::address_book::register_handler(
             ctx,
@@ -35,22 +36,25 @@ pub mod sra_handler {
             mint,
             target_chain_id,
             target_token,
+            target_decimals,
         )
     }
 
-    pub fn deactivate_address_book_entry(
-        ctx: Context<DeactivateAddressBookEntry>,
+    pub fn set_address_book_entry_active(
+        ctx: Context<SetAddressBookEntryActive>,
         adapter: Pubkey,
         mint: Pubkey,
         target_chain_id: u64,
         target_token: [u8; 32],
+        active: bool,
     ) -> Result<()> {
-        instructions::source::address_book::deactivate_handler(
+        instructions::source::address_book::set_active_handler(
             ctx,
             adapter,
             mint,
             target_chain_id,
             target_token,
+            active,
         )
     }
 }

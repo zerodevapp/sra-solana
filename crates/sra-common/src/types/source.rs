@@ -58,6 +58,7 @@ pub struct AddressBookEntry {
     pub mint: Pubkey,
     pub target_chain_id: u64,
     pub target_token: [u8; 32],
+    pub target_decimals: u8,
     pub active: bool,
     pub bump: u8,
 }
@@ -90,7 +91,8 @@ mod tests {
 
     #[test]
     fn address_book_entry_init_space() {
-        // 32 adapter + 32 mint + 8 target_chain_id + 32 target_token + 1 active + 1 bump = 106
-        assert_eq!(AddressBookEntry::INIT_SPACE, 106);
+        // 32 adapter + 32 mint + 8 target_chain_id + 32 target_token
+        // + 1 target_decimals + 1 active + 1 bump = 107
+        assert_eq!(AddressBookEntry::INIT_SPACE, 107);
     }
 }

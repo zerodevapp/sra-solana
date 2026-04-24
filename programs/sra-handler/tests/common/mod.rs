@@ -9,8 +9,6 @@ use anchor_lang::{
 use litesvm::LiteSVM;
 use solana_sdk::{
     account::Account,
-    hash::hash,
-    instruction::AccountMeta,
     instruction::Instruction,
     message::Message,
     pubkey::Pubkey,
@@ -87,30 +85,6 @@ pub fn derive_address_book_pda(
         ],
         &PROGRAM_ID,
     )
-}
-
-fn instruction_discriminator(name: &str) -> [u8; 8] {
-    let preimage = format!("global:{name}");
-    let hash = hash(preimage.as_bytes()).to_bytes();
-    let mut discriminator = [0u8; 8];
-    discriminator.copy_from_slice(&hash[..8]);
-    discriminator
-}
-
-fn address_book_instruction_data(
-    name: &str,
-    adapter: Pubkey,
-    mint: Pubkey,
-    target_chain_id: u64,
-    target_token: [u8; 32],
-) -> Vec<u8> {
-    let mut data = Vec::with_capacity(8 + 32 + 32 + 8 + 32);
-    data.extend_from_slice(&instruction_discriminator(name));
-    data.extend_from_slice(adapter.as_ref());
-    data.extend_from_slice(mint.as_ref());
-    data.extend_from_slice(&target_chain_id.to_le_bytes());
-    data.extend_from_slice(&target_token);
-    data
 }
 
 pub fn seed_fee_config(svm: &mut LiteSVM, admin: &Pubkey) -> Pubkey {
@@ -190,28 +164,30 @@ pub fn register_address_book_ix(
     mint: Pubkey,
     target_chain_id: u64,
     target_token: [u8; 32],
+    target_decimals: u8,
 ) -> Instruction {
     Instruction {
         program_id: PROGRAM_ID,
-        accounts: vec![
-            AccountMeta::new(*payer, true),
-            AccountMeta::new_readonly(*admin, true),
-            AccountMeta::new_readonly(*fee_config, false),
-            AccountMeta::new(*address_book_entry, false),
-            AccountMeta::new_readonly(system_program::ID, false),
-        ],
-        data: address_book_instruction_data(
-            "register_address_book_entry",
+        accounts: sra_handler::accounts::RegisterAddressBookEntry {
+            payer: *payer,
+            admin: *admin,
+            fee_config: *fee_config,
+            address_book_entry: *address_book_entry,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::RegisterAddressBookEntry {
             adapter,
             mint,
             target_chain_id,
             target_token,
-        ),
+            target_decimals,
+        }
+        .data(),
     }
 }
 
-pub fn deactivate_address_book_ix(
-    payer: &Pubkey,
+pub fn set_address_book_active_ix(
     admin: &Pubkey,
     fee_config: &Pubkey,
     address_book_entry: &Pubkey,
@@ -219,22 +195,24 @@ pub fn deactivate_address_book_ix(
     mint: Pubkey,
     target_chain_id: u64,
     target_token: [u8; 32],
+    active: bool,
 ) -> Instruction {
     Instruction {
         program_id: PROGRAM_ID,
-        accounts: vec![
-            AccountMeta::new(*payer, true),
-            AccountMeta::new_readonly(*admin, true),
-            AccountMeta::new_readonly(*fee_config, false),
-            AccountMeta::new(*address_book_entry, false),
-        ],
-        data: address_book_instruction_data(
-            "deactivate_address_book_entry",
+        accounts: sra_handler::accounts::SetAddressBookEntryActive {
+            admin: *admin,
+            fee_config: *fee_config,
+            address_book_entry: *address_book_entry,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::SetAddressBookEntryActive {
             adapter,
             mint,
             target_chain_id,
             target_token,
-        ),
+            active,
+        }
+        .data(),
     }
 }
 

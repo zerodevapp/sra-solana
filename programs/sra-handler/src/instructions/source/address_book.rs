@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use sra_common::{
+    errors::SraError,
     seeds::{SEED_ADDRESS_BOOK, SEED_FEE_CONFIG},
     types::{AddressBookEntry, FeeConfig},
 };
@@ -31,9 +32,7 @@ pub struct RegisterAddressBookEntry<'info> {
 
 #[derive(Accounts)]
 #[instruction(adapter: Pubkey, mint: Pubkey, target_chain_id: u64, target_token: [u8; 32])]
-pub struct DeactivateAddressBookEntry<'info> {
-    #[account(mut)]
-    pub payer: Signer<'info>,
+pub struct SetAddressBookEntryActive<'info> {
     pub admin: Signer<'info>,
     #[account(seeds = [SEED_FEE_CONFIG], bump = fee_config.bump, has_one = admin)]
     pub fee_config: Account<'info, FeeConfig>,
@@ -57,24 +56,34 @@ pub(crate) fn register_handler(
     mint: Pubkey,
     target_chain_id: u64,
     target_token: [u8; 32],
+    target_decimals: u8,
 ) -> Result<()> {
+    require!(
+        target_token != [0u8; 32] && target_decimals != 0,
+        SraError::InvalidTokenInfo
+    );
+
     let address_book_entry = &mut ctx.accounts.address_book_entry;
     address_book_entry.adapter = adapter;
     address_book_entry.mint = mint;
     address_book_entry.target_chain_id = target_chain_id;
     address_book_entry.target_token = target_token;
+    address_book_entry.target_decimals = target_decimals;
     address_book_entry.active = true;
     address_book_entry.bump = ctx.bumps.address_book_entry;
     Ok(())
 }
 
-pub(crate) fn deactivate_handler(
-    ctx: Context<DeactivateAddressBookEntry>,
+// Args are unused in the body but required by the Accounts struct's
+// #[instruction(...)] macro so Anchor can rebuild the PDA seeds.
+pub(crate) fn set_active_handler(
+    ctx: Context<SetAddressBookEntryActive>,
     _adapter: Pubkey,
     _mint: Pubkey,
     _target_chain_id: u64,
     _target_token: [u8; 32],
+    active: bool,
 ) -> Result<()> {
-    ctx.accounts.address_book_entry.active = false;
+    ctx.accounts.address_book_entry.active = active;
     Ok(())
 }
