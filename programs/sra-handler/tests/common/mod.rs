@@ -4,13 +4,9 @@
 // IX builders mirror the on-chain accounts + args shape, which exceeds clippy's default.
 #![allow(clippy::too_many_arguments)]
 
-use anchor_lang::{
-    prelude::{AccountSerialize, Space},
-    AccountDeserialize, InstructionData, ToAccountMetas,
-};
+use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
 use litesvm::LiteSVM;
 use solana_sdk::{
-    account::Account,
     instruction::Instruction,
     message::Message,
     pubkey::Pubkey,
@@ -20,8 +16,8 @@ use solana_sdk::{
 };
 use solana_system_interface::program as system_program;
 use sra_common::{
-    seeds::{SEED_ADDRESS_BOOK, SEED_FEE_CONFIG, SEED_SRA},
-    types::{AddressBookEntry, FeeConfig, SraConfig},
+    seeds::{SEED_ADDRESS_BOOK, SEED_SRA},
+    types::{AddressBookEntry, SraConfig},
 };
 use sra_handler::instructions::source::initialize_sra::SraInitConfig;
 use std::{fs, path::PathBuf};
@@ -67,55 +63,20 @@ pub fn derive_sra_pda(owner: &Pubkey, config: &SraInitConfig, salt: &[u8; 32]) -
     Pubkey::find_program_address(&[SEED_SRA, owner.as_ref(), &config_hash, salt], &PROGRAM_ID)
 }
 
-pub fn derive_fee_config_pda() -> (Pubkey, u8) {
-    Pubkey::find_program_address(&[SEED_FEE_CONFIG], &PROGRAM_ID)
-}
-
 pub fn derive_address_book_pda(
-    adapter: &Pubkey,
-    mint: &Pubkey,
+    sra_config: &Pubkey,
     target_chain_id: u64,
     target_token: &[u8; 32],
 ) -> (Pubkey, u8) {
     Pubkey::find_program_address(
         &[
             SEED_ADDRESS_BOOK,
-            adapter.as_ref(),
-            mint.as_ref(),
+            sra_config.as_ref(),
             &target_chain_id.to_le_bytes(),
             target_token,
         ],
         &PROGRAM_ID,
     )
-}
-
-pub fn seed_fee_config(svm: &mut LiteSVM, admin: &Pubkey) -> Pubkey {
-    let (fee_config_pda, bump) = derive_fee_config_pda();
-    let fee_config = FeeConfig {
-        admin: *admin,
-        protocol_fee_bps: 0,
-        protocol_fee_recipient: Pubkey::new_unique(),
-        bump,
-    };
-
-    let mut data = Vec::with_capacity(8 + FeeConfig::INIT_SPACE);
-    fee_config
-        .try_serialize(&mut data)
-        .expect("fee config serializes");
-
-    svm.set_account(
-        fee_config_pda,
-        Account {
-            lamports: svm.minimum_balance_for_rent_exemption(data.len()),
-            data,
-            owner: PROGRAM_ID,
-            executable: false,
-            rent_epoch: 0,
-        },
-    )
-    .expect("fee config seeded");
-
-    fee_config_pda
 }
 
 pub fn initialize_sra_ix(
@@ -157,62 +118,29 @@ pub fn update_adapters_ix(
     }
 }
 
-pub fn register_address_book_ix(
+pub fn set_address_book_entry_ix(
     payer: &Pubkey,
-    admin: &Pubkey,
-    fee_config: &Pubkey,
+    owner: &Pubkey,
+    sra_config: &Pubkey,
     address_book_entry: &Pubkey,
-    adapter: Pubkey,
-    mint: Pubkey,
     target_chain_id: u64,
     target_token: [u8; 32],
     target_decimals: u8,
 ) -> Instruction {
     Instruction {
         program_id: PROGRAM_ID,
-        accounts: sra_handler::accounts::RegisterAddressBookEntry {
+        accounts: sra_handler::accounts::SetAddressBookEntry {
             payer: *payer,
-            admin: *admin,
-            fee_config: *fee_config,
+            owner: *owner,
+            sra_config: *sra_config,
             address_book_entry: *address_book_entry,
             system_program: system_program::ID,
         }
         .to_account_metas(None),
-        data: sra_handler::instruction::RegisterAddressBookEntry {
-            adapter,
-            mint,
+        data: sra_handler::instruction::SetAddressBookEntry {
             target_chain_id,
             target_token,
             target_decimals,
-        }
-        .data(),
-    }
-}
-
-pub fn set_address_book_active_ix(
-    admin: &Pubkey,
-    fee_config: &Pubkey,
-    address_book_entry: &Pubkey,
-    adapter: Pubkey,
-    mint: Pubkey,
-    target_chain_id: u64,
-    target_token: [u8; 32],
-    active: bool,
-) -> Instruction {
-    Instruction {
-        program_id: PROGRAM_ID,
-        accounts: sra_handler::accounts::SetAddressBookEntryActive {
-            admin: *admin,
-            fee_config: *fee_config,
-            address_book_entry: *address_book_entry,
-        }
-        .to_account_metas(None),
-        data: sra_handler::instruction::SetAddressBookEntryActive {
-            adapter,
-            mint,
-            target_chain_id,
-            target_token,
-            active,
         }
         .data(),
     }

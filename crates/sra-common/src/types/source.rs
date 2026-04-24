@@ -49,18 +49,31 @@ pub struct MintNonce {
     pub bump: u8,
 }
 
-/// Admin-managed (adapter, mint, chain, token) registry.
-/// PDA seeds: ["address_book", adapter, mint, chain_id.to_le_bytes(), target_token]
+/// Per-SRA owner-managed (chain, target_token) -> decimals registry.
+/// `target_decimals = 0` is a tombstone/disabled entry, mirroring zeroed EVM TokenInfo.
+/// PDA seeds: ["address_book", sra_config, chain_id.to_le_bytes(), target_token]
 #[account]
 #[derive(InitSpace)]
 pub struct AddressBookEntry {
-    pub adapter: Pubkey,
-    pub mint: Pubkey,
+    pub sra_config: Pubkey,
     pub target_chain_id: u64,
     pub target_token: [u8; 32],
+    /// Decimals of `target_token` on the target chain. Serves three roles:
+    /// (a) canonical record for downstream amount math, (b) EVM-parity
+    /// existence sentinel, (c) tombstone marker when `0`. Tokens with 0
+    /// real decimals are not representable here — not a concern for USDC
+    /// and other bridgeable tokens, but worth knowing.
     pub target_decimals: u8,
-    pub active: bool,
     pub bump: u8,
+}
+
+impl AddressBookEntry {
+    /// `true` iff the entry is not a tombstone. All consumers that need to
+    /// gate on "is this (chain, token) currently allowed?" should route
+    /// through this helper rather than inlining `target_decimals != 0`.
+    pub fn is_enabled(&self) -> bool {
+        self.target_decimals != 0
+    }
 }
 
 #[cfg(test)]
@@ -91,8 +104,7 @@ mod tests {
 
     #[test]
     fn address_book_entry_init_space() {
-        // 32 adapter + 32 mint + 8 target_chain_id + 32 target_token
-        // + 1 target_decimals + 1 active + 1 bump = 107
-        assert_eq!(AddressBookEntry::INIT_SPACE, 107);
+        // 32 sra_config + 8 target_chain_id + 32 target_token + 1 target_decimals + 1 bump = 74
+        assert_eq!(AddressBookEntry::INIT_SPACE, 74);
     }
 }
