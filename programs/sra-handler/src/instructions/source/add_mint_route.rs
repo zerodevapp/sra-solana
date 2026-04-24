@@ -28,10 +28,8 @@ pub struct AddMintRouteParams {
 /// (`target_decimals == 0`) is rejected, matching the EVM check in
 /// `SRAHandler._deposit` that guards against zeroed `TokenInfo`.
 ///
-/// `adapter_authority` is validated as
-/// `PDA(["adapter_authority", sra_config], adapter_program)` so the freshly
-/// created `adapter_custody` ATA is guaranteed to be spendable by the intended
-/// adapter — not a stranded account.
+/// The chosen `adapter_program` is persisted on `mint_route`, so later source
+/// deposits and route-close safety checks can use the same adapter deterministically.
 #[derive(Accounts)]
 #[instruction(params: AddMintRouteParams)]
 pub struct AddMintRoute<'info> {
@@ -105,6 +103,7 @@ pub struct AddMintRoute<'info> {
 }
 
 pub(crate) fn handler(ctx: Context<AddMintRoute>, params: AddMintRouteParams) -> Result<()> {
+    require!(params.target_token != [0u8; 32], SraError::InvalidTokenInfo);
     require!(
         params.action_idxs.len() <= MAX_ACTION_IDXS,
         SraError::TooManyActionIdxs
@@ -117,10 +116,20 @@ pub(crate) fn handler(ctx: Context<AddMintRoute>, params: AddMintRouteParams) ->
         ctx.accounts.address_book_entry.is_enabled(),
         SraError::InvalidAddressBook
     );
+    let adapter_program = ctx.accounts.adapter_program.key();
+    require!(
+        ctx.accounts
+            .sra_config
+            .allowed_adapters
+            .iter()
+            .any(|a| a == &adapter_program),
+        SraError::AdapterNotAllowed
+    );
 
     let mint_route = &mut ctx.accounts.mint_route;
     mint_route.sra_config = ctx.accounts.sra_config.key();
     mint_route.source_mint = ctx.accounts.source_mint.key();
+    mint_route.adapter_program = adapter_program;
     mint_route.action_idxs = params.action_idxs;
     mint_route.target_token = params.target_token;
     mint_route.allowed_slippage_bps = params.allowed_slippage_bps;

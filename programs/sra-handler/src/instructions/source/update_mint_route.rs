@@ -31,14 +31,13 @@ pub struct UpdateMintRoute<'info> {
     pub address_book_entry: Option<Account<'info, AddressBookEntry>>,
 }
 
-pub(crate) fn handler(
-    ctx: Context<UpdateMintRoute>,
-    params: UpdateMintRouteParams,
-) -> Result<()> {
+pub(crate) fn handler(ctx: Context<UpdateMintRoute>, params: UpdateMintRouteParams) -> Result<()> {
     let mint_route = &mut ctx.accounts.mint_route;
     let sra_config = &ctx.accounts.sra_config;
 
     if let Some(new_token) = params.target_token {
+        require!(new_token != [0u8; 32], SraError::InvalidTokenInfo);
+
         // AddressBookEntry is handler-owned, so Anchor's deserializer already
         // verifies the account type/ownership. The stored fields are written
         // in `set_address_book_entry` from the same seeds that derive the PDA,
@@ -48,7 +47,11 @@ pub(crate) fn handler(
             .address_book_entry
             .as_ref()
             .ok_or_else(|| error!(SraError::InvalidAddressBook))?;
-        require_keys_eq!(ab.sra_config, sra_config.key(), SraError::InvalidAddressBook);
+        require_keys_eq!(
+            ab.sra_config,
+            sra_config.key(),
+            SraError::InvalidAddressBook
+        );
         require!(
             ab.target_chain_id == sra_config.target_chain_id,
             SraError::InvalidAddressBook

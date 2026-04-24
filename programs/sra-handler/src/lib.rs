@@ -36,10 +36,7 @@ pub mod sra_handler {
         )
     }
 
-    pub fn add_mint_route(
-        ctx: Context<AddMintRoute>,
-        params: AddMintRouteParams,
-    ) -> Result<()> {
+    pub fn add_mint_route(ctx: Context<AddMintRoute>, params: AddMintRouteParams) -> Result<()> {
         instructions::source::add_mint_route::handler(ctx, params)
     }
 

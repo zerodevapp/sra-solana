@@ -23,11 +23,11 @@ fn update_mint_route_slippage_updates() {
         None,
         params,
     );
-    send_ix(&mut svm, ix, &fx.payer, &[&fx.owner])
-        .expect("slippage update should succeed");
+    send_ix(&mut svm, ix, &fx.payer, &[&fx.owner]).expect("slippage update should succeed");
 
     let route = fetch_mint_route(&svm, &fx.accounts.mint_route);
     assert_eq!(route.allowed_slippage_bps, 777);
+    assert_eq!(route.adapter_program, fx.adapter_program);
     assert_eq!(
         route.target_token, fx.target_token,
         "target_token must be untouched when only slippage is updated"
@@ -68,6 +68,7 @@ fn update_mint_route_target_token_valid_address_book_updates() {
         .expect("target_token update against enabled AB should succeed");
 
     let route = fetch_mint_route(&svm, &fx.accounts.mint_route);
+    assert_eq!(route.adapter_program, fx.adapter_program);
     assert_eq!(route.target_token, new_target_token);
 }
 

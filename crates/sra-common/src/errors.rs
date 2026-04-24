@@ -9,13 +9,16 @@ pub enum SraError {
     #[msg("Route is paused")]
     RoutePaused,
 
+    #[msg("Route must be paused before closing")]
+    RouteMustBePaused,
+
     #[msg("Output amount below minimum after slippage")]
     SlippageExceeded,
 
     #[msg("Address book entry is inactive or does not match")]
     InvalidAddressBook,
 
-    #[msg("target_token must be non-zero and target_decimals must be non-zero")]
+    #[msg("target_token must be non-zero")]
     InvalidTokenInfo,
 
     // -- Source: mint route --
@@ -24,6 +27,9 @@ pub enum SraError {
 
     #[msg("Vault must be empty before closing route")]
     VaultNotEmpty,
+
+    #[msg("Adapter custody must be empty before closing route")]
+    AdapterCustodyNotEmpty,
 
     #[msg("Allowed adapters list exceeds maximum")]
     TooManyAdapters,

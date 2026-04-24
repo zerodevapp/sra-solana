@@ -11,18 +11,14 @@ fn close_mint_route_empty_vault_returns_rent() {
     let mut svm = setup_svm();
     let fx = MintRouteFixture::new(&mut svm);
     fx.add_default_route(&mut svm);
+    fx.pause_route(&mut svm);
 
     let owner_lamports_before = svm
         .get_account(&fx.owner.pubkey())
         .expect("owner exists")
         .lamports;
 
-    let ix = close_mint_route_ix(
-        &fx.owner.pubkey(),
-        &fx.sra_config,
-        &fx.accounts.mint_route,
-        &fx.accounts.sra_vault,
-    );
+    let ix = close_mint_route_ix(&fx.owner.pubkey(), &fx.accounts);
     send_ix(&mut svm, ix, &fx.payer, &[&fx.owner]).expect("close should succeed");
 
     assert!(
@@ -47,6 +43,7 @@ fn close_mint_route_non_empty_vault_rejected() {
     let mut svm = setup_svm();
     let fx = MintRouteFixture::new(&mut svm);
     fx.add_default_route(&mut svm);
+    fx.pause_route(&mut svm);
 
     // Mint some tokens into the SRA vault so it is non-empty. Payer is the mint authority.
     mint_to(
@@ -59,12 +56,7 @@ fn close_mint_route_non_empty_vault_rejected() {
     );
     assert_eq!(fetch_token_balance(&svm, &fx.accounts.sra_vault), 1_000);
 
-    let ix = close_mint_route_ix(
-        &fx.owner.pubkey(),
-        &fx.sra_config,
-        &fx.accounts.mint_route,
-        &fx.accounts.sra_vault,
-    );
+    let ix = close_mint_route_ix(&fx.owner.pubkey(), &fx.accounts);
     let err = send_ix_expect_err(
         &mut svm,
         ix,
@@ -85,10 +77,71 @@ fn close_mint_route_non_empty_vault_rejected() {
 }
 
 #[test]
+fn close_mint_route_non_empty_adapter_custody_rejected() {
+    let mut svm = setup_svm();
+    let fx = MintRouteFixture::new(&mut svm);
+    fx.add_default_route(&mut svm);
+    fx.pause_route(&mut svm);
+
+    mint_to(
+        &mut svm,
+        &fx.payer,
+        &fx.payer,
+        &fx.source_mint,
+        &fx.accounts.adapter_custody,
+        1_000,
+    );
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.accounts.adapter_custody),
+        1_000
+    );
+
+    let ix = close_mint_route_ix(&fx.owner.pubkey(), &fx.accounts);
+    let err = send_ix_expect_err(
+        &mut svm,
+        ix,
+        &fx.payer,
+        &[&fx.owner],
+        "close must be rejected while adapter custody has balance",
+    );
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::AdapterCustodyNotEmpty.into()),
+        )
+    );
+}
+
+#[test]
+fn close_mint_route_unpaused_rejected() {
+    let mut svm = setup_svm();
+    let fx = MintRouteFixture::new(&mut svm);
+    fx.add_default_route(&mut svm);
+
+    let ix = close_mint_route_ix(&fx.owner.pubkey(), &fx.accounts);
+    let err = send_ix_expect_err(
+        &mut svm,
+        ix,
+        &fx.payer,
+        &[&fx.owner],
+        "route must be paused before close",
+    );
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::RouteMustBePaused.into()),
+        )
+    );
+}
+
+#[test]
 fn close_mint_route_mint_nonce_persists() {
     let mut svm = setup_svm();
     let fx = MintRouteFixture::new(&mut svm);
     fx.add_default_route(&mut svm);
+    fx.pause_route(&mut svm);
 
     // Nonce exists prior to close; snapshot it.
     let nonce_before = fetch_mint_nonce(&svm, &fx.accounts.mint_nonce);
@@ -96,12 +149,7 @@ fn close_mint_route_mint_nonce_persists() {
         .get_account(&fx.accounts.mint_nonce)
         .expect("mint_nonce account exists before close");
 
-    let ix = close_mint_route_ix(
-        &fx.owner.pubkey(),
-        &fx.sra_config,
-        &fx.accounts.mint_route,
-        &fx.accounts.sra_vault,
-    );
+    let ix = close_mint_route_ix(&fx.owner.pubkey(), &fx.accounts);
     send_ix(&mut svm, ix, &fx.payer, &[&fx.owner]).expect("close should succeed");
 
     let nonce_acct_after = svm
@@ -125,6 +173,7 @@ fn close_mint_route_then_recreate_preserves_nonce() {
     let mut svm = setup_svm();
     let fx = MintRouteFixture::new(&mut svm);
     fx.add_default_route(&mut svm);
+    fx.pause_route(&mut svm);
 
     // Simulate nonce progress by writing directly to the underlying account
     // via an init overwrite is intrusive; instead we rely on the initial
@@ -132,12 +181,7 @@ fn close_mint_route_then_recreate_preserves_nonce() {
     // re-add, the MintNonce bump and account metadata must survive.
     let nonce_before = fetch_mint_nonce(&svm, &fx.accounts.mint_nonce);
 
-    let close_ix = close_mint_route_ix(
-        &fx.owner.pubkey(),
-        &fx.sra_config,
-        &fx.accounts.mint_route,
-        &fx.accounts.sra_vault,
-    );
+    let close_ix = close_mint_route_ix(&fx.owner.pubkey(), &fx.accounts);
     send_ix(&mut svm, close_ix, &fx.payer, &[&fx.owner]).expect("close should succeed");
 
     // Re-add with a different action_idxs, same mint.
@@ -165,6 +209,7 @@ fn close_mint_route_then_recreate_preserves_nonce() {
 
     // The new route has the updated action_idxs.
     let route = fetch_mint_route(&svm, &fx.accounts.mint_route);
+    assert_eq!(route.adapter_program, fx.adapter_program);
     assert_eq!(route.action_idxs, vec![42]);
 }
 
@@ -175,12 +220,7 @@ fn close_mint_route_non_owner_rejected() {
     fx.add_default_route(&mut svm);
     let attacker = funded_keypair(&mut svm, SOL);
 
-    let ix = close_mint_route_ix(
-        &attacker.pubkey(),
-        &fx.sra_config,
-        &fx.accounts.mint_route,
-        &fx.accounts.sra_vault,
-    );
+    let ix = close_mint_route_ix(&attacker.pubkey(), &fx.accounts);
     let err = send_ix_expect_err(
         &mut svm,
         ix,

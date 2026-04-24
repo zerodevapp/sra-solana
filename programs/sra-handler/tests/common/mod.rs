@@ -26,7 +26,9 @@ use solana_sdk::{
 };
 use solana_system_interface::{instruction as system_instruction, program as system_program};
 use sra_common::{
-    seeds::{SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_MINT_ROUTE, SEED_SRA},
+    seeds::{
+        SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_MINT_ROUTE, SEED_SRA,
+    },
     types::{AddressBookEntry, MintNonce, SraConfig, SraMintRoute},
 };
 use sra_handler::instructions::source::{
@@ -241,10 +243,7 @@ pub fn derive_mint_nonce_pda(sra_config: &Pubkey, source_mint: &Pubkey) -> (Pubk
     )
 }
 
-pub fn derive_adapter_authority_pda(
-    sra_config: &Pubkey,
-    adapter_program: &Pubkey,
-) -> (Pubkey, u8) {
+pub fn derive_adapter_authority_pda(sra_config: &Pubkey, adapter_program: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(
         &[SEED_ADAPTER_AUTHORITY, sra_config.as_ref()],
         adapter_program,
@@ -291,7 +290,8 @@ pub fn create_mint(
     let msg = Message::new(&[create_acct_ix, init_mint_ix], Some(&payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.sign(&[payer, &mint], blockhash);
-    svm.send_transaction(tx).expect("create_mint should succeed");
+    svm.send_transaction(tx)
+        .expect("create_mint should succeed");
     mint.pubkey()
 }
 
@@ -329,8 +329,7 @@ pub fn mint_to(
 
 pub fn fetch_token_balance(svm: &LiteSVM, ata: &Pubkey) -> u64 {
     let acct = svm.get_account(ata).expect("token account exists");
-    let parsed =
-        spl_token::state::Account::unpack(&acct.data).expect("valid SPL TokenAccount");
+    let parsed = spl_token::state::Account::unpack(&acct.data).expect("valid SPL TokenAccount");
     parsed.amount
 }
 
@@ -451,19 +450,17 @@ pub fn update_mint_route_ix(
     }
 }
 
-pub fn close_mint_route_ix(
-    owner: &Pubkey,
-    sra_config: &Pubkey,
-    mint_route: &Pubkey,
-    sra_vault: &Pubkey,
-) -> Instruction {
+pub fn close_mint_route_ix(owner: &Pubkey, accounts: &MintRouteAccounts) -> Instruction {
     Instruction {
         program_id: PROGRAM_ID,
         accounts: sra_handler::accounts::CloseMintRoute {
             owner: *owner,
-            sra_config: *sra_config,
-            mint_route: *mint_route,
-            sra_vault: *sra_vault,
+            sra_config: accounts.sra_config,
+            mint_route: accounts.mint_route,
+            sra_vault: accounts.sra_vault,
+            adapter_program: accounts.adapter_program,
+            adapter_authority: accounts.adapter_authority,
+            adapter_custody: accounts.adapter_custody,
         }
         .to_account_metas(None),
         data: sra_handler::instruction::CloseMintRoute {}.data(),
@@ -502,6 +499,13 @@ impl MintRouteFixture {
             6,
         );
         let adapter_program = Pubkey::new_unique();
+        let update_ix = update_adapters_ix(
+            &payer.pubkey(),
+            &owner.pubkey(),
+            &sra_config,
+            vec![adapter_program],
+        );
+        send_ix(svm, update_ix, &payer, &[&owner]).expect("update_adapters should succeed");
         let accounts = MintRouteAccounts::derive(
             &sra_config,
             &source_mint,
@@ -538,5 +542,19 @@ impl MintRouteFixture {
         );
         send_ix(svm, ix, &self.payer, &[&self.owner])
             .expect("add_mint_route default setup should succeed");
+    }
+
+    pub fn pause_route(&self, svm: &mut LiteSVM) {
+        let ix = update_mint_route_ix(
+            &self.owner.pubkey(),
+            &self.sra_config,
+            &self.accounts.mint_route,
+            None,
+            UpdateMintRouteParams {
+                paused: Some(true),
+                ..Default::default()
+            },
+        );
+        send_ix(svm, ix, &self.payer, &[&self.owner]).expect("pause route should succeed");
     }
 }

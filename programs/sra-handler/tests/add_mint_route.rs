@@ -36,6 +36,7 @@ fn add_mint_route_happy_path() {
     let route = fetch_mint_route(&svm, &expected_mint_route);
     assert_eq!(route.sra_config, fx.sra_config);
     assert_eq!(route.source_mint, fx.source_mint);
+    assert_eq!(route.adapter_program, fx.adapter_program);
     assert_eq!(route.action_idxs, params.action_idxs);
     assert_eq!(route.target_token, fx.target_token);
     assert_eq!(route.allowed_slippage_bps, params.allowed_slippage_bps);
@@ -62,12 +63,7 @@ fn add_mint_route_too_many_action_idxs_rejected() {
         target_token: fx.target_token,
         allowed_slippage_bps: 0,
     };
-    let ix = add_mint_route_ix(
-        &fx.payer.pubkey(),
-        &fx.owner.pubkey(),
-        &fx.accounts,
-        params,
-    );
+    let ix = add_mint_route_ix(&fx.payer.pubkey(), &fx.owner.pubkey(), &fx.accounts, params);
 
     let err = send_ix_expect_err(
         &mut svm,
@@ -143,6 +139,60 @@ fn add_mint_route_disabled_address_book_rejected() {
 }
 
 #[test]
+fn add_mint_route_unregistered_adapter_rejected() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 100 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let sra_config = init_sra(&mut svm, &payer, &owner);
+    let source_mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+    let target_chain_id = sample_config().target_chain_id;
+    let target_token = [0xD0; 32];
+    setup_address_book_entry(
+        &mut svm,
+        &payer,
+        &owner,
+        &sra_config,
+        target_chain_id,
+        target_token,
+        6,
+    );
+
+    let adapter_program = solana_sdk::pubkey::Pubkey::new_unique();
+    let accounts = MintRouteAccounts::derive(
+        &sra_config,
+        &source_mint,
+        target_chain_id,
+        &target_token,
+        &adapter_program,
+    );
+
+    let ix = add_mint_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        &accounts,
+        AddMintRouteParams {
+            action_idxs: vec![0],
+            target_token,
+            allowed_slippage_bps: 0,
+        },
+    );
+    let err = send_ix_expect_err(
+        &mut svm,
+        ix,
+        &payer,
+        &[&owner],
+        "adapter must already be allowlisted on the SRA",
+    );
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::AdapterNotAllowed.into()),
+        )
+    );
+}
+
+#[test]
 fn add_mint_route_duplicate_rejected() {
     let mut svm = setup_svm();
     let fx = MintRouteFixture::new(&mut svm);
@@ -174,12 +224,7 @@ fn add_mint_route_slippage_over_max_rejected() {
         target_token: fx.target_token,
         allowed_slippage_bps: MAX_SLIPPAGE_BPS + 1,
     };
-    let ix = add_mint_route_ix(
-        &fx.payer.pubkey(),
-        &fx.owner.pubkey(),
-        &fx.accounts,
-        params,
-    );
+    let ix = add_mint_route_ix(&fx.payer.pubkey(), &fx.owner.pubkey(), &fx.accounts, params);
     let err = send_ix_expect_err(
         &mut svm,
         ix,

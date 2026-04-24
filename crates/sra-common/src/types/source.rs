@@ -31,6 +31,9 @@ pub struct SraMintRoute {
     // Immutable
     pub sra_config: Pubkey,
     pub source_mint: Pubkey,
+    /// Source-side adapter bound to this route. A route always deposits
+    /// through the same adapter; switching adapters requires a close + re-add.
+    pub adapter_program: Pubkey,
     #[max_len(MAX_ACTION_IDXS)]
     pub action_idxs: Vec<u64>,
     // Mutable (owner-gated)
@@ -90,10 +93,11 @@ mod tests {
 
     #[test]
     fn sra_mint_route_init_space() {
-        // 32 sra_config + 32 source_mint + 4 + (8 * 4) action_idxs
-        // + 32 target_token + 2 allowed_slippage_bps + 1 paused + 1 bump
-        // = 32 + 32 + 36 + 32 + 2 + 1 + 1 = 136
-        assert_eq!(SraMintRoute::INIT_SPACE, 136);
+        // 32 sra_config + 32 source_mint + 32 adapter_program
+        // + 4 + (8 * 4) action_idxs + 32 target_token
+        // + 2 allowed_slippage_bps + 1 paused + 1 bump
+        // = 32 + 32 + 32 + 36 + 32 + 2 + 1 + 1 = 168
+        assert_eq!(SraMintRoute::INIT_SPACE, 168);
     }
 
     #[test]
