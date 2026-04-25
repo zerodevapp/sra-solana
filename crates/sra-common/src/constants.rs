@@ -6,7 +6,7 @@ use anchor_lang::pubkey;
 /// EVM has no equivalent limit (uses linked list).
 pub const MAX_ADAPTERS: usize = 8;
 
-/// Max action indices per SraMintRoute.
+/// Max action indices per source message or destination route.
 /// Solana-specific: bounds ABI-encoded message size to fit 1,232-byte tx limit.
 /// EVM has no equivalent limit.
 pub const MAX_ACTION_IDXS: usize = 4;

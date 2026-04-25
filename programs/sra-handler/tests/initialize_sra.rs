@@ -29,6 +29,7 @@ fn initialize_sra_happy_path() {
     assert_eq!(stored.app_id, config.app_id);
     assert_eq!(stored.salt, salt);
     assert!(stored.allowed_adapters.is_empty());
+    assert_eq!(stored.allowed_slippage_bps, 0);
     assert_eq!(stored.bump, bump);
 }
 

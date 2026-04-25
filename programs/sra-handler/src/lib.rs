@@ -23,6 +23,10 @@ pub mod sra_handler {
         instructions::source::update_adapters::handler(ctx, adapters)
     }
 
+    pub fn update_slippage(ctx: Context<UpdateSlippage>, allowed_slippage_bps: u16) -> Result<()> {
+        instructions::source::update_slippage::handler(ctx, allowed_slippage_bps)
+    }
+
     pub fn set_address_book_entry(
         ctx: Context<SetAddressBookEntry>,
         target_chain_id: u64,

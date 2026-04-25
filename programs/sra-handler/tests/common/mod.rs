@@ -156,6 +156,25 @@ pub fn update_adapters_ix(
     }
 }
 
+pub fn update_slippage_ix(
+    owner: &Pubkey,
+    sra_config: &Pubkey,
+    allowed_slippage_bps: u16,
+) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::UpdateSlippage {
+            owner: *owner,
+            sra_config: *sra_config,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::UpdateSlippage {
+            allowed_slippage_bps,
+        }
+        .data(),
+    }
+}
+
 pub fn set_address_book_entry_ix(
     payer: &Pubkey,
     owner: &Pubkey,

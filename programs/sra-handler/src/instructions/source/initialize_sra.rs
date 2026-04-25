@@ -62,6 +62,7 @@ pub(crate) fn handler(
     sra_config.app_id = config.app_id;
     sra_config.salt = salt;
     sra_config.allowed_adapters = Vec::new();
+    sra_config.allowed_slippage_bps = 0;
     sra_config.bump = ctx.bumps.sra_config;
     Ok(())
 }
