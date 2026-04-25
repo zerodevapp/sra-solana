@@ -26,12 +26,11 @@ use solana_sdk::{
 };
 use solana_system_interface::{instruction as system_instruction, program as system_program};
 use sra_common::{
-    seeds::{SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_MINT_ROUTE, SEED_SRA},
-    types::{AddressBookEntry, MintNonce, SraConfig, SraMintRoute},
+    seeds::{SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_SRA},
+    types::{AddressBookEntry, MintNonce, SraConfig},
 };
 use sra_handler::instructions::source::{
-    add_mint_route::AddMintRouteParams, initialize_sra::SraInitConfig,
-    update_mint_route::UpdateMintRouteParams, validate_and_prepare::PrepareParams,
+    initialize_sra::SraInitConfig, validate_and_prepare::PrepareParams,
 };
 use std::{fs, path::PathBuf};
 
@@ -114,6 +113,20 @@ pub fn derive_address_book_pda(
             target_token,
         ],
         &PROGRAM_ID,
+    )
+}
+
+pub fn derive_mint_nonce_pda(sra_config: &Pubkey, source_mint: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[SEED_MINT_NONCE, sra_config.as_ref(), source_mint.as_ref()],
+        &PROGRAM_ID,
+    )
+}
+
+pub fn derive_adapter_authority_pda(sra_config: &Pubkey, adapter_program: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[SEED_ADAPTER_AUTHORITY, sra_config.as_ref()],
+        adapter_program,
     )
 }
 
@@ -251,57 +264,18 @@ pub fn fetch_address_book_entry(svm: &LiteSVM, pda: &Pubkey) -> AddressBookEntry
     AddressBookEntry::try_deserialize(&mut acct.data.as_slice()).expect("valid AddressBookEntry")
 }
 
-pub fn fetch_mint_route(svm: &LiteSVM, pda: &Pubkey) -> SraMintRoute {
-    let acct = svm.get_account(pda).expect("mint_route account exists");
-    SraMintRoute::try_deserialize(&mut acct.data.as_slice()).expect("valid SraMintRoute")
-}
-
 pub fn fetch_mint_nonce(svm: &LiteSVM, pda: &Pubkey) -> MintNonce {
     let acct = svm.get_account(pda).expect("mint_nonce account exists");
     MintNonce::try_deserialize(&mut acct.data.as_slice()).expect("valid MintNonce")
 }
 
-pub fn mint_route_exists(svm: &LiteSVM, pda: &Pubkey) -> bool {
-    svm.get_account(pda)
-        .map(|a| !a.data.is_empty())
-        .unwrap_or(false)
-}
-
 // ---------------------------------------------------------------------------
-// PDA + ATA helpers
+// SPL Token helpers
 // ---------------------------------------------------------------------------
-
-pub fn derive_mint_route_pda(sra_config: &Pubkey, source_mint: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &[SEED_MINT_ROUTE, sra_config.as_ref(), source_mint.as_ref()],
-        &PROGRAM_ID,
-    )
-}
-
-pub fn derive_mint_nonce_pda(sra_config: &Pubkey, source_mint: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &[SEED_MINT_NONCE, sra_config.as_ref(), source_mint.as_ref()],
-        &PROGRAM_ID,
-    )
-}
-
-pub fn derive_adapter_authority_pda(
-    sra_config: &Pubkey,
-    adapter_program: &Pubkey,
-) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &[SEED_ADAPTER_AUTHORITY, sra_config.as_ref()],
-        adapter_program,
-    )
-}
 
 pub fn derive_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
     get_associated_token_address(owner, mint)
 }
-
-// ---------------------------------------------------------------------------
-// SPL Token helpers
-// ---------------------------------------------------------------------------
 
 pub fn create_mint(
     svm: &mut LiteSVM,
@@ -335,7 +309,8 @@ pub fn create_mint(
     let msg = Message::new(&[create_acct_ix, init_mint_ix], Some(&payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.sign(&[payer, &mint], blockhash);
-    svm.send_transaction(tx).expect("create_mint should succeed");
+    svm.send_transaction(tx)
+        .expect("create_mint should succeed");
     mint.pubkey()
 }
 
@@ -373,8 +348,7 @@ pub fn mint_to(
 
 pub fn fetch_token_balance(svm: &LiteSVM, ata: &Pubkey) -> u64 {
     let acct = svm.get_account(ata).expect("token account exists");
-    let parsed =
-        spl_token::state::Account::unpack(&acct.data).expect("valid SPL TokenAccount");
+    let parsed = spl_token::state::Account::unpack(&acct.data).expect("valid SPL TokenAccount");
     parsed.amount
 }
 
@@ -404,41 +378,28 @@ pub fn setup_address_book_entry(
 }
 
 // ---------------------------------------------------------------------------
-// Mint-route instruction builders
+// validate_and_prepare helpers
 // ---------------------------------------------------------------------------
 
-pub struct MintRouteAccounts {
+pub struct ValidatePrepareAccounts {
     pub sra_config: Pubkey,
-    pub mint_route: Pubkey,
     pub mint_nonce: Pubkey,
     pub source_mint: Pubkey,
     pub sra_vault: Pubkey,
-    pub address_book_entry: Pubkey,
     pub adapter_program: Pubkey,
     pub adapter_authority: Pubkey,
     pub adapter_custody: Pubkey,
 }
 
-impl MintRouteAccounts {
-    pub fn derive(
-        sra_config: &Pubkey,
-        source_mint: &Pubkey,
-        target_chain_id: u64,
-        target_token: &[u8; 32],
-        adapter_program: &Pubkey,
-    ) -> Self {
-        let (mint_route, _) = derive_mint_route_pda(sra_config, source_mint);
+impl ValidatePrepareAccounts {
+    pub fn derive(sra_config: &Pubkey, source_mint: &Pubkey, adapter_program: &Pubkey) -> Self {
         let (mint_nonce, _) = derive_mint_nonce_pda(sra_config, source_mint);
-        let (address_book_entry, _) =
-            derive_address_book_pda(sra_config, target_chain_id, target_token);
         let (adapter_authority, _) = derive_adapter_authority_pda(sra_config, adapter_program);
         Self {
             sra_config: *sra_config,
-            mint_route,
             mint_nonce,
             source_mint: *source_mint,
             sra_vault: derive_ata(sra_config, source_mint),
-            address_book_entry,
             adapter_program: *adapter_program,
             adapter_authority,
             adapter_custody: derive_ata(&adapter_authority, source_mint),
@@ -446,172 +407,30 @@ impl MintRouteAccounts {
     }
 }
 
-pub fn add_mint_route_ix(
-    payer: &Pubkey,
-    owner: &Pubkey,
-    accounts: &MintRouteAccounts,
-    params: AddMintRouteParams,
-) -> Instruction {
-    Instruction {
-        program_id: PROGRAM_ID,
-        accounts: sra_handler::accounts::AddMintRoute {
-            payer: *payer,
-            owner: *owner,
-            sra_config: accounts.sra_config,
-            mint_route: accounts.mint_route,
-            mint_nonce: accounts.mint_nonce,
-            source_mint: accounts.source_mint,
-            sra_vault: accounts.sra_vault,
-            address_book_entry: accounts.address_book_entry,
-            adapter_authority: accounts.adapter_authority,
-            adapter_custody: accounts.adapter_custody,
-            adapter_program: accounts.adapter_program,
-            token_program: TOKEN_PROGRAM_ID,
-            associated_token_program: ATA_PROGRAM_ID,
-            system_program: system_program::ID,
-        }
-        .to_account_metas(None),
-        data: sra_handler::instruction::AddMintRoute { params }.data(),
-    }
-}
-
-pub fn update_mint_route_ix(
-    owner: &Pubkey,
-    sra_config: &Pubkey,
-    mint_route: &Pubkey,
-    address_book_entry: Option<&Pubkey>,
-    params: UpdateMintRouteParams,
-) -> Instruction {
-    Instruction {
-        program_id: PROGRAM_ID,
-        accounts: sra_handler::accounts::UpdateMintRoute {
-            owner: *owner,
-            sra_config: *sra_config,
-            mint_route: *mint_route,
-            address_book_entry: address_book_entry.copied(),
-        }
-        .to_account_metas(None),
-        data: sra_handler::instruction::UpdateMintRoute { params }.data(),
-    }
-}
-
-pub fn close_mint_route_ix(
-    owner: &Pubkey,
-    sra_config: &Pubkey,
-    mint_route: &Pubkey,
-    sra_vault: &Pubkey,
-) -> Instruction {
-    Instruction {
-        program_id: PROGRAM_ID,
-        accounts: sra_handler::accounts::CloseMintRoute {
-            owner: *owner,
-            sra_config: *sra_config,
-            mint_route: *mint_route,
-            sra_vault: *sra_vault,
-        }
-        .to_account_metas(None),
-        data: sra_handler::instruction::CloseMintRoute {}.data(),
-    }
-}
-
-/// Bundled setup for mint-route tests: enables an address book entry,
-/// creates the source mint, returns everything downstream tests need.
-pub struct MintRouteFixture {
-    pub payer: Keypair,
-    pub owner: Keypair,
-    pub sra_config: Pubkey,
-    pub source_mint: Pubkey,
-    pub target_chain_id: u64,
-    pub target_token: [u8; 32],
-    pub adapter_program: Pubkey,
-    pub accounts: MintRouteAccounts,
-}
-
-impl MintRouteFixture {
-    pub fn new(svm: &mut LiteSVM) -> Self {
-        let payer = funded_keypair(svm, 100 * SOL);
-        let owner = funded_keypair(svm, SOL);
-        let sra_config = init_sra(svm, &payer, &owner);
-        let source_mint = create_mint(svm, &payer, &payer.pubkey(), 6);
-        let target_chain_id = sample_config().target_chain_id;
-        let target_token = [0xAB; 32];
-        // Enable address book entry before any add_mint_route call.
-        setup_address_book_entry(
-            svm,
-            &payer,
-            &owner,
-            &sra_config,
-            target_chain_id,
-            target_token,
-            6,
-        );
-        let adapter_program = Pubkey::new_unique();
-        let accounts = MintRouteAccounts::derive(
-            &sra_config,
-            &source_mint,
-            target_chain_id,
-            &target_token,
-            &adapter_program,
-        );
-        Self {
-            payer,
-            owner,
-            sra_config,
-            source_mint,
-            target_chain_id,
-            target_token,
-            adapter_program,
-            accounts,
-        }
-    }
-
-    pub fn default_params(&self) -> AddMintRouteParams {
-        AddMintRouteParams {
-            action_idxs: vec![0, 1],
-            target_token: self.target_token,
-            allowed_slippage_bps: 100,
-        }
-    }
-
-    pub fn add_default_route(&self, svm: &mut LiteSVM) {
-        let ix = add_mint_route_ix(
-            &self.payer.pubkey(),
-            &self.owner.pubkey(),
-            &self.accounts,
-            self.default_params(),
-        );
-        send_ix(svm, ix, &self.payer, &[&self.owner])
-            .expect("add_mint_route default setup should succeed");
-    }
-}
-
-// ---------------------------------------------------------------------------
-// validate_and_prepare helpers
-// ---------------------------------------------------------------------------
-
 pub fn validate_and_prepare_ix(
     fee_payer: &Pubkey,
-    depositor: &Pubkey,
-    accounts: &MintRouteAccounts,
-    depositor_token_account: &Pubkey,
+    owner: &Pubkey,
+    accounts: &ValidatePrepareAccounts,
+    owner_token_account: &Pubkey,
+    address_book_entry: &Pubkey,
     params: PrepareParams,
 ) -> Instruction {
     Instruction {
         program_id: PROGRAM_ID,
         accounts: sra_handler::accounts::ValidateAndPrepare {
             fee_payer: *fee_payer,
-            depositor: *depositor,
+            owner: *owner,
             sra_config: accounts.sra_config,
-            mint_route: accounts.mint_route,
             mint_nonce: accounts.mint_nonce,
             source_mint: accounts.source_mint,
-            depositor_token_account: *depositor_token_account,
+            owner_token_account: *owner_token_account,
             sra_vault: accounts.sra_vault,
             adapter_authority: accounts.adapter_authority,
             adapter_custody: accounts.adapter_custody,
             adapter_program: accounts.adapter_program,
-            address_book_entry: accounts.address_book_entry,
+            address_book_entry: *address_book_entry,
             token_program: TOKEN_PROGRAM_ID,
+            associated_token_program: ATA_PROGRAM_ID,
             system_program: system_program::ID,
             instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
         }
@@ -620,40 +439,29 @@ pub fn validate_and_prepare_ix(
     }
 }
 
-/// Fully-wired deposit fixture: SRA initialized with an EVM-padded target
-/// config, adapter registered in `allowed_adapters`, route created, depositor
-/// holds `DEPOSITOR_STARTING_BALANCE` tokens.
-pub const DEPOSITOR_STARTING_BALANCE: u64 = 10_000_000;
+pub const OWNER_STARTING_BALANCE: u64 = 10_000_000;
 
 pub struct ValidatePrepareFixture {
     pub payer: Keypair,
     pub owner: Keypair,
-    pub depositor: Keypair,
     pub config: SraInitConfig,
-    pub salt: [u8; 32],
     pub sra_config: Pubkey,
     pub source_mint: Pubkey,
     pub target_chain_id: u64,
     pub target_token: [u8; 32],
     pub adapter_program: Pubkey,
-    pub accounts: MintRouteAccounts,
-    pub depositor_ata: Pubkey,
-    pub route_params: AddMintRouteParams,
+    pub accounts: ValidatePrepareAccounts,
+    pub owner_ata: Pubkey,
 }
 
 impl ValidatePrepareFixture {
     pub fn new(svm: &mut LiteSVM) -> Self {
-        Self::new_with(svm, 50, vec![3, 7])
+        Self::new_with(svm, 50)
     }
 
-    pub fn new_with(
-        svm: &mut LiteSVM,
-        allowed_slippage_bps: u16,
-        action_idxs: Vec<u64>,
-    ) -> Self {
+    pub fn new_with(svm: &mut LiteSVM, allowed_slippage_bps: u16) -> Self {
         let payer = funded_keypair(svm, 100 * SOL);
         let owner = funded_keypair(svm, SOL);
-        let depositor = funded_keypair(svm, SOL);
 
         let config = evm_destination_config();
         let salt = [0xABu8; 32];
@@ -689,73 +497,59 @@ impl ValidatePrepareFixture {
         );
         send_ix(svm, ix, &payer, &[&owner]).expect("update_adapters");
 
-        let accounts = MintRouteAccounts::derive(
-            &sra_config,
-            &source_mint,
-            target_chain_id,
-            &target_token,
-            &adapter_program,
-        );
-        let route_params = AddMintRouteParams {
-            action_idxs,
-            target_token,
-            allowed_slippage_bps,
-        };
-        let ix = add_mint_route_ix(
-            &payer.pubkey(),
-            &owner.pubkey(),
-            &accounts,
-            route_params.clone(),
-        );
-        send_ix(svm, ix, &payer, &[&owner]).expect("add_mint_route");
+        let ix = update_slippage_ix(&owner.pubkey(), &sra_config, allowed_slippage_bps);
+        send_ix(svm, ix, &payer, &[&owner]).expect("update_slippage");
 
-        let depositor_ata = create_ata(svm, &payer, &depositor.pubkey(), &source_mint);
+        let accounts = ValidatePrepareAccounts::derive(&sra_config, &source_mint, &adapter_program);
+
+        let owner_ata = create_ata(svm, &payer, &owner.pubkey(), &source_mint);
         mint_to(
             svm,
             &payer,
             &payer,
             &source_mint,
-            &depositor_ata,
-            DEPOSITOR_STARTING_BALANCE,
+            &owner_ata,
+            OWNER_STARTING_BALANCE,
         );
 
         Self {
             payer,
             owner,
-            depositor,
             config,
-            salt,
             sra_config,
             source_mint,
             target_chain_id,
             target_token,
             adapter_program,
             accounts,
-            depositor_ata,
-            route_params,
+            owner_ata,
         }
+    }
+
+    pub fn address_book_entry(&self, target_token: &[u8; 32]) -> Pubkey {
+        derive_address_book_pda(&self.sra_config, self.target_chain_id, target_token).0
     }
 
     pub fn invoke(
         &self,
         svm: &mut LiteSVM,
         params: PrepareParams,
-    ) -> Result<
-        litesvm::types::TransactionMetadata,
-        Box<litesvm::types::FailedTransactionMetadata>,
-    > {
+    ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
+    {
+        let address_book_entry = self.address_book_entry(&params.target_token);
         let ix = validate_and_prepare_ix(
             &self.payer.pubkey(),
-            &self.depositor.pubkey(),
+            &self.owner.pubkey(),
             &self.accounts,
-            &self.depositor_ata,
+            &self.owner_ata,
+            &address_book_entry,
             params,
         );
         svm.expire_blockhash();
         let blockhash = svm.latest_blockhash();
         let msg = Message::new(&[ix], Some(&self.payer.pubkey()));
         let mut tx = Transaction::new_unsigned(msg);
-        tx.sign(&[&self.payer, &self.depositor], blockhash);
+        tx.sign(&[&self.payer, &self.owner], blockhash);
         svm.send_transaction(tx).map_err(Box::new)
     }
 }
@@ -766,9 +560,7 @@ impl ValidatePrepareFixture {
 
 /// Scan program logs for a `Program data: <base64>` line whose discriminator
 /// matches `DepositPrepared`, and borsh-deserialize the remainder.
-pub fn extract_deposit_prepared(
-    logs: &[String],
-) -> Option<sra_handler::events::DepositPrepared> {
+pub fn extract_deposit_prepared(logs: &[String]) -> Option<sra_handler::events::DepositPrepared> {
     use anchor_lang::{AnchorDeserialize, Discriminator};
     use base64::Engine;
 
