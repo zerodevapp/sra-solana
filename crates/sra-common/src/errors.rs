@@ -6,24 +6,18 @@ pub enum SraError {
     #[msg("Adapter program not in allowed_adapters list")]
     AdapterNotAllowed,
 
-    #[msg("Route is paused")]
-    RoutePaused,
-
     #[msg("Output amount below minimum after slippage")]
     SlippageExceeded,
 
     #[msg("Address book entry is inactive or does not match")]
     InvalidAddressBook,
 
-    #[msg("target_token must be non-zero and target_decimals must be non-zero")]
+    #[msg("target_token must be non-zero")]
     InvalidTokenInfo,
 
-    // -- Source: mint route --
+    // -- Source: message / config --
     #[msg("action_idxs exceeds maximum allowed")]
     TooManyActionIdxs,
-
-    #[msg("Vault must be empty before closing route")]
-    VaultNotEmpty,
 
     #[msg("Allowed adapters list exceeds maximum")]
     TooManyAdapters,

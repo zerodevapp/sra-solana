@@ -214,6 +214,38 @@
           }
         }
       ]
+    },
+    {
+      "name": "update_slippage",
+      "discriminator": [
+        62,
+        148,
+        250,
+        172,
+        118,
+        36,
+        254,
+        125
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "sra_config"
+          ]
+        },
+        {
+          "name": "sra_config",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "allowed_slippage_bps",
+          "type": "u16"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -293,7 +325,8 @@
     {
       "name": "SraConfig",
       "docs": [
-        "One SRA per user per app. Per-mint routing via SraMintRoute child PDAs.",
+        "One SRA per user per app. Source deposits are owner-signed, so mutable",
+        "routing policy lives at account scope instead of in per-mint route PDAs.",
         "PDA seeds: [\"sra\", owner, config_hash, salt]",
         "config_hash = keccak256(borsh(owner, target_chain_id, target_handler, target_adapter, recipient, app_id))"
       ],
@@ -358,6 +391,10 @@
             "type": {
               "vec": "pubkey"
             }
+          },
+          {
+            "name": "allowed_slippage_bps",
+            "type": "u16"
           },
           {
             "name": "bump",
