@@ -5234,6 +5234,7 @@ dependencies = [
  "litesvm",
  "solana-program",
  "solana-sdk",
+ "solana-sdk-ids",
  "solana-system-interface",
  "sra-common",
 ]

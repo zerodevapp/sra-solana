@@ -187,6 +187,43 @@ fn validate_and_prepare_unregistered_adapter_rejected() {
 }
 
 #[test]
+fn validate_and_prepare_non_executable_adapter_rejected() {
+    let mut svm = setup_svm();
+    let mut fx = ValidatePrepareFixture::new(&mut svm);
+    let non_executable_adapter = funded_keypair(&mut svm, SOL);
+
+    let ix = update_adapters_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.sra_config,
+        vec![non_executable_adapter.pubkey()],
+    );
+    send_ix(&mut svm, ix, &fx.payer, &[&fx.owner]).expect("update adapters");
+
+    fx.adapter_program = non_executable_adapter.pubkey();
+    fx.accounts =
+        ValidatePrepareAccounts::derive(&fx.sra_config, &fx.source_mint, &fx.adapter_program);
+
+    let err = fx
+        .invoke(&mut svm, default_prepare_params(&fx))
+        .expect_err("non-executable adapter must reject")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::InvalidAdapterProgram.into()),
+        )
+    );
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.owner_ata),
+        OWNER_STARTING_BALANCE
+    );
+}
+
+#[test]
 fn validate_and_prepare_slippage_exceeded_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);

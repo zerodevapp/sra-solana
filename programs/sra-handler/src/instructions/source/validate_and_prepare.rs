@@ -3,6 +3,7 @@ use anchor_spl::{
     associated_token::AssociatedToken,
     token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked},
 };
+use solana_sdk_ids::{bpf_loader, bpf_loader_deprecated, bpf_loader_upgradeable, loader_v4};
 use sra_common::{
     abi::{
         abi_encode_sra_message, build_extra_envelope, bytes32_to_evm_address, source_token_hash,
@@ -15,6 +16,13 @@ use sra_common::{
 };
 
 use crate::events::DepositPrepared;
+
+fn is_program_owner(owner: &Pubkey) -> bool {
+    bpf_loader::check_id(owner)
+        || bpf_loader_deprecated::check_id(owner)
+        || bpf_loader_upgradeable::check_id(owner)
+        || loader_v4::check_id(owner)
+}
 
 /// IX 1 inputs: how much the owner is locking (`input_amount`), the minimum
 /// output they'll accept on the destination chain (`output_amount`), plus the
@@ -92,7 +100,8 @@ pub struct ValidateAndPrepare<'info> {
         associated_token::authority = adapter_authority,
     )]
     pub adapter_custody: Box<Account<'info, TokenAccount>>,
-    /// CHECK: enforced in-handler to be a member of `sra_config.allowed_adapters`.
+    /// CHECK: the handler enforces that this is an executable program id and a
+    /// member of `sra_config.allowed_adapters`.
     pub adapter_program: UncheckedAccount<'info>,
     #[account(
         has_one = sra_config,
@@ -120,7 +129,14 @@ pub(crate) fn handler(ctx: Context<ValidateAndPrepare>, params: PrepareParams) -
         SraError::TooManyActionIdxs
     );
 
-    // Step 0a — adapter is in the SRA's allowlist.
+    // Step 0a — adapter must be an executable program and be in the SRA's
+    // allowlist. This prevents a mistyped Pubkey from becoming custody owner.
+    require!(
+        !ctx.accounts.adapter_program.data_is_empty()
+            && ctx.accounts.adapter_program.executable
+            && is_program_owner(ctx.accounts.adapter_program.owner),
+        SraError::InvalidAdapterProgram
+    );
     let adapter_key = ctx.accounts.adapter_program.key();
     require!(
         ctx.accounts

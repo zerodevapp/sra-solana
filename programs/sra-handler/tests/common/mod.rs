@@ -488,7 +488,10 @@ impl ValidatePrepareFixture {
             6,
         );
 
-        let adapter_program = Pubkey::new_unique();
+        // `validate_and_prepare` now requires the adapter to be a loader-owned
+        // executable program account, so reuse the loaded handler program as a
+        // stand-in.
+        let adapter_program = PROGRAM_ID;
         let ix = update_adapters_ix(
             &payer.pubkey(),
             &owner.pubkey(),
