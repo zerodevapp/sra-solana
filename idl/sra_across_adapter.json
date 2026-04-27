@@ -22,5 +22,12 @@
       "accounts": [],
       "args": []
     }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "DepositNowSeedSerializationFailed",
+      "msg": "Failed to serialize deposit-now seed data"
+    }
   ]
 }
