@@ -2,67 +2,13 @@ mod common;
 
 use common::*;
 use solana_sdk::{instruction::InstructionError, signer::Signer, transaction::TransactionError};
-use sra_common::{
-    abi::{
-        abi_encode_sra_message, build_extra_envelope, bytes32_to_evm_address, source_token_hash,
-        u256_from_u64, DepositInfo, Message, TokenParam,
-    },
-    constants::{MAX_ACTION_IDXS, SOLANA_CHAIN_ID},
-    errors::SraError,
-};
+use sra_common::{constants::MAX_ACTION_IDXS, errors::SraError};
 use sra_handler::instructions::source::validate_and_prepare::PrepareParams;
 
 const INPUT: u64 = 1_000_000;
 // 50 bps slippage tolerance -> min acceptable = 995_000 for INPUT = 1_000_000.
 const OUTPUT_WITHIN_SLIPPAGE: u64 = 999_500;
 const DEFAULT_ACTION_IDXS: [u64; 2] = [3, 7];
-
-/// Byte-for-byte reproduction of what `validate_and_prepare` should emit as
-/// `DepositPrepared.message` for a given pre-increment nonce. Mirrors the
-/// instruction's Step 4 exactly; any drift here or in the on-chain encoder
-/// breaks this test immediately.
-fn expected_canonical_message(
-    fx: &ValidatePrepareFixture,
-    nonce: u64,
-    params: &PrepareParams,
-) -> Vec<u8> {
-    let target_adapter_evm = bytes32_to_evm_address(&fx.config.target_adapter).unwrap();
-    let target_handler_evm = bytes32_to_evm_address(&fx.config.target_handler).unwrap();
-    let target_token_evm = bytes32_to_evm_address(&params.target_token).unwrap();
-
-    let extra = build_extra_envelope(&target_adapter_evm, nonce);
-    let action_idxs: Vec<[u8; 32]> = params
-        .action_idxs
-        .iter()
-        .map(|&i| u256_from_u64(i))
-        .collect();
-
-    let msg = Message {
-        account: fx.config.recipient,
-        init_code: vec![],
-        deposit_info: DepositInfo {
-            deposit_param: TokenParam {
-                token: source_token_hash(&fx.source_mint),
-                amount: u256_from_u64(params.input_amount),
-            },
-            target_chain_id: u256_from_u64(fx.config.target_chain_id),
-            target_param: TokenParam {
-                token: target_token_evm,
-                amount: u256_from_u64(params.output_amount),
-            },
-            extra,
-        },
-        action_idxs,
-        app_id: fx.config.app_id,
-    };
-
-    abi_encode_sra_message(
-        &target_adapter_evm,
-        &target_handler_evm,
-        &u256_from_u64(SOLANA_CHAIN_ID),
-        &msg,
-    )
-}
 
 fn default_prepare_params(fx: &ValidatePrepareFixture) -> PrepareParams {
     PrepareParams {
@@ -104,7 +50,7 @@ fn validate_and_prepare_happy_path() {
     let nonce_state = fetch_mint_nonce(&svm, &fx.accounts.mint_nonce);
     assert_eq!(nonce_state.nonce, 1);
 
-    // DepositPrepared event emitted with the canonical message bytes.
+    // DepositPrepared event emitted with raw bytes32 routing inputs.
     let ev = extract_deposit_prepared(&meta.logs).expect("DepositPrepared event must be emitted");
     assert_eq!(ev.sra_config, fx.sra_config);
     assert_eq!(ev.source_mint, fx.source_mint);
@@ -112,12 +58,13 @@ fn validate_and_prepare_happy_path() {
     assert_eq!(ev.nonce, 0, "event carries the pre-increment nonce");
     assert_eq!(ev.input_amount, INPUT);
     assert_eq!(ev.output_amount, OUTPUT_WITHIN_SLIPPAGE);
-
-    let expected = expected_canonical_message(&fx, 0, &params);
-    assert_eq!(
-        ev.message, expected,
-        "emitted message must match abi_encode_sra_message byte-for-byte",
-    );
+    assert_eq!(ev.target_chain_id, fx.config.target_chain_id);
+    assert_eq!(ev.target_handler, fx.config.target_handler);
+    assert_eq!(ev.target_adapter, fx.config.target_adapter);
+    assert_eq!(ev.recipient, fx.config.recipient);
+    assert_eq!(ev.app_id, fx.config.app_id);
+    assert_eq!(ev.target_token, params.target_token);
+    assert_eq!(ev.action_idxs, params.action_idxs);
 }
 
 #[test]
@@ -336,11 +283,8 @@ fn validate_and_prepare_sequential_nonce_increments() {
             ev.nonce, expected_pre_nonce,
             "deposit #{expected_pre_nonce} carries pre-increment nonce",
         );
-        let expected_msg = expected_canonical_message(&fx, expected_pre_nonce, &params);
-        assert_eq!(
-            ev.message, expected_msg,
-            "deposit #{expected_pre_nonce} message must match byte-for-byte",
-        );
+        assert_eq!(ev.target_token, params.target_token);
+        assert_eq!(ev.action_idxs, params.action_idxs);
 
         let n = fetch_mint_nonce(&svm, &fx.accounts.mint_nonce);
         assert_eq!(

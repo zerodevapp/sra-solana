@@ -5,11 +5,7 @@ use anchor_spl::{
 };
 use solana_sdk_ids::{bpf_loader, bpf_loader_deprecated, bpf_loader_upgradeable, loader_v4};
 use sra_common::{
-    abi::{
-        abi_encode_sra_message, build_extra_envelope, bytes32_to_evm_address, source_token_hash,
-        u256_from_u64, DepositInfo, Message, TokenParam,
-    },
-    constants::{BPS_DENOMINATOR, MAX_ACTION_IDXS, SOLANA_CHAIN_ID},
+    constants::{BPS_DENOMINATOR, MAX_ACTION_IDXS},
     errors::SraError,
     seeds::{config_hash, SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_SRA},
     types::{AddressBookEntry, MintNonce, SraConfig},
@@ -37,8 +33,8 @@ pub struct PrepareParams {
 
 /// Source-side deposit IX. Validates the SRA + per-call routing inputs, pulls
 /// the owner's tokens through the SRA vault into adapter custody, and emits
-/// the canonical ABI-encoded message bytes that IX 2 (`execute_deposit_across`)
-/// will re-derive before CPI'ing into Across.
+/// the raw routing inputs that IX 2 or an off-chain relayer needs to build a
+/// target-specific bridge message.
 ///
 /// **Not standalone.** This is the first instruction of a 2-IX versioned
 /// transaction. Step 13 adds IX 2 attestation via the `instructions_sysvar`
@@ -191,50 +187,10 @@ pub(crate) fn handler(ctx: Context<ValidateAndPrepare>, params: PrepareParams) -
         SraError::SlippageExceeded
     );
 
-    // Step 4 — build the canonical ABI message using the *current* (pre-bump)
-    // nonce. IX 2 will read the (already bumped) nonce, subtract 1, and
-    // reproduce this same byte sequence.
-    let target_adapter_evm = bytes32_to_evm_address(&ctx.accounts.sra_config.target_adapter)
-        .map_err(|_| error!(SraError::InvalidEvmAddress))?;
-    let target_handler_evm = bytes32_to_evm_address(&ctx.accounts.sra_config.target_handler)
-        .map_err(|_| error!(SraError::InvalidEvmAddress))?;
-    let target_token_evm = bytes32_to_evm_address(&params.target_token)
-        .map_err(|_| error!(SraError::InvalidEvmAddress))?;
-
+    // Step 4 — capture the pre-bump nonce. Target-specific adapters can use
+    // this plus the raw bytes32 routing fields from the event to derive their
+    // own message shape later without forcing EVM address semantics here.
     let nonce_now = ctx.accounts.mint_nonce.nonce;
-    let extra = build_extra_envelope(&target_adapter_evm, nonce_now);
-
-    let action_idxs: Vec<[u8; 32]> = params
-        .action_idxs
-        .iter()
-        .map(|&i| u256_from_u64(i))
-        .collect();
-
-    let canonical_msg = Message {
-        account: ctx.accounts.sra_config.recipient,
-        init_code: Vec::new(),
-        deposit_info: DepositInfo {
-            deposit_param: TokenParam {
-                token: source_token_hash(&ctx.accounts.source_mint.key()),
-                amount: u256_from_u64(params.input_amount),
-            },
-            target_chain_id: u256_from_u64(ctx.accounts.sra_config.target_chain_id),
-            target_param: TokenParam {
-                token: target_token_evm,
-                amount: u256_from_u64(params.output_amount),
-            },
-            extra,
-        },
-        action_idxs,
-        app_id: ctx.accounts.sra_config.app_id,
-    };
-    let source_chain_id_bytes = u256_from_u64(SOLANA_CHAIN_ID);
-    let encoded_message = abi_encode_sra_message(
-        &target_adapter_evm,
-        &target_handler_evm,
-        &source_chain_id_bytes,
-        &canonical_msg,
-    );
 
     // Step 5 — transfer SRA vault → adapter custody, signed by the SRA PDA.
     {
@@ -277,14 +233,18 @@ pub(crate) fn handler(ctx: Context<ValidateAndPrepare>, params: PrepareParams) -
     }
 
     // Step 6 — bump the nonce so IX 2 can recover `nonce_now` as `nonce - 1`.
+    // Stamp the PDA bump only on first init; `init_if_needed` zero-fills the
+    // account, and a canonical PDA bump of zero is statistically impossible.
     let mint_nonce = &mut ctx.accounts.mint_nonce;
-    mint_nonce.bump = ctx.bumps.mint_nonce;
+    if mint_nonce.bump == 0 {
+        mint_nonce.bump = ctx.bumps.mint_nonce;
+    }
     mint_nonce.nonce = mint_nonce
         .nonce
         .checked_add(1)
         .ok_or(SraError::ArithmeticOverflow)?;
 
-    // Step 7 — emit the canonical message bytes for off-chain observers.
+    // Step 7 — emit the raw routing fields for off-chain observers.
     emit!(DepositPrepared {
         sra_config: ctx.accounts.sra_config.key(),
         source_mint: ctx.accounts.source_mint.key(),
@@ -292,7 +252,13 @@ pub(crate) fn handler(ctx: Context<ValidateAndPrepare>, params: PrepareParams) -
         nonce: nonce_now,
         input_amount: params.input_amount,
         output_amount: params.output_amount,
-        message: encoded_message,
+        target_chain_id: ctx.accounts.sra_config.target_chain_id,
+        target_handler: ctx.accounts.sra_config.target_handler,
+        target_adapter: ctx.accounts.sra_config.target_adapter,
+        recipient: ctx.accounts.sra_config.recipient,
+        app_id: ctx.accounts.sra_config.app_id,
+        target_token: params.target_token,
+        action_idxs: params.action_idxs,
     });
 
     Ok(())

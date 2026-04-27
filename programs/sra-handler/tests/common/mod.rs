@@ -70,29 +70,8 @@ pub fn sample_config() -> SraInitConfig {
     }
 }
 
-/// `sample_config`-shaped SraInitConfig whose `target_handler` /
-/// `target_adapter` are valid EVM-padded bytes32 values (upper 12 bytes zero).
-/// Required by `validate_and_prepare`, which converts them to 20-byte EVM
-/// addresses when building the canonical ABI message.
-pub fn evm_destination_config() -> SraInitConfig {
-    let mut target_handler = [0u8; 32];
-    target_handler[12..].copy_from_slice(&[0x11u8; 20]);
-    let mut target_adapter = [0u8; 32];
-    target_adapter[12..].copy_from_slice(&[0x22u8; 20]);
-    SraInitConfig {
-        target_chain_id: 42161,
-        target_handler,
-        target_adapter,
-        recipient: [0x33u8; 32],
-        app_id: [0x44u8; 32],
-    }
-}
-
-/// EVM-padded `target_token` (20 bytes of 0xAB, upper 12 bytes zero).
-pub fn evm_target_token() -> [u8; 32] {
-    let mut t = [0u8; 32];
-    t[12..].copy_from_slice(&[0xABu8; 20]);
-    t
+pub fn sample_target_token() -> [u8; 32] {
+    [0xAB; 32]
 }
 
 pub fn derive_sra_pda(owner: &Pubkey, config: &SraInitConfig, salt: &[u8; 32]) -> (Pubkey, u8) {
@@ -463,7 +442,7 @@ impl ValidatePrepareFixture {
         let payer = funded_keypair(svm, 100 * SOL);
         let owner = funded_keypair(svm, SOL);
 
-        let config = evm_destination_config();
+        let config = sample_config();
         let salt = [0xABu8; 32];
         let (sra_config, _) = derive_sra_pda(&owner.pubkey(), &config, &salt);
         let ix = initialize_sra_ix(
@@ -477,7 +456,7 @@ impl ValidatePrepareFixture {
 
         let source_mint = create_mint(svm, &payer, &payer.pubkey(), 6);
         let target_chain_id = config.target_chain_id;
-        let target_token = evm_target_token();
+        let target_token = sample_target_token();
         setup_address_book_entry(
             svm,
             &payer,
