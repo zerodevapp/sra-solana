@@ -30,6 +30,7 @@ sra-common = { path = "../../crates/sra-common" }
 
 [dev-dependencies]
 litesvm = "0.7.1"
+litesvm-token = "0.7.1"
 solana-sdk = "2.3"
 solana-system-interface = "1.0"
 base64 = "0.22"

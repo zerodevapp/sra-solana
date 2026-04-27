@@ -6,25 +6,23 @@
 
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
 use anchor_spl::{
-    associated_token::{
-        get_associated_token_address, spl_associated_token_account, ID as ATA_PROGRAM_ID,
-    },
-    token::{
-        spl_token::{self, state::Mint as SplMint},
-        ID as TOKEN_PROGRAM_ID,
-    },
+    associated_token::{get_associated_token_address, ID as ATA_PROGRAM_ID},
+    token::ID as TOKEN_PROGRAM_ID,
 };
 use litesvm::LiteSVM;
+use litesvm_token::{
+    get_spl_account, spl_token::state::Account as SplTokenAccount, CreateAssociatedTokenAccount,
+    CreateMint, MintTo,
+};
 use solana_sdk::{
     instruction::Instruction,
     message::Message,
-    program_pack::Pack,
     pubkey::Pubkey,
     signature::Keypair,
     signer::Signer,
     transaction::{Transaction, TransactionError},
 };
-use solana_system_interface::{instruction as system_instruction, program as system_program};
+use solana_system_interface::program as system_program;
 use sra_common::{
     seeds::{SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_SRA},
     types::{AddressBookEntry, MintNonce, SraConfig},
@@ -262,47 +260,18 @@ pub fn create_mint(
     mint_authority: &Pubkey,
     decimals: u8,
 ) -> Pubkey {
-    let mint = Keypair::new();
-    let rent = svm
-        .minimum_balance_for_rent_exemption(SplMint::LEN)
-        .max(2_000_000);
-
-    let create_acct_ix = system_instruction::create_account(
-        &payer.pubkey(),
-        &mint.pubkey(),
-        rent,
-        SplMint::LEN as u64,
-        &TOKEN_PROGRAM_ID,
-    );
-    let init_mint_ix = spl_token::instruction::initialize_mint(
-        &TOKEN_PROGRAM_ID,
-        &mint.pubkey(),
-        mint_authority,
-        None,
-        decimals,
-    )
-    .expect("initialize_mint instruction");
-
-    svm.expire_blockhash();
-    let blockhash = svm.latest_blockhash();
-    let msg = Message::new(&[create_acct_ix, init_mint_ix], Some(&payer.pubkey()));
-    let mut tx = Transaction::new_unsigned(msg);
-    tx.sign(&[payer, &mint], blockhash);
-    svm.send_transaction(tx)
-        .expect("create_mint should succeed");
-    mint.pubkey()
+    CreateMint::new(svm, payer)
+        .authority(mint_authority)
+        .decimals(decimals)
+        .send()
+        .expect("create_mint should succeed")
 }
 
 pub fn create_ata(svm: &mut LiteSVM, payer: &Keypair, owner: &Pubkey, mint: &Pubkey) -> Pubkey {
-    let ata = derive_ata(owner, mint);
-    let ix = spl_associated_token_account::instruction::create_associated_token_account(
-        &payer.pubkey(),
-        owner,
-        mint,
-        &TOKEN_PROGRAM_ID,
-    );
-    send_ix(svm, ix, payer, &[]).expect("create_associated_token_account should succeed");
-    ata
+    CreateAssociatedTokenAccount::new(svm, payer, mint)
+        .owner(owner)
+        .send()
+        .expect("create_associated_token_account should succeed")
 }
 
 pub fn mint_to(
@@ -313,22 +282,16 @@ pub fn mint_to(
     to: &Pubkey,
     amount: u64,
 ) {
-    let ix = spl_token::instruction::mint_to(
-        &TOKEN_PROGRAM_ID,
-        mint,
-        to,
-        &mint_authority.pubkey(),
-        &[],
-        amount,
-    )
-    .expect("mint_to instruction");
-    send_ix(svm, ix, payer, &[mint_authority]).expect("mint_to should succeed");
+    MintTo::new(svm, payer, mint, to, amount)
+        .owner(mint_authority)
+        .send()
+        .expect("mint_to should succeed");
 }
 
 pub fn fetch_token_balance(svm: &LiteSVM, ata: &Pubkey) -> u64 {
-    let acct = svm.get_account(ata).expect("token account exists");
-    let parsed = spl_token::state::Account::unpack(&acct.data).expect("valid SPL TokenAccount");
-    parsed.amount
+    get_spl_account::<SplTokenAccount>(svm, ata)
+        .expect("token account exists")
+        .amount
 }
 
 /// Creates (or overwrites) an `AddressBookEntry` owned by `owner`. `decimals == 0`
@@ -548,7 +511,7 @@ pub fn extract_deposit_prepared(logs: &[String]) -> Option<sra_handler::events::
 
     let engine = base64::engine::general_purpose::STANDARD;
     let expected_disc: &[u8] =
-        <sra_handler::events::DepositPrepared as Discriminator>::DISCRIMINATOR.as_ref();
+        <sra_handler::events::DepositPrepared as Discriminator>::DISCRIMINATOR;
 
     for log in logs {
         let Some(b64) = log.strip_prefix("Program data: ") else {
