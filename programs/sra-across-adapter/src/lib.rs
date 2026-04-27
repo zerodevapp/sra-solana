@@ -1,6 +1,8 @@
 use anchor_lang::prelude::*;
 
-pub mod deposit_now;
+pub mod utils;
+
+pub use utils::*;
 
 declare_id!("8n167Xs4Xx7zEq5fuyCDVgYd3vUjFmHAkGTdK2SCpmXD");
 

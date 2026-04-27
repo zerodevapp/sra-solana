@@ -1,0 +1,111 @@
+{
+  "address": "DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru",
+  "metadata": {
+    "name": "svm_spoke",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Minimal Across SVM Spoke IDL surface for deposit_now CPI"
+  },
+  "instructions": [
+    {
+      "name": "deposit_now",
+      "discriminator": [
+        75,
+        228,
+        135,
+        221,
+        200,
+        25,
+        148,
+        26
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "state",
+          "writable": true
+        },
+        {
+          "name": "delegate"
+        },
+        {
+          "name": "depositor_token_account",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "associated_token_program"
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "depositor",
+          "type": "pubkey"
+        },
+        {
+          "name": "recipient",
+          "type": "pubkey"
+        },
+        {
+          "name": "input_token",
+          "type": "pubkey"
+        },
+        {
+          "name": "output_token",
+          "type": "pubkey"
+        },
+        {
+          "name": "input_amount",
+          "type": "u64"
+        },
+        {
+          "name": "output_amount",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "destination_chain_id",
+          "type": "u64"
+        },
+        {
+          "name": "exclusive_relayer",
+          "type": "pubkey"
+        },
+        {
+          "name": "fill_deadline_offset",
+          "type": "u32"
+        },
+        {
+          "name": "exclusivity_period",
+          "type": "u32"
+        },
+        {
+          "name": "message",
+          "type": {
+            "vec": "u8"
+          }
+        }
+      ]
+    }
+  ]
+}

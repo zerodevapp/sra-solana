@@ -60,6 +60,7 @@ pub fn deposit_now_delegate(program_id: &Pubkey, params: &DepositNowParams) -> D
 mod tests {
     use super::*;
     use sra_common::{abi::u256_from_u64, constants::ACROSS_SPOKE_POOL_ID};
+    use std::str::FromStr;
 
     fn sample_params() -> DepositNowParams {
         DepositNowParams {
@@ -94,27 +95,47 @@ mod tests {
         out
     }
 
+    fn encode_hex(bytes: &[u8]) -> String {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut out = String::with_capacity(bytes.len() * 2);
+        for byte in bytes {
+            out.push(HEX[(byte >> 4) as usize] as char);
+            out.push(HEX[(byte & 0x0f) as usize] as char);
+        }
+        out
+    }
+
+    #[test]
+    fn compute_seed_hash_deterministic() {
+        let params = sample_params();
+        assert_eq!(
+            deposit_now_seed_hash(&params),
+            deposit_now_seed_hash(&params)
+        );
+    }
+
     #[test]
     fn deposit_now_seed_hash_matches_across_layout() {
         let params = sample_params();
         let expected = keccak_hash(&manual_seed_preimage(&params)).to_bytes();
-        assert_eq!(deposit_now_seed_hash(&params), expected);
+        let derived = deposit_now_seed_hash(&params);
+        assert_eq!(derived, expected);
+        assert_eq!(
+            encode_hex(&derived),
+            "2f78ae0f689327fc3e04359f81a12db6c0e105259be0ee7db75e6b060d8f49f1"
+        );
     }
 
     #[test]
-    fn deposit_now_delegate_matches_pda_derivation() {
+    fn derive_delegate_pda_matches_across_vector() {
         let params = sample_params();
-        let seed_hash = keccak_hash(&manual_seed_preimage(&params)).to_bytes();
-        let (expected_pda, expected_bump) = Pubkey::find_program_address(
-            &[DELEGATE_SEED_PREFIX, seed_hash.as_ref()],
-            &ACROSS_SPOKE_POOL_ID,
-        );
-
         let derived = deposit_now_delegate(&ACROSS_SPOKE_POOL_ID, &params);
-
-        assert_eq!(derived.seed_hash, seed_hash);
-        assert_eq!(derived.pda, expected_pda);
-        assert_eq!(derived.bump, expected_bump);
+        assert_eq!(derived.seed_hash, deposit_now_seed_hash(&params));
+        assert_eq!(
+            derived.pda,
+            Pubkey::from_str("DXnWShwq4fnWimLiwBNbQG1UAVaCL1pWX4SeV9y5HrjD").unwrap()
+        );
+        assert_eq!(derived.bump, 255);
     }
 
     #[test]
