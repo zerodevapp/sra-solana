@@ -37,9 +37,7 @@ pub struct PrepareParams {
 /// target-specific bridge message.
 ///
 /// **Not standalone.** This is the first instruction of a 2-IX versioned
-/// transaction. Step 13 adds IX 2 attestation via the `instructions_sysvar`
-/// account — it's included here so the account layout (and therefore Step 13's
-/// `handler_ix_layout` index constants) is stable across both commits.
+/// transaction.
 ///
 /// Every Anchor `Account<'info, T>` is boxed to keep Anchor-generated
 /// `try_accounts` within the 4 KB on-chain stack budget. With 8 accounts
@@ -113,7 +111,7 @@ pub struct ValidateAndPrepare<'info> {
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
-    /// CHECK: pinned to the Instructions sysvar. Step 13 will read this for
+    /// CHECK: pinned to the Instructions sysvar. next we'll will read this for
     /// IX 2 attestation; the handler doesn't touch it yet.
     #[account(address = instructions::ID)]
     pub instructions_sysvar: UncheckedAccount<'info>,
@@ -126,7 +124,7 @@ pub(crate) fn handler(ctx: Context<ValidateAndPrepare>, params: PrepareParams) -
     );
 
     // Step 0a — adapter must be an executable program and be in the SRA's
-    // allowlist. This prevents a mistyped Pubkey from becoming custody owner.
+    // allowlist.
     require!(
         !ctx.accounts.adapter_program.data_is_empty()
             && ctx.accounts.adapter_program.executable
@@ -151,7 +149,7 @@ pub(crate) fn handler(ctx: Context<ValidateAndPrepare>, params: PrepareParams) -
         SraError::InvalidAddressBook
     );
 
-    // Step 0c — IX 2 attestation: wired in Step 13.
+    // Step 0c — IX 2 attestation: TODO
 
     // Step 1 — adapter_authority PDA validation: enforced declaratively by
     // the `seeds` constraint on the Accounts struct.
