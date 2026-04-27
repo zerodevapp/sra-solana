@@ -1,8 +1,11 @@
-use anchor_lang::prelude::*;
+use anchor_lang::{error, prelude::*};
 use solana_program::keccak::hash as keccak_hash;
+
+use crate::errors::AcrossAdapterError;
 
 /// Seed prefix the Across SVM Spoke program uses for delegate signer PDAs.
 pub const DELEGATE_SEED_PREFIX: &[u8] = b"delegate";
+const DEPOSIT_NOW_FIXED_SERIALIZED_LEN: usize = (32 * 4) + 8 + 32 + 8 + 32 + 4 + 4 + 4;
 
 /// Deposit-now inputs that participate in Across's delegate seed hash.
 #[derive(AnchorSerialize, Clone, Debug, PartialEq, Eq)]
@@ -27,17 +30,14 @@ pub struct DelegateDerivation {
     pub bump: u8,
 }
 
-fn anchor_serialize_keccak<T: AnchorSerialize>(value: &T) -> [u8; 32] {
-    let mut serialized = Vec::new();
-    value
-        .serialize(&mut serialized)
-        .expect("serializing deposit-now seed data cannot fail");
-    keccak_hash(&serialized).to_bytes()
-}
-
 /// `keccak256(anchor_serialize(deposit_now_args))`, matching Across's SVM Spoke.
-pub fn deposit_now_seed_hash(params: &DepositNowParams) -> [u8; 32] {
-    anchor_serialize_keccak(params)
+pub fn deposit_now_seed_hash(params: &DepositNowParams) -> Result<[u8; 32]> {
+    let mut serialized =
+        Vec::with_capacity(DEPOSIT_NOW_FIXED_SERIALIZED_LEN + params.message.len());
+    params
+        .serialize(&mut serialized)
+        .map_err(|_| error!(AcrossAdapterError::DepositNowSeedSerializationFailed))?;
+    Ok(keccak_hash(&serialized).to_bytes())
 }
 
 /// Across delegates token movement to a PDA derived as `["delegate", seed_hash]`.
@@ -52,8 +52,11 @@ pub fn delegate_pda(program_id: &Pubkey, seed_hash: [u8; 32]) -> DelegateDerivat
 }
 
 /// Convenience helper for the exact delegate signer needed by `deposit_now(...)`.
-pub fn deposit_now_delegate(program_id: &Pubkey, params: &DepositNowParams) -> DelegateDerivation {
-    delegate_pda(program_id, deposit_now_seed_hash(params))
+pub fn deposit_now_delegate(
+    program_id: &Pubkey,
+    params: &DepositNowParams,
+) -> Result<DelegateDerivation> {
+    Ok(delegate_pda(program_id, deposit_now_seed_hash(params)?))
 }
 
 #[cfg(test)]
@@ -79,7 +82,7 @@ mod tests {
     }
 
     fn manual_seed_preimage(params: &DepositNowParams) -> Vec<u8> {
-        let mut out = Vec::with_capacity(192 + params.message.len());
+        let mut out = Vec::with_capacity(DEPOSIT_NOW_FIXED_SERIALIZED_LEN + params.message.len());
         out.extend_from_slice(params.depositor.as_ref());
         out.extend_from_slice(params.recipient.as_ref());
         out.extend_from_slice(params.input_token.as_ref());
@@ -109,8 +112,8 @@ mod tests {
     fn compute_seed_hash_deterministic() {
         let params = sample_params();
         assert_eq!(
-            deposit_now_seed_hash(&params),
-            deposit_now_seed_hash(&params)
+            deposit_now_seed_hash(&params).unwrap(),
+            deposit_now_seed_hash(&params).unwrap()
         );
     }
 
@@ -118,7 +121,7 @@ mod tests {
     fn deposit_now_seed_hash_matches_across_layout() {
         let params = sample_params();
         let expected = keccak_hash(&manual_seed_preimage(&params)).to_bytes();
-        let derived = deposit_now_seed_hash(&params);
+        let derived = deposit_now_seed_hash(&params).unwrap();
         assert_eq!(derived, expected);
         assert_eq!(
             encode_hex(&derived),
@@ -129,8 +132,8 @@ mod tests {
     #[test]
     fn derive_delegate_pda_matches_across_vector() {
         let params = sample_params();
-        let derived = deposit_now_delegate(&ACROSS_SPOKE_POOL_ID, &params);
-        assert_eq!(derived.seed_hash, deposit_now_seed_hash(&params));
+        let derived = deposit_now_delegate(&ACROSS_SPOKE_POOL_ID, &params).unwrap();
+        assert_eq!(derived.seed_hash, deposit_now_seed_hash(&params).unwrap());
         assert_eq!(
             derived.pda,
             Pubkey::from_str("DXnWShwq4fnWimLiwBNbQG1UAVaCL1pWX4SeV9y5HrjD").unwrap()
@@ -141,9 +144,9 @@ mod tests {
     #[test]
     fn deposit_now_seed_hash_changes_with_inputs() {
         let mut params = sample_params();
-        let initial = deposit_now_seed_hash(&params);
+        let initial = deposit_now_seed_hash(&params).unwrap();
 
         params.fill_deadline_offset += 1;
-        assert_ne!(deposit_now_seed_hash(&params), initial);
+        assert_ne!(deposit_now_seed_hash(&params).unwrap(), initial);
     }
 }
