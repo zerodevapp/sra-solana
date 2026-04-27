@@ -6,7 +6,10 @@ use anchor_lang::prelude::*;
 declare_id!("Gte7LViTnE2UixBF59Xfu2sSqcmHhMNANj42yUkYpkdo");
 
 pub mod abi;
+pub mod adapter_ix_layout;
 pub mod constants;
 pub mod errors;
+pub mod handler_ix_layout;
+pub mod ix_attestation;
 pub mod seeds;
 pub mod types;

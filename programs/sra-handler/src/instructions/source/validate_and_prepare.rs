@@ -7,11 +7,13 @@ use solana_sdk_ids::{bpf_loader, bpf_loader_deprecated, bpf_loader_upgradeable, 
 use sra_common::{
     constants::{BPS_DENOMINATOR, MAX_ACTION_IDXS},
     errors::SraError,
+    ix_attestation::Routing,
     seeds::{config_hash, SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_SRA},
     types::{AddressBookEntry, MintNonce, SraConfig},
 };
 
 use crate::events::DepositPrepared;
+use crate::utils::ix_attestation::verify_adapter_ix;
 
 fn is_program_owner(owner: &Pubkey) -> bool {
     bpf_loader::check_id(owner)
@@ -38,15 +40,9 @@ pub struct PrepareParams {
 ///
 /// **Not standalone.** This is the first instruction of a 2-IX versioned
 /// transaction.
-///
-/// Every Anchor `Account<'info, T>` is boxed to keep Anchor-generated
-/// `try_accounts` within the 4 KB on-chain stack budget. With 8 accounts
-/// (including `SraConfig`'s variable-sized `allowed_adapters` Vec and three
-/// `TokenAccount`s) the unboxed struct overflows by ~100 bytes.
 #[derive(Accounts)]
 #[instruction(params: PrepareParams)]
 pub struct ValidateAndPrepare<'info> {
-    /// Pays tx fees. Separated from `owner` to enable gas sponsorship.
     #[account(mut)]
     pub fee_payer: Signer<'info>,
     /// Owns the source ATA and authorizes the user->vault transfer.
@@ -111,7 +107,7 @@ pub struct ValidateAndPrepare<'info> {
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
-    /// CHECK: pinned to the Instructions sysvar. next we'll will read this for
+    /// CHECK: pinned to the Instructions sysvar. TODO we'll will read this for
     /// IX 2 attestation; the handler doesn't touch it yet.
     #[account(address = instructions::ID)]
     pub instructions_sysvar: UncheckedAccount<'info>,
@@ -149,7 +145,23 @@ pub(crate) fn handler(ctx: Context<ValidateAndPrepare>, params: PrepareParams) -
         SraError::InvalidAddressBook
     );
 
-    // Step 0c — IX 2 attestation: TODO
+    // Step 0c — IX 2 attestation. The next instruction must be the nominated
+    // adapter's `execute_deposit_across` for this SRA, with byte-identical
+    // routing fields. Without this check, an attacker could pair an honest
+    // IX 1 (which moves the owner's tokens into adapter custody) with an
+    // IX 2 that drains them along a different path or to a different SRA.
+    let routing = Routing {
+        input_amount: params.input_amount,
+        output_amount: params.output_amount,
+        target_token: &params.target_token,
+        action_idxs: &params.action_idxs,
+    };
+    verify_adapter_ix(
+        &ctx.accounts.instructions_sysvar,
+        &adapter_key,
+        &ctx.accounts.sra_config.key(),
+        &routing,
+    )?;
 
     // Step 1 — adapter_authority PDA validation: enforced declaratively by
     // the `seeds` constraint on the Accounts struct.
@@ -185,9 +197,7 @@ pub(crate) fn handler(ctx: Context<ValidateAndPrepare>, params: PrepareParams) -
         SraError::SlippageExceeded
     );
 
-    // Step 4 — capture the pre-bump nonce. Target-specific adapters can use
-    // this plus the raw bytes32 routing fields from the event to derive their
-    // own message shape later without forcing EVM address semantics here.
+    // Step 4 — capture the pre-bump nonce.
     let nonce_now = ctx.accounts.mint_nonce.nonce;
 
     // Step 5 — transfer SRA vault → adapter custody, signed by the SRA PDA.

@@ -2,6 +2,7 @@ mod common;
 
 use common::*;
 use solana_sdk::{instruction::InstructionError, signer::Signer, transaction::TransactionError};
+use solana_system_interface::program as system_program;
 use sra_common::{constants::MAX_ACTION_IDXS, errors::SraError};
 use sra_handler::instructions::source::validate_and_prepare::PrepareParams;
 
@@ -151,8 +152,11 @@ fn validate_and_prepare_non_executable_adapter_rejected() {
     fx.accounts =
         ValidatePrepareAccounts::derive(&fx.sra_config, &fx.source_mint, &fx.adapter_program);
 
+    // Skip the default 2-IX flow: IX 2 would dispatch to the non-executable
+    // account and the runtime would reject the tx before IX 1's
+    // `InvalidAdapterProgram` check fires.
     let err = fx
-        .invoke(&mut svm, default_prepare_params(&fx))
+        .invoke_standalone(&mut svm, default_prepare_params(&fx))
         .expect_err("non-executable adapter must reject")
         .err
         .clone();
@@ -258,6 +262,120 @@ fn validate_and_prepare_insufficient_balance_rejected() {
     assert_eq!(
         fetch_token_balance(&svm, &fx.owner_ata),
         OWNER_STARTING_BALANCE
+    );
+}
+
+#[test]
+fn validate_and_prepare_standalone_rejected() {
+    // IX 1 alone in a tx — `verify_adapter_ix`'s `get_instruction_relative(+1)`
+    // returns no instruction; the wrapper maps that to
+    // `InvalidFollowingInstruction`. Tokens must never move.
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+
+    let err = fx
+        .invoke_standalone(&mut svm, default_prepare_params(&fx))
+        .expect_err("standalone IX 1 must reject")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::InvalidFollowingInstruction.into()),
+        )
+    );
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.owner_ata),
+        OWNER_STARTING_BALANCE,
+        "standalone IX 1 must not move tokens",
+    );
+    // adapter_custody is `init_if_needed` — it would only be created mid-IX 1,
+    // and only after `verify_adapter_ix` has already passed. With the
+    // standalone rejection happening at Step 0c the custody account is never
+    // initialized, so we don't read its balance here.
+}
+
+#[test]
+fn validate_and_prepare_wrong_next_ix_adapter_rejected() {
+    // IX 1 nominates the registered adapter, but IX 2 targets a different
+    // program (system program). verify_adapter_ix sees the program-id
+    // mismatch and rejects IX 1 before tokens move.
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+
+    let params = default_prepare_params(&fx);
+    let address_book_entry = fx.address_book_entry(&params.target_token);
+    let ix1 = validate_and_prepare_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.accounts,
+        &fx.owner_ata,
+        &address_book_entry,
+        params.clone(),
+    );
+    let ix2 = build_synthetic_adapter_ix(&system_program::ID, &fx.sra_config, &params);
+
+    let err = send_two_ixes(&mut svm, &fx.payer, &fx.owner, ix1, ix2)
+        .expect_err("wrong adapter program in IX 2 must reject")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::InvalidFollowingInstruction.into()),
+        )
+    );
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.owner_ata),
+        OWNER_STARTING_BALANCE,
+        "tokens must not move when IX 2 nominates wrong adapter",
+    );
+}
+
+#[test]
+fn validate_and_prepare_wrong_next_ix_routing_rejected() {
+    // IX 2 has the right program + discriminator + sra_config, but its
+    // `target_token` differs from IX 1's. The routing byte-comparison must
+    // catch this.
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+
+    let params = default_prepare_params(&fx);
+    let address_book_entry = fx.address_book_entry(&params.target_token);
+    let ix1 = validate_and_prepare_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.accounts,
+        &fx.owner_ata,
+        &address_book_entry,
+        params.clone(),
+    );
+    let mismatched = PrepareParams {
+        target_token: [0xFF; 32],
+        ..params.clone()
+    };
+    let ix2 = build_synthetic_adapter_ix(&fx.adapter_program, &fx.sra_config, &mismatched);
+
+    let err = send_two_ixes(&mut svm, &fx.payer, &fx.owner, ix1, ix2)
+        .expect_err("mismatched routing in IX 2 must reject")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::InvalidFollowingInstruction.into()),
+        )
+    );
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.owner_ata),
+        OWNER_STARTING_BALANCE,
+        "tokens must not move when IX 2 routing differs",
     );
 }
 

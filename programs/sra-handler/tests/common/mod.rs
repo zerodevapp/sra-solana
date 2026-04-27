@@ -4,7 +4,7 @@
 // IX builders mirror the on-chain accounts + args shape, which exceeds clippy's default.
 #![allow(clippy::too_many_arguments)]
 
-use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
+use anchor_lang::{prelude::pubkey, AccountDeserialize, InstructionData, ToAccountMetas};
 use anchor_spl::{
     associated_token::{get_associated_token_address, ID as ATA_PROGRAM_ID},
     token::ID as TOKEN_PROGRAM_ID,
@@ -24,6 +24,7 @@ use solana_sdk::{
 };
 use solana_system_interface::program as system_program;
 use sra_common::{
+    adapter_ix_layout,
     seeds::{SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_SRA},
     types::{AddressBookEntry, MintNonce, SraConfig},
 };
@@ -33,22 +34,37 @@ use sra_handler::instructions::source::{
 use std::{fs, path::PathBuf};
 
 pub const PROGRAM_ID: Pubkey = sra_handler::ID;
+/// Hardcoded so this test crate doesn't need a dev-dep on sra-across-adapter.
+/// Must stay in sync with `sra-across-adapter/src/lib.rs::declare_id!`.
+pub const ADAPTER_PROGRAM_ID: Pubkey = pubkey!("8n167Xs4Xx7zEq5fuyCDVgYd3vUjFmHAkGTdK2SCpmXD");
 pub const SOL: u64 = 1_000_000_000;
 
 fn program_so_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/sra_handler.so")
 }
 
+fn adapter_so_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/deploy/sra_across_adapter.so")
+}
+
 pub fn setup_svm() -> LiteSVM {
     let mut svm = LiteSVM::new();
-    let so_path = program_so_path();
-    let so = fs::read(&so_path).unwrap_or_else(|err| {
+    let handler_so = fs::read(program_so_path()).unwrap_or_else(|err| {
         panic!(
-            "failed to read program binary at {}: {err}. Run `anchor build` first.",
-            so_path.display()
+            "failed to read sra_handler binary at {}: {err}. Run `anchor build` first.",
+            program_so_path().display()
         )
     });
-    svm.add_program(PROGRAM_ID, so.as_slice()).unwrap();
+    svm.add_program(PROGRAM_ID, handler_so.as_slice()).unwrap();
+    let adapter_so = fs::read(adapter_so_path()).unwrap_or_else(|err| {
+        panic!(
+            "failed to read sra_across_adapter binary at {}: {err}. Run `anchor build` first.",
+            adapter_so_path().display()
+        )
+    });
+    svm.add_program(ADAPTER_PROGRAM_ID, adapter_so.as_slice())
+        .unwrap();
     svm
 }
 
@@ -430,10 +446,12 @@ impl ValidatePrepareFixture {
             6,
         );
 
-        // `validate_and_prepare` now requires the adapter to be a loader-owned
-        // executable program account, so reuse the loaded handler program as a
-        // stand-in.
-        let adapter_program = PROGRAM_ID;
+        // After Step 13 wired `verify_adapter_ix` into the handler, the
+        // registered adapter must be a real BPF program that recognizes
+        // `execute_deposit_across`. `setup_svm` now also loads
+        // `sra_across_adapter`, whose Step-13 stub no-ops the IX so 2-IX
+        // happy-path tests can complete.
+        let adapter_program = ADAPTER_PROGRAM_ID;
         let ix = update_adapters_ix(
             &payer.pubkey(),
             &owner.pubkey(),
@@ -475,7 +493,40 @@ impl ValidatePrepareFixture {
         derive_address_book_pda(&self.sra_config, self.target_chain_id, target_token).0
     }
 
+    /// Default 2-IX flow: validate_and_prepare + matching synthetic
+    /// execute_deposit_across. Used by every test that needs IX 1 to clear
+    /// `verify_adapter_ix` and reach later checks (slippage, SPL transfer,
+    /// nonce increment).
     pub fn invoke(
+        &self,
+        svm: &mut LiteSVM,
+        params: PrepareParams,
+    ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
+    {
+        let address_book_entry = self.address_book_entry(&params.target_token);
+        let ix1 = validate_and_prepare_ix(
+            &self.payer.pubkey(),
+            &self.owner.pubkey(),
+            &self.accounts,
+            &self.owner_ata,
+            &address_book_entry,
+            params.clone(),
+        );
+        let ix2 =
+            build_synthetic_adapter_ix(&self.adapter_program, &self.sra_config, &params);
+        svm.expire_blockhash();
+        let blockhash = svm.latest_blockhash();
+        let msg = Message::new(&[ix1, ix2], Some(&self.payer.pubkey()));
+        let mut tx = Transaction::new_unsigned(msg);
+        tx.sign(&[&self.payer, &self.owner], blockhash);
+        svm.send_transaction(tx).map_err(Box::new)
+    }
+
+    /// Single-IX submission. Use only for tests where IX 1 must reject
+    /// before `verify_adapter_ix` runs (e.g. nominated adapter is non-
+    /// executable so its program account would not be loadable for IX 2),
+    /// or for the explicit standalone-rejection test.
+    pub fn invoke_standalone(
         &self,
         svm: &mut LiteSVM,
         params: PrepareParams,
@@ -497,6 +548,69 @@ impl ValidatePrepareFixture {
         tx.sign(&[&self.payer, &self.owner], blockhash);
         svm.send_transaction(tx).map_err(Box::new)
     }
+}
+
+// ---------------------------------------------------------------------------
+// IX 2 attestation helpers (Step 13)
+// ---------------------------------------------------------------------------
+
+/// Build a synthetic `execute_deposit_across` IX 2 used to exercise the
+/// handler's `verify_adapter_ix`. The body is laid out exactly as Step 15
+/// will eventually emit: 8-byte `EXECUTE_DEPOSIT_ACROSS_DISCRIMINATOR`, then
+/// `input_amount` (u64 LE), `output_amount` (u64 LE), `target_token`
+/// (`[u8; 32]`), `action_idxs` (`Vec<u64>`).
+///
+/// Account list is the layout-fixed minimum (`adapter_ix_layout::ACCT_SRA_CONFIG + 1`
+/// slots) with `sra_config` at the pinned slot. Negative tests pair this with
+/// a `program_id` that is not the registered adapter, or with mismatched
+/// routing fields, to drive `verify_adapter_ix` into each rejection branch.
+pub fn build_synthetic_adapter_ix(
+    program_id: &Pubkey,
+    sra_config: &Pubkey,
+    params: &PrepareParams,
+) -> Instruction {
+    let slot_count = adapter_ix_layout::ACCT_SRA_CONFIG + 1;
+    let mut accounts: Vec<solana_sdk::instruction::AccountMeta> = (0..slot_count)
+        .map(|_| {
+            solana_sdk::instruction::AccountMeta::new_readonly(Pubkey::new_unique(), false)
+        })
+        .collect();
+    accounts[adapter_ix_layout::ACCT_SRA_CONFIG] =
+        solana_sdk::instruction::AccountMeta::new_readonly(*sra_config, false);
+
+    let mut data: Vec<u8> = Vec::with_capacity(60 + params.action_idxs.len() * 8);
+    data.extend_from_slice(&adapter_ix_layout::EXECUTE_DEPOSIT_ACROSS_DISCRIMINATOR);
+    data.extend_from_slice(&params.input_amount.to_le_bytes());
+    data.extend_from_slice(&params.output_amount.to_le_bytes());
+    data.extend_from_slice(&params.target_token);
+    data.extend_from_slice(&(params.action_idxs.len() as u32).to_le_bytes());
+    for v in &params.action_idxs {
+        data.extend_from_slice(&v.to_le_bytes());
+    }
+
+    Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    }
+}
+
+/// Submit a two-instruction versioned-equivalent transaction. Used by the
+/// bidirectional-attestation negative tests where IX 1 is real
+/// `validate_and_prepare` and IX 2 is a synthetic adapter IX.
+pub fn send_two_ixes(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    owner: &Keypair,
+    ix1: Instruction,
+    ix2: Instruction,
+) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>> {
+    svm.expire_blockhash();
+    let blockhash = svm.latest_blockhash();
+    let msg = Message::new(&[ix1, ix2], Some(&payer.pubkey()));
+    let mut tx = Transaction::new_unsigned(msg);
+    tx.sign(&[payer, owner], blockhash);
+    svm.send_transaction(tx).map_err(Box::new)
 }
 
 // ---------------------------------------------------------------------------

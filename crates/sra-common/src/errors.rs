@@ -56,6 +56,10 @@ pub enum SraError {
     #[msg("Preceding instruction is not validate_and_prepare from sra-handler")]
     InvalidPrecedingInstruction,
 
+    // -- Handler: IX attestation --
+    #[msg("Following instruction is not execute_deposit_across from the registered adapter")]
+    InvalidFollowingInstruction,
+
     // -- Adapter: fill verification --
     #[msg("Across fill status is not Filled")]
     FillNotCompleted,

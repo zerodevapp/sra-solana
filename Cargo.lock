@@ -5243,6 +5243,7 @@ dependencies = [
  "hex",
  "serde_json",
  "solana-keccak-hasher",
+ "solana-sha256-hasher",
 ]
 
 [[package]]
