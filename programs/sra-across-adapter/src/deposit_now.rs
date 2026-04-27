@@ -5,7 +5,7 @@ use solana_program::keccak::hash as keccak_hash;
 pub const DELEGATE_SEED_PREFIX: &[u8] = b"delegate";
 
 /// Deposit-now inputs that participate in Across's delegate seed hash.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(AnchorSerialize, Clone, Debug, PartialEq, Eq)]
 pub struct DepositNowParams {
     pub depositor: Pubkey,
     pub recipient: Pubkey,
@@ -20,22 +20,6 @@ pub struct DepositNowParams {
     pub message: Vec<u8>,
 }
 
-/// Exact Borsh/Anchor layout consumed by Across's `deposit_now(...)` seed hash.
-#[derive(AnchorSerialize)]
-struct DepositNowSeedData<'a> {
-    pub depositor: Pubkey,
-    pub recipient: Pubkey,
-    pub input_token: Pubkey,
-    pub output_token: Pubkey,
-    pub input_amount: u64,
-    pub output_amount: [u8; 32],
-    pub destination_chain_id: u64,
-    pub exclusive_relayer: Pubkey,
-    pub fill_deadline_offset: u32,
-    pub exclusivity_period: u32,
-    pub message: &'a Vec<u8>,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DelegateDerivation {
     pub seed_hash: [u8; 32],
@@ -43,27 +27,17 @@ pub struct DelegateDerivation {
     pub bump: u8,
 }
 
-/// `keccak256(anchor_serialize(deposit_now_args))`, matching Across's SVM Spoke.
-pub fn deposit_now_seed_hash(params: &DepositNowParams) -> [u8; 32] {
-    let seed_data = DepositNowSeedData {
-        depositor: params.depositor,
-        recipient: params.recipient,
-        input_token: params.input_token,
-        output_token: params.output_token,
-        input_amount: params.input_amount,
-        output_amount: params.output_amount,
-        destination_chain_id: params.destination_chain_id,
-        exclusive_relayer: params.exclusive_relayer,
-        fill_deadline_offset: params.fill_deadline_offset,
-        exclusivity_period: params.exclusivity_period,
-        message: &params.message,
-    };
-
+fn anchor_serialize_keccak<T: AnchorSerialize>(value: &T) -> [u8; 32] {
     let mut serialized = Vec::new();
-    seed_data
+    value
         .serialize(&mut serialized)
         .expect("serializing deposit-now seed data cannot fail");
     keccak_hash(&serialized).to_bytes()
+}
+
+/// `keccak256(anchor_serialize(deposit_now_args))`, matching Across's SVM Spoke.
+pub fn deposit_now_seed_hash(params: &DepositNowParams) -> [u8; 32] {
+    anchor_serialize_keccak(params)
 }
 
 /// Across delegates token movement to a PDA derived as `["delegate", seed_hash]`.
