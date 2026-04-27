@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 
+pub mod events;
 pub mod instructions;
 
 use instructions::*;
@@ -38,5 +39,12 @@ pub mod sra_handler {
             target_token,
             target_decimals,
         )
+    }
+
+    pub fn validate_and_prepare(
+        ctx: Context<ValidateAndPrepare>,
+        params: PrepareParams,
+    ) -> Result<()> {
+        instructions::source::validate_and_prepare::handler(ctx, params)
     }
 }

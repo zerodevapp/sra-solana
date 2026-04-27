@@ -5,7 +5,15 @@
 #![allow(clippy::too_many_arguments)]
 
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
+use anchor_spl::{
+    associated_token::{get_associated_token_address, ID as ATA_PROGRAM_ID},
+    token::ID as TOKEN_PROGRAM_ID,
+};
 use litesvm::LiteSVM;
+use litesvm_token::{
+    get_spl_account, spl_token::state::Account as SplTokenAccount, CreateAssociatedTokenAccount,
+    CreateMint, MintTo,
+};
 use solana_sdk::{
     instruction::Instruction,
     message::Message,
@@ -16,10 +24,12 @@ use solana_sdk::{
 };
 use solana_system_interface::program as system_program;
 use sra_common::{
-    seeds::{SEED_ADDRESS_BOOK, SEED_SRA},
-    types::{AddressBookEntry, SraConfig},
+    seeds::{SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_SRA},
+    types::{AddressBookEntry, MintNonce, SraConfig},
 };
-use sra_handler::instructions::source::initialize_sra::SraInitConfig;
+use sra_handler::instructions::source::{
+    initialize_sra::SraInitConfig, validate_and_prepare::PrepareParams,
+};
 use std::{fs, path::PathBuf};
 
 pub const PROGRAM_ID: Pubkey = sra_handler::ID;
@@ -58,6 +68,10 @@ pub fn sample_config() -> SraInitConfig {
     }
 }
 
+pub fn sample_target_token() -> [u8; 32] {
+    [0xAB; 32]
+}
+
 pub fn derive_sra_pda(owner: &Pubkey, config: &SraInitConfig, salt: &[u8; 32]) -> (Pubkey, u8) {
     let config_hash = config.hash(owner);
     Pubkey::find_program_address(&[SEED_SRA, owner.as_ref(), &config_hash, salt], &PROGRAM_ID)
@@ -76,6 +90,20 @@ pub fn derive_address_book_pda(
             target_token,
         ],
         &PROGRAM_ID,
+    )
+}
+
+pub fn derive_mint_nonce_pda(sra_config: &Pubkey, source_mint: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[SEED_MINT_NONCE, sra_config.as_ref(), source_mint.as_ref()],
+        &PROGRAM_ID,
+    )
+}
+
+pub fn derive_adapter_authority_pda(sra_config: &Pubkey, adapter_program: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[SEED_ADAPTER_AUTHORITY, sra_config.as_ref()],
+        adapter_program,
     )
 }
 
@@ -211,4 +239,295 @@ pub fn fetch_address_book_entry(svm: &LiteSVM, pda: &Pubkey) -> AddressBookEntry
         .get_account(pda)
         .expect("address_book_entry account exists");
     AddressBookEntry::try_deserialize(&mut acct.data.as_slice()).expect("valid AddressBookEntry")
+}
+
+pub fn fetch_mint_nonce(svm: &LiteSVM, pda: &Pubkey) -> MintNonce {
+    let acct = svm.get_account(pda).expect("mint_nonce account exists");
+    MintNonce::try_deserialize(&mut acct.data.as_slice()).expect("valid MintNonce")
+}
+
+// ---------------------------------------------------------------------------
+// SPL Token helpers
+// ---------------------------------------------------------------------------
+
+pub fn derive_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+    get_associated_token_address(owner, mint)
+}
+
+pub fn create_mint(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    mint_authority: &Pubkey,
+    decimals: u8,
+) -> Pubkey {
+    CreateMint::new(svm, payer)
+        .authority(mint_authority)
+        .decimals(decimals)
+        .send()
+        .expect("create_mint should succeed")
+}
+
+pub fn create_ata(svm: &mut LiteSVM, payer: &Keypair, owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+    CreateAssociatedTokenAccount::new(svm, payer, mint)
+        .owner(owner)
+        .send()
+        .expect("create_associated_token_account should succeed")
+}
+
+pub fn mint_to(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    mint_authority: &Keypair,
+    mint: &Pubkey,
+    to: &Pubkey,
+    amount: u64,
+) {
+    MintTo::new(svm, payer, mint, to, amount)
+        .owner(mint_authority)
+        .send()
+        .expect("mint_to should succeed");
+}
+
+pub fn fetch_token_balance(svm: &LiteSVM, ata: &Pubkey) -> u64 {
+    get_spl_account::<SplTokenAccount>(svm, ata)
+        .expect("token account exists")
+        .amount
+}
+
+/// Creates (or overwrites) an `AddressBookEntry` owned by `owner`. `decimals == 0`
+/// leaves the entry tombstoned — useful for the disabled-address-book tests.
+pub fn setup_address_book_entry(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    owner: &Keypair,
+    sra_config: &Pubkey,
+    target_chain_id: u64,
+    target_token: [u8; 32],
+    target_decimals: u8,
+) -> Pubkey {
+    let (pda, _) = derive_address_book_pda(sra_config, target_chain_id, &target_token);
+    let ix = set_address_book_entry_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        sra_config,
+        &pda,
+        target_chain_id,
+        target_token,
+        target_decimals,
+    );
+    send_ix(svm, ix, payer, &[owner]).expect("set_address_book_entry should succeed");
+    pda
+}
+
+// ---------------------------------------------------------------------------
+// validate_and_prepare helpers
+// ---------------------------------------------------------------------------
+
+pub struct ValidatePrepareAccounts {
+    pub sra_config: Pubkey,
+    pub mint_nonce: Pubkey,
+    pub source_mint: Pubkey,
+    pub sra_vault: Pubkey,
+    pub adapter_program: Pubkey,
+    pub adapter_authority: Pubkey,
+    pub adapter_custody: Pubkey,
+}
+
+impl ValidatePrepareAccounts {
+    pub fn derive(sra_config: &Pubkey, source_mint: &Pubkey, adapter_program: &Pubkey) -> Self {
+        let (mint_nonce, _) = derive_mint_nonce_pda(sra_config, source_mint);
+        let (adapter_authority, _) = derive_adapter_authority_pda(sra_config, adapter_program);
+        Self {
+            sra_config: *sra_config,
+            mint_nonce,
+            source_mint: *source_mint,
+            sra_vault: derive_ata(sra_config, source_mint),
+            adapter_program: *adapter_program,
+            adapter_authority,
+            adapter_custody: derive_ata(&adapter_authority, source_mint),
+        }
+    }
+}
+
+pub fn validate_and_prepare_ix(
+    fee_payer: &Pubkey,
+    owner: &Pubkey,
+    accounts: &ValidatePrepareAccounts,
+    owner_token_account: &Pubkey,
+    address_book_entry: &Pubkey,
+    params: PrepareParams,
+) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::ValidateAndPrepare {
+            fee_payer: *fee_payer,
+            owner: *owner,
+            sra_config: accounts.sra_config,
+            mint_nonce: accounts.mint_nonce,
+            source_mint: accounts.source_mint,
+            owner_token_account: *owner_token_account,
+            sra_vault: accounts.sra_vault,
+            adapter_authority: accounts.adapter_authority,
+            adapter_custody: accounts.adapter_custody,
+            adapter_program: accounts.adapter_program,
+            address_book_entry: *address_book_entry,
+            token_program: TOKEN_PROGRAM_ID,
+            associated_token_program: ATA_PROGRAM_ID,
+            system_program: system_program::ID,
+            instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::ValidateAndPrepare { params }.data(),
+    }
+}
+
+pub const OWNER_STARTING_BALANCE: u64 = 10_000_000;
+
+pub struct ValidatePrepareFixture {
+    pub payer: Keypair,
+    pub owner: Keypair,
+    pub config: SraInitConfig,
+    pub sra_config: Pubkey,
+    pub source_mint: Pubkey,
+    pub target_chain_id: u64,
+    pub target_token: [u8; 32],
+    pub adapter_program: Pubkey,
+    pub accounts: ValidatePrepareAccounts,
+    pub owner_ata: Pubkey,
+}
+
+impl ValidatePrepareFixture {
+    pub fn new(svm: &mut LiteSVM) -> Self {
+        Self::new_with(svm, 50)
+    }
+
+    pub fn new_with(svm: &mut LiteSVM, allowed_slippage_bps: u16) -> Self {
+        let payer = funded_keypair(svm, 100 * SOL);
+        let owner = funded_keypair(svm, SOL);
+
+        let config = sample_config();
+        let salt = [0xABu8; 32];
+        let (sra_config, _) = derive_sra_pda(&owner.pubkey(), &config, &salt);
+        let ix = initialize_sra_ix(
+            &payer.pubkey(),
+            &owner.pubkey(),
+            &sra_config,
+            config.clone(),
+            salt,
+        );
+        send_ix(svm, ix, &payer, &[&owner]).expect("initialize_sra");
+
+        let source_mint = create_mint(svm, &payer, &payer.pubkey(), 6);
+        let target_chain_id = config.target_chain_id;
+        let target_token = sample_target_token();
+        setup_address_book_entry(
+            svm,
+            &payer,
+            &owner,
+            &sra_config,
+            target_chain_id,
+            target_token,
+            6,
+        );
+
+        // `validate_and_prepare` now requires the adapter to be a loader-owned
+        // executable program account, so reuse the loaded handler program as a
+        // stand-in.
+        let adapter_program = PROGRAM_ID;
+        let ix = update_adapters_ix(
+            &payer.pubkey(),
+            &owner.pubkey(),
+            &sra_config,
+            vec![adapter_program],
+        );
+        send_ix(svm, ix, &payer, &[&owner]).expect("update_adapters");
+
+        let ix = update_slippage_ix(&owner.pubkey(), &sra_config, allowed_slippage_bps);
+        send_ix(svm, ix, &payer, &[&owner]).expect("update_slippage");
+
+        let accounts = ValidatePrepareAccounts::derive(&sra_config, &source_mint, &adapter_program);
+
+        let owner_ata = create_ata(svm, &payer, &owner.pubkey(), &source_mint);
+        mint_to(
+            svm,
+            &payer,
+            &payer,
+            &source_mint,
+            &owner_ata,
+            OWNER_STARTING_BALANCE,
+        );
+
+        Self {
+            payer,
+            owner,
+            config,
+            sra_config,
+            source_mint,
+            target_chain_id,
+            target_token,
+            adapter_program,
+            accounts,
+            owner_ata,
+        }
+    }
+
+    pub fn address_book_entry(&self, target_token: &[u8; 32]) -> Pubkey {
+        derive_address_book_pda(&self.sra_config, self.target_chain_id, target_token).0
+    }
+
+    pub fn invoke(
+        &self,
+        svm: &mut LiteSVM,
+        params: PrepareParams,
+    ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
+    {
+        let address_book_entry = self.address_book_entry(&params.target_token);
+        let ix = validate_and_prepare_ix(
+            &self.payer.pubkey(),
+            &self.owner.pubkey(),
+            &self.accounts,
+            &self.owner_ata,
+            &address_book_entry,
+            params,
+        );
+        svm.expire_blockhash();
+        let blockhash = svm.latest_blockhash();
+        let msg = Message::new(&[ix], Some(&self.payer.pubkey()));
+        let mut tx = Transaction::new_unsigned(msg);
+        tx.sign(&[&self.payer, &self.owner], blockhash);
+        svm.send_transaction(tx).map_err(Box::new)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Anchor event extraction
+// ---------------------------------------------------------------------------
+
+/// Scan program logs for a `Program data: <base64>` line whose discriminator
+/// matches `DepositPrepared`, and borsh-deserialize the remainder.
+pub fn extract_deposit_prepared(logs: &[String]) -> Option<sra_handler::events::DepositPrepared> {
+    use anchor_lang::{AnchorDeserialize, Discriminator};
+    use base64::Engine;
+
+    let engine = base64::engine::general_purpose::STANDARD;
+    let expected_disc: &[u8] =
+        <sra_handler::events::DepositPrepared as Discriminator>::DISCRIMINATOR;
+
+    for log in logs {
+        let Some(b64) = log.strip_prefix("Program data: ") else {
+            continue;
+        };
+        let Ok(raw) = engine.decode(b64) else {
+            continue;
+        };
+        if raw.len() < expected_disc.len() || &raw[..expected_disc.len()] != expected_disc {
+            continue;
+        }
+        if let Ok(ev) =
+            sra_handler::events::DepositPrepared::try_from_slice(&raw[expected_disc.len()..])
+        {
+            return Some(ev);
+        }
+    }
+    None
 }

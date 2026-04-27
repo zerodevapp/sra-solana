@@ -1894,6 +1894,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "litesvm-token"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7e687628d90e324edbffd85db2fee13dd84b7477d7ce413fa9fabd9af9e2a36"
+dependencies = [
+ "litesvm",
+ "smallvec",
+ "solana-account",
+ "solana-keypair",
+ "solana-program-pack",
+ "solana-pubkey",
+ "solana-rent",
+ "solana-signer",
+ "solana-system-interface",
+ "solana-transaction",
+ "solana-transaction-error",
+ "spl-associated-token-account-client",
+ "spl-token",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5230,9 +5251,12 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
+ "base64 0.22.1",
  "litesvm",
+ "litesvm-token",
  "solana-program",
  "solana-sdk",
+ "solana-sdk-ids",
  "solana-system-interface",
  "sra-common",
 ]

@@ -6,6 +6,9 @@ pub enum SraError {
     #[msg("Adapter program not in allowed_adapters list")]
     AdapterNotAllowed,
 
+    #[msg("Adapter must be a deployed program account")]
+    InvalidAdapterProgram,
+
     #[msg("Output amount below minimum after slippage")]
     SlippageExceeded,
 
@@ -66,4 +69,7 @@ pub enum SraError {
 
     #[msg("Arithmetic overflow")]
     ArithmeticOverflow,
+
+    #[msg("bytes32 value cannot be narrowed to a 20-byte EVM address")]
+    InvalidEvmAddress,
 }
