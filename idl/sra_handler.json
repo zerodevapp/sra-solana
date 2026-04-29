@@ -652,7 +652,7 @@
         {
           "name": "instructions_sysvar",
           "docs": [
-            "IX 2 attestation; the handler doesn't touch it yet."
+            "to bind this IX to its paired adapter `execute_deposit_across`."
           ],
           "address": "Sysvar1nstructions1111111111111111111111111"
         }
@@ -933,11 +933,6 @@
     },
     {
       "name": "PrepareParams",
-      "docs": [
-        "IX 1 inputs: how much the owner is locking (`input_amount`), the minimum",
-        "output they'll accept on the destination chain (`output_amount`), plus the",
-        "dynamic message fields"
-      ],
       "type": {
         "kind": "struct",
         "fields": [

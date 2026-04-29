@@ -13,6 +13,40 @@ fn encode_ix_data<T: AnchorSerialize>(name: &str, value: &T) -> Vec<u8> {
 }
 
 #[test]
+fn decode_prepare_params_round_trips_valid_data() {
+    let params = PrepareParams {
+        input_amount: 7,
+        output_amount: 9,
+        target_token: [4u8; 32],
+        action_idxs: vec![1, 2],
+    };
+    let data = encode_ix_data("validate_and_prepare", &params);
+
+    let decoded =
+        decode_anchor_instruction_data::<PrepareParams>("validate_and_prepare", &data).unwrap();
+    assert_eq!(decoded, params);
+}
+
+#[test]
+fn decode_across_deposit_params_round_trips_valid_data() {
+    let params = AcrossDepositParams {
+        input_amount: 7,
+        output_amount: handler_output_amount_u256(9),
+        target_token: [4u8; 32],
+        action_idxs: vec![1, 2],
+        exclusive_relayer: anchor_lang::prelude::Pubkey::new_from_array([6u8; 32]),
+        fill_deadline_offset: 600,
+        exclusivity_period: 120,
+    };
+    let data = encode_ix_data("execute_deposit_across", &params);
+
+    let decoded =
+        decode_anchor_instruction_data::<AcrossDepositParams>("execute_deposit_across", &data)
+            .unwrap();
+    assert_eq!(decoded, params);
+}
+
+#[test]
 fn decode_prepare_params_rejects_wrong_discriminator() {
     let params = PrepareParams {
         input_amount: 7,

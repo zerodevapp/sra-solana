@@ -5,8 +5,13 @@ use sra_common::{
     source_deposit::{AcrossDepositParams, NormalizedDepositIntent, PrepareParams},
 };
 
+// Account-slot indices in the adapter's `ExecuteDepositAcross` ix that the
+// handler verifier needs to pin. Drift would silently break attestation, so
+// these mirror `programs/sra-across-adapter/src/instructions/execute_deposit.rs`
+// account order.
 const ADAPTER_ACCT_SRA_CONFIG: usize = 2;
 const ADAPTER_ACCT_INPUT_MINT: usize = 6;
+const MIN_ADAPTER_ACCOUNTS: usize = ADAPTER_ACCT_INPUT_MINT + 1;
 
 pub fn verify_next_adapter_ix(
     instructions_sysvar: &AccountInfo,
@@ -23,7 +28,7 @@ pub fn verify_next_adapter_ix(
         SraError::InvalidPairedInstruction
     );
     require!(
-        next_ix.accounts.len() > ADAPTER_ACCT_INPUT_MINT,
+        next_ix.accounts.len() >= MIN_ADAPTER_ACCOUNTS,
         SraError::InvalidPairedInstruction
     );
     require!(

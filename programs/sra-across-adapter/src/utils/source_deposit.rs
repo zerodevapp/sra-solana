@@ -156,8 +156,14 @@ mod tests {
         .unwrap();
 
         assert_eq!(build.params.input_amount, prepare.input_amount);
-        assert_eq!(build.params.output_amount, u256_from_u64(prepare.output_amount));
-        assert_eq!(build.params.output_token, Pubkey::new_from_array(prepare.target_token));
+        assert_eq!(
+            build.params.output_amount,
+            u256_from_u64(prepare.output_amount)
+        );
+        assert_eq!(
+            build.params.output_token,
+            Pubkey::new_from_array(prepare.target_token)
+        );
         assert_eq!(build.params.message, matching.params.message);
     }
 }

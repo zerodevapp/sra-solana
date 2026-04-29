@@ -142,22 +142,9 @@ fn validate_and_prepare_wrong_next_ix_program_rejected() {
 fn validate_and_prepare_wrong_next_ix_routing_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    let params = default_prepare_params(&fx);
-    let mut across = across_params_for(&fx, &params);
+    let prepare = default_prepare_params(&fx);
+    let mut across = across_params_for(&fx, &prepare);
     across.action_idxs[1] += 1;
-
-    let err = fx
-        .invoke_with(&mut svm, params, vec![compute_budget_ix()])
-        .expect_err("non-adjacent pair must reject before routing comparison")
-        .err
-        .clone();
-    assert_eq!(
-        err,
-        TransactionError::InstructionError(
-            0,
-            InstructionError::Custom(SraError::InvalidPairedInstruction.into()),
-        )
-    );
 
     let address_book_entry = fx.address_book_entry(&fx.target_token);
     let validate_ix = validate_and_prepare_ix(
@@ -166,13 +153,13 @@ fn validate_and_prepare_wrong_next_ix_routing_rejected() {
         &fx.accounts,
         &fx.owner_ata,
         &address_book_entry,
-        default_prepare_params(&fx),
+        prepare.clone(),
     );
     let execute_ix = execute_deposit_across_ix(
         &fx.payer.pubkey(),
         &fx,
         &fetch_sra_config(&svm, &fx.sra_config),
-        &default_prepare_params(&fx),
+        &prepare,
         across,
         current_nonce(&svm, &fx.accounts.mint_nonce),
     );
@@ -191,6 +178,239 @@ fn validate_and_prepare_wrong_next_ix_routing_rejected() {
         TransactionError::InstructionError(
             0,
             InstructionError::Custom(SraError::PairedInstructionMismatch.into()),
+        )
+    );
+}
+
+#[test]
+fn validate_and_prepare_wrong_next_ix_sra_config_rejected() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    let prepare = default_prepare_params(&fx);
+    let across = across_params_for(&fx, &prepare);
+
+    let address_book_entry = fx.address_book_entry(&fx.target_token);
+    let validate_ix = validate_and_prepare_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.accounts,
+        &fx.owner_ata,
+        &address_book_entry,
+        prepare.clone(),
+    );
+    let mut execute_ix = execute_deposit_across_ix(
+        &fx.payer.pubkey(),
+        &fx,
+        &fetch_sra_config(&svm, &fx.sra_config),
+        &prepare,
+        across,
+        current_nonce(&svm, &fx.accounts.mint_nonce),
+    );
+    // ADAPTER_ACCT_SRA_CONFIG = 2 in the adapter ix layout.
+    execute_ix.accounts[2].pubkey = solana_sdk::pubkey::Pubkey::new_unique();
+
+    let err = send_instructions(
+        &mut svm,
+        &[validate_ix, execute_ix],
+        &fx.payer,
+        &[&fx.owner],
+    )
+    .expect_err("wrong sra_config slot in IX 2 must reject")
+    .err
+    .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::PairedInstructionMismatch.into()),
+        )
+    );
+}
+
+#[test]
+fn validate_and_prepare_wrong_next_ix_source_mint_rejected() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    let prepare = default_prepare_params(&fx);
+    let across = across_params_for(&fx, &prepare);
+
+    let address_book_entry = fx.address_book_entry(&fx.target_token);
+    let validate_ix = validate_and_prepare_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.accounts,
+        &fx.owner_ata,
+        &address_book_entry,
+        prepare.clone(),
+    );
+    let mut execute_ix = execute_deposit_across_ix(
+        &fx.payer.pubkey(),
+        &fx,
+        &fetch_sra_config(&svm, &fx.sra_config),
+        &prepare,
+        across,
+        current_nonce(&svm, &fx.accounts.mint_nonce),
+    );
+    // ADAPTER_ACCT_INPUT_MINT = 6 in the adapter ix layout.
+    execute_ix.accounts[6].pubkey = solana_sdk::pubkey::Pubkey::new_unique();
+
+    let err = send_instructions(
+        &mut svm,
+        &[validate_ix, execute_ix],
+        &fx.payer,
+        &[&fx.owner],
+    )
+    .expect_err("wrong input_mint slot in IX 2 must reject")
+    .err
+    .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::PairedInstructionMismatch.into()),
+        )
+    );
+}
+
+#[test]
+fn validate_and_prepare_wrong_next_ix_target_token_rejected() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    let prepare = default_prepare_params(&fx);
+    let mut across = across_params_for(&fx, &prepare);
+    // Differ only in target_token. Other normalized fields stay aligned so the
+    // handler verifier rejects on routing data, not on account slots.
+    across.target_token[31] ^= 0xFF;
+
+    let address_book_entry = fx.address_book_entry(&fx.target_token);
+    let validate_ix = validate_and_prepare_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.accounts,
+        &fx.owner_ata,
+        &address_book_entry,
+        prepare.clone(),
+    );
+    let execute_ix = execute_deposit_across_ix(
+        &fx.payer.pubkey(),
+        &fx,
+        &fetch_sra_config(&svm, &fx.sra_config),
+        &prepare,
+        across,
+        current_nonce(&svm, &fx.accounts.mint_nonce),
+    );
+
+    let err = send_instructions(
+        &mut svm,
+        &[validate_ix, execute_ix],
+        &fx.payer,
+        &[&fx.owner],
+    )
+    .expect_err("target_token mismatch in IX 2 must reject")
+    .err
+    .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::PairedInstructionMismatch.into()),
+        )
+    );
+}
+
+#[test]
+fn validate_and_prepare_wrong_next_ix_input_amount_rejected() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    let prepare = default_prepare_params(&fx);
+    let mut across = across_params_for(&fx, &prepare);
+    across.input_amount += 1;
+
+    let address_book_entry = fx.address_book_entry(&fx.target_token);
+    let validate_ix = validate_and_prepare_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.accounts,
+        &fx.owner_ata,
+        &address_book_entry,
+        prepare.clone(),
+    );
+    let execute_ix = execute_deposit_across_ix(
+        &fx.payer.pubkey(),
+        &fx,
+        &fetch_sra_config(&svm, &fx.sra_config),
+        &prepare,
+        across,
+        current_nonce(&svm, &fx.accounts.mint_nonce),
+    );
+
+    let err = send_instructions(
+        &mut svm,
+        &[validate_ix, execute_ix],
+        &fx.payer,
+        &[&fx.owner],
+    )
+    .expect_err("input_amount mismatch in IX 2 must reject")
+    .err
+    .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::PairedInstructionMismatch.into()),
+        )
+    );
+}
+
+#[test]
+fn validate_and_prepare_malformed_next_ix_data_rejected() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    let prepare = default_prepare_params(&fx);
+    let across = across_params_for(&fx, &prepare);
+
+    let address_book_entry = fx.address_book_entry(&fx.target_token);
+    let validate_ix = validate_and_prepare_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.accounts,
+        &fx.owner_ata,
+        &address_book_entry,
+        prepare.clone(),
+    );
+    let mut execute_ix = execute_deposit_across_ix(
+        &fx.payer.pubkey(),
+        &fx,
+        &fetch_sra_config(&svm, &fx.sra_config),
+        &prepare,
+        across,
+        current_nonce(&svm, &fx.accounts.mint_nonce),
+    );
+    // Wrong discriminator: zero out the leading 8 bytes so decode rejects
+    // before any field comparison.
+    for byte in execute_ix.data.iter_mut().take(8) {
+        *byte = 0;
+    }
+
+    let err = send_instructions(
+        &mut svm,
+        &[validate_ix, execute_ix],
+        &fx.payer,
+        &[&fx.owner],
+    )
+    .expect_err("malformed IX 2 data must reject")
+    .err
+    .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::InvalidPairedInstruction.into()),
         )
     );
 }
@@ -238,15 +458,112 @@ fn execute_deposit_standalone_rejected() {
 
     let prepare = default_prepare_params(&fx);
     let err = invoke_execute_only(&fx, &mut svm, &prepare, across_params_for(&fx, &prepare))
-    .expect_err("standalone ix2 must reject")
-    .err
-    .clone();
+        .expect_err("standalone ix2 must reject")
+        .err
+        .clone();
 
     assert_eq!(
         err,
         TransactionError::InstructionError(
             0,
             InstructionError::Custom(SraError::MissingPairedInstruction.into()),
+        )
+    );
+}
+
+#[test]
+fn execute_deposit_wrong_prev_ix_program_rejected() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    seed_mint_nonce_account(
+        &mut svm,
+        &fx.accounts.mint_nonce,
+        1,
+        derive_mint_nonce_pda(&fx.sra_config, &fx.source_mint).1,
+    );
+    create_ata(
+        &mut svm,
+        &fx.payer,
+        &fx.accounts.adapter_authority,
+        &fx.source_mint,
+    );
+
+    let prepare = default_prepare_params(&fx);
+    let execute_ix = execute_deposit_across_ix(
+        &fx.payer.pubkey(),
+        &fx,
+        &fetch_sra_config(&svm, &fx.sra_config),
+        &prepare,
+        across_params_for(&fx, &prepare),
+        current_nonce(&svm, &fx.accounts.mint_nonce),
+    );
+
+    let err = send_instructions(&mut svm, &[compute_budget_ix(), execute_ix], &fx.payer, &[])
+        .expect_err("non-handler prev ix must reject in adapter")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            1,
+            InstructionError::Custom(SraError::InvalidPairedInstruction.into()),
+        )
+    );
+}
+
+#[test]
+fn execute_deposit_wrong_prev_handler_call_rejected() {
+    // Use a real but different sra_handler instruction (`update_adapters`) as the
+    // preceding ix. The adapter verifier passes the program_id check but rejects
+    // on the account-count guard since update_adapters has fewer accounts than
+    // validate_and_prepare's adapter_program slot index.
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    seed_mint_nonce_account(
+        &mut svm,
+        &fx.accounts.mint_nonce,
+        1,
+        derive_mint_nonce_pda(&fx.sra_config, &fx.source_mint).1,
+    );
+    create_ata(
+        &mut svm,
+        &fx.payer,
+        &fx.accounts.adapter_authority,
+        &fx.source_mint,
+    );
+
+    let prepare = default_prepare_params(&fx);
+    let other_handler_ix = update_adapters_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.sra_config,
+        vec![ADAPTER_PROGRAM_ID],
+    );
+    let execute_ix = execute_deposit_across_ix(
+        &fx.payer.pubkey(),
+        &fx,
+        &fetch_sra_config(&svm, &fx.sra_config),
+        &prepare,
+        across_params_for(&fx, &prepare),
+        current_nonce(&svm, &fx.accounts.mint_nonce),
+    );
+
+    let err = send_instructions(
+        &mut svm,
+        &[other_handler_ix, execute_ix],
+        &fx.payer,
+        &[&fx.owner],
+    )
+    .expect_err("non-validate_and_prepare handler ix must reject in adapter")
+    .err
+    .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            1,
+            InstructionError::Custom(SraError::InvalidPairedInstruction.into()),
         )
     );
 }

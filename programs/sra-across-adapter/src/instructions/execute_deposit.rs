@@ -12,6 +12,14 @@ use sra_common::{
 
 use crate::{utils::build_deposit_now_bundle, AcrossAdapterError};
 
+/// Recover the pre-bump nonce written by the paired `validate_and_prepare`.
+///
+/// In the paired flow IX 1 always increments `mint_nonce.nonce` before IX 2
+/// reads it, so this guard is defense-in-depth: an unincremented account
+/// (zero nonce, untouched by IX 1) cannot produce a valid Across deposit
+/// extra-envelope. Coverage lives in the helper-level unit tests below;
+/// the branch is structurally unreachable end-to-end because attestation
+/// would fail first if IX 1 were missing.
 fn prepared_nonce(mint_nonce: &MintNonce) -> Result<u64> {
     mint_nonce
         .nonce
@@ -33,7 +41,10 @@ pub struct ExecuteDepositAcross<'info> {
         seeds::program = sra_common::ID,
     )]
     pub mint_nonce: Box<Account<'info, MintNonce>>,
-    /// CHECK: paired with handler-derived PDA; deeper checks land with full implementation.
+    /// CHECK: PDA `["adapter_authority", sra_config]` under this adapter program
+    /// (`seeds::program` defaults to `ctx.program_id`). The handler's
+    /// `validate_and_prepare` derives the symmetric PDA explicitly via
+    /// `seeds::program = adapter_program.key()`; both resolve identically.
     #[account(
         seeds = [SEED_ADAPTER_AUTHORITY, sra_config.key().as_ref()],
         bump,
@@ -61,6 +72,14 @@ pub struct ExecuteDepositAcross<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Adapter-side ix of the source 2-IX flow.
+///
+/// `params.input_amount`, `params.output_amount`, `params.target_token`, and
+/// `params.action_idxs` exist solely to be cross-checked against the paired
+/// handler IX's `PrepareParams`. After attestation succeeds, all routing-bearing
+/// values flow from the verified handler `prepare` — only the Across-specific
+/// fields (`exclusive_relayer`, `fill_deadline_offset`, `exclusivity_period`)
+/// from `params` are consumed downstream.
 pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) -> Result<()> {
     let prepare = crate::utils::verify_previous_handler_ix(
         &ctx.accounts.instructions_sysvar.to_account_info(),

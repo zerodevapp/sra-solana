@@ -103,8 +103,8 @@ pub struct ValidateAndPrepare<'info> {
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
-    /// CHECK: pinned to the Instructions sysvar. next we'll will read this for
-    /// IX 2 attestation; the handler doesn't touch it yet.
+    /// CHECK: pinned to the Instructions sysvar; read by `verify_next_adapter_ix`
+    /// to bind this IX to its paired adapter `execute_deposit_across`.
     #[account(address = instructions::ID)]
     pub instructions_sysvar: UncheckedAccount<'info>,
 }

@@ -27,6 +27,11 @@
         },
         {
           "name": "adapter_authority",
+          "docs": [
+            "(`seeds::program` defaults to `ctx.program_id`). The handler's",
+            "`validate_and_prepare` derives the symmetric PDA explicitly via",
+            "`seeds::program = adapter_program.key()`; both resolve identically."
+          ],
           "pda": {
             "seeds": [
               { "kind": "const", "value": [97,100,97,112,116,101,114,95,97,117,116,104,111,114,105,116,121] },
