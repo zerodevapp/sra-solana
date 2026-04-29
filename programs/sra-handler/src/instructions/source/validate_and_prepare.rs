@@ -12,6 +12,7 @@ use sra_common::{
 };
 
 use crate::events::DepositPrepared;
+use crate::utils::verify_next_adapter_ix;
 
 fn is_program_owner(owner: &Pubkey) -> bool {
     bpf_loader::check_id(owner)
@@ -20,16 +21,7 @@ fn is_program_owner(owner: &Pubkey) -> bool {
         || loader_v4::check_id(owner)
 }
 
-/// IX 1 inputs: how much the owner is locking (`input_amount`), the minimum
-/// output they'll accept on the destination chain (`output_amount`), plus the
-/// dynamic message fields
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
-pub struct PrepareParams {
-    pub input_amount: u64,
-    pub output_amount: u64,
-    pub target_token: [u8; 32],
-    pub action_idxs: Vec<u64>,
-}
+pub use sra_common::source_deposit::PrepareParams;
 
 /// Source-side deposit IX. Validates the SRA + per-call routing inputs, pulls
 /// the owner's tokens through the SRA vault into adapter custody, and emits
@@ -149,7 +141,15 @@ pub(crate) fn handler(ctx: Context<ValidateAndPrepare>, params: PrepareParams) -
         SraError::InvalidAddressBook
     );
 
-    // Step 0c — IX 2 attestation: TODO
+    // Step 0c — IX 2 attestation: the immediately following instruction must
+    // be the paired adapter deposit for the same source intent.
+    verify_next_adapter_ix(
+        &ctx.accounts.instructions_sysvar.to_account_info(),
+        &adapter_key,
+        &ctx.accounts.sra_config.key(),
+        &ctx.accounts.source_mint.key(),
+        &params,
+    )?;
 
     // Step 1 — adapter_authority PDA validation: enforced declaratively by
     // the `seeds` constraint on the Accounts struct.

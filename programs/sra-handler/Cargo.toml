@@ -34,6 +34,7 @@ litesvm-token = "0.7.1"
 solana-sdk = "2.3"
 solana-system-interface = "1.0"
 base64 = "0.22"
+sra-across-adapter = { path = "../sra-across-adapter" }
 
 
 [lints.rust]

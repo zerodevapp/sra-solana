@@ -2,8 +2,7 @@ mod common;
 
 use common::*;
 use solana_sdk::{instruction::InstructionError, signer::Signer, transaction::TransactionError};
-use sra_common::{constants::MAX_ACTION_IDXS, errors::SraError};
-use sra_handler::instructions::source::validate_and_prepare::PrepareParams;
+use sra_common::{constants::MAX_ACTION_IDXS, errors::SraError, source_deposit::PrepareParams};
 
 const INPUT: u64 = 1_000_000;
 // 50 bps slippage tolerance -> min acceptable = 995_000 for INPUT = 1_000_000.
@@ -42,8 +41,13 @@ fn validate_and_prepare_happy_path() {
     );
     assert_eq!(
         fetch_token_balance(&svm, &fx.accounts.adapter_custody),
+        0,
+        "adapter custody is drained by IX 2 in the same tx",
+    );
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.across_vault),
         INPUT,
-        "adapter custody holds the locked tokens",
+        "Across vault receives the bridged tokens",
     );
 
     // Nonce bumped 0 -> 1.
@@ -65,6 +69,201 @@ fn validate_and_prepare_happy_path() {
     assert_eq!(ev.app_id, fx.config.app_id);
     assert_eq!(ev.target_token, params.target_token);
     assert_eq!(ev.action_idxs, params.action_idxs);
+}
+
+#[test]
+fn validate_and_prepare_standalone_rejected() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+
+    let address_book_entry = fx.address_book_entry(&fx.target_token);
+    let ix = validate_and_prepare_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.accounts,
+        &fx.owner_ata,
+        &address_book_entry,
+        default_prepare_params(&fx),
+    );
+    let err = send_ix(&mut svm, ix, &fx.payer, &[&fx.owner])
+        .expect_err("standalone ix1 must reject")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::MissingPairedInstruction.into()),
+        )
+    );
+}
+
+#[test]
+fn validate_and_prepare_wrong_next_ix_program_rejected() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    let params = default_prepare_params(&fx);
+
+    let mut bad_ix = execute_deposit_across_ix(
+        &fx.payer.pubkey(),
+        &fx,
+        &fetch_sra_config(&svm, &fx.sra_config),
+        &params,
+        across_params_for(&fx, &params),
+        current_nonce(&svm, &fx.accounts.mint_nonce),
+    );
+    bad_ix.program_id = PROGRAM_ID;
+
+    let address_book_entry = fx.address_book_entry(&params.target_token);
+    let validate_ix = validate_and_prepare_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.accounts,
+        &fx.owner_ata,
+        &address_book_entry,
+        params,
+    );
+    let err = send_instructions(&mut svm, &[validate_ix, bad_ix], &fx.payer, &[&fx.owner])
+        .expect_err("wrong next program must reject")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::InvalidPairedInstruction.into()),
+        )
+    );
+}
+
+#[test]
+fn validate_and_prepare_wrong_next_ix_routing_rejected() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    let params = default_prepare_params(&fx);
+    let mut across = across_params_for(&fx, &params);
+    across.action_idxs[1] += 1;
+
+    let err = fx
+        .invoke_with(&mut svm, params, vec![compute_budget_ix()])
+        .expect_err("non-adjacent pair must reject before routing comparison")
+        .err
+        .clone();
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::InvalidPairedInstruction.into()),
+        )
+    );
+
+    let address_book_entry = fx.address_book_entry(&fx.target_token);
+    let validate_ix = validate_and_prepare_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.accounts,
+        &fx.owner_ata,
+        &address_book_entry,
+        default_prepare_params(&fx),
+    );
+    let execute_ix = execute_deposit_across_ix(
+        &fx.payer.pubkey(),
+        &fx,
+        &fetch_sra_config(&svm, &fx.sra_config),
+        &default_prepare_params(&fx),
+        across,
+        current_nonce(&svm, &fx.accounts.mint_nonce),
+    );
+    let err = send_instructions(
+        &mut svm,
+        &[validate_ix, execute_ix],
+        &fx.payer,
+        &[&fx.owner],
+    )
+    .expect_err("routing mismatch must reject")
+    .err
+    .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::PairedInstructionMismatch.into()),
+        )
+    );
+}
+
+#[test]
+fn validate_and_prepare_non_adjacent_next_ix_rejected() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+
+    let err = fx
+        .invoke_with(
+            &mut svm,
+            default_prepare_params(&fx),
+            vec![compute_budget_ix()],
+        )
+        .expect_err("non-adjacent ix2 must reject")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::InvalidPairedInstruction.into()),
+        )
+    );
+}
+
+#[test]
+fn execute_deposit_standalone_rejected() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    seed_mint_nonce_account(
+        &mut svm,
+        &fx.accounts.mint_nonce,
+        1,
+        derive_mint_nonce_pda(&fx.sra_config, &fx.source_mint).1,
+    );
+    create_ata(
+        &mut svm,
+        &fx.payer,
+        &fx.accounts.adapter_authority,
+        &fx.source_mint,
+    );
+
+    let prepare = default_prepare_params(&fx);
+    let err = invoke_execute_only(&fx, &mut svm, &prepare, across_params_for(&fx, &prepare))
+    .expect_err("standalone ix2 must reject")
+    .err
+    .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::MissingPairedInstruction.into()),
+        )
+    );
+}
+
+#[test]
+fn source_2ix_happy_path_moves_tokens_into_across_vault() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+
+    let meta = fx
+        .invoke(&mut svm, default_prepare_params(&fx))
+        .expect("paired source flow should succeed");
+
+    assert_eq!(fetch_token_balance(&svm, &fx.accounts.adapter_custody), 0);
+    assert_eq!(fetch_token_balance(&svm, &fx.across_vault), INPUT);
+    let ev = extract_deposit_prepared(&meta.logs).expect("DepositPrepared event must be emitted");
+    assert_eq!(ev.input_amount, INPUT);
 }
 
 #[test]
@@ -295,10 +494,7 @@ fn validate_and_prepare_sequential_nonce_increments() {
     }
 
     // After 3 successful deposits: adapter_custody holds 3x 100_000, owner is short the same.
-    assert_eq!(
-        fetch_token_balance(&svm, &fx.accounts.adapter_custody),
-        300_000
-    );
+    assert_eq!(fetch_token_balance(&svm, &fx.across_vault), 300_000);
     assert_eq!(
         fetch_token_balance(&svm, &fx.owner_ata),
         OWNER_STARTING_BALANCE - 300_000

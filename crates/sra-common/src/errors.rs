@@ -52,9 +52,15 @@ pub enum SraError {
     #[msg("Fee exceeds maximum allowed (10%)")]
     FeeTooHigh,
 
-    // -- Adapter: IX attestation --
-    #[msg("Preceding instruction is not validate_and_prepare from sra-handler")]
-    InvalidPrecedingInstruction,
+    // -- Source: paired instruction attestation --
+    #[msg("Expected neighboring paired instruction is missing")]
+    MissingPairedInstruction,
+
+    #[msg("Paired instruction is malformed or has the wrong type")]
+    InvalidPairedInstruction,
+
+    #[msg("Paired instruction does not match the expected deposit intent")]
+    PairedInstructionMismatch,
 
     // -- Adapter: fill verification --
     #[msg("Across fill status is not Filled")]
