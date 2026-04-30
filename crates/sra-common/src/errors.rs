@@ -52,10 +52,6 @@ pub enum SraError {
     #[msg("Fee exceeds maximum allowed (10%)")]
     FeeTooHigh,
 
-    // -- Adapter: IX attestation --
-    #[msg("Preceding instruction is not validate_and_prepare from sra-handler")]
-    InvalidPrecedingInstruction,
-
     // -- Adapter: fill verification --
     #[msg("Across fill status is not Filled")]
     FillNotCompleted,
@@ -72,4 +68,14 @@ pub enum SraError {
 
     #[msg("bytes32 value cannot be narrowed to a 20-byte EVM address")]
     InvalidEvmAddress,
+
+    // -- Source: paired instruction attestation (appended to keep prior codes stable) --
+    #[msg("Expected neighboring paired instruction is missing")]
+    MissingPairedInstruction,
+
+    #[msg("Paired instruction is malformed or has the wrong type")]
+    InvalidPairedInstruction,
+
+    #[msg("Paired instruction does not match the expected deposit intent")]
+    PairedInstructionMismatch,
 }

@@ -4,7 +4,9 @@
 // IX builders mirror the on-chain accounts + args shape, which exceeds clippy's default.
 #![allow(clippy::too_many_arguments)]
 
-use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
+use anchor_lang::{
+    AccountDeserialize, AnchorSerialize, Discriminator, InstructionData, ToAccountMetas,
+};
 use anchor_spl::{
     associated_token::{get_associated_token_address, ID as ATA_PROGRAM_ID},
     token::ID as TOKEN_PROGRAM_ID,
@@ -15,6 +17,7 @@ use litesvm_token::{
     CreateMint, MintTo,
 };
 use solana_sdk::{
+    compute_budget::ComputeBudgetInstruction,
     instruction::Instruction,
     message::Message,
     pubkey::Pubkey,
@@ -24,19 +27,29 @@ use solana_sdk::{
 };
 use solana_system_interface::program as system_program;
 use sra_common::{
+    constants::ACROSS_SPOKE_POOL_ID,
+    instruction_data::instruction_discriminator,
     seeds::{SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_SRA},
+    source_deposit::{AcrossDepositParams, PrepareParams},
     types::{AddressBookEntry, MintNonce, SraConfig},
 };
-use sra_handler::instructions::source::{
-    initialize_sra::SraInitConfig, validate_and_prepare::PrepareParams,
-};
+use sra_handler::instructions::source::initialize_sra::SraInitConfig;
 use std::{fs, path::PathBuf};
 
 pub const PROGRAM_ID: Pubkey = sra_handler::ID;
+pub const ADAPTER_PROGRAM_ID: Pubkey = sra_across_adapter::ID;
 pub const SOL: u64 = 1_000_000_000;
 
 fn program_so_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/sra_handler.so")
+}
+
+fn adapter_program_so_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/sra_across_adapter.so")
+}
+
+fn mock_spoke_pool_so_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/mock_spoke_pool.so")
 }
 
 pub fn setup_svm() -> LiteSVM {
@@ -49,6 +62,26 @@ pub fn setup_svm() -> LiteSVM {
         )
     });
     svm.add_program(PROGRAM_ID, so.as_slice()).unwrap();
+
+    let adapter_so_path = adapter_program_so_path();
+    let adapter_so = fs::read(&adapter_so_path).unwrap_or_else(|err| {
+        panic!(
+            "failed to read program binary at {}: {err}. Run `anchor build` first.",
+            adapter_so_path.display()
+        )
+    });
+    svm.add_program(ADAPTER_PROGRAM_ID, adapter_so.as_slice())
+        .unwrap();
+
+    let mock_spoke_so_path = mock_spoke_pool_so_path();
+    let mock_spoke_so = fs::read(&mock_spoke_so_path).unwrap_or_else(|err| {
+        panic!(
+            "failed to read program binary at {}: {err}. Run `anchor build` first.",
+            mock_spoke_so_path.display()
+        )
+    });
+    svm.add_program(ACROSS_SPOKE_POOL_ID, mock_spoke_so.as_slice())
+        .unwrap();
     svm
 }
 
@@ -59,17 +92,26 @@ pub fn funded_keypair(svm: &mut LiteSVM, lamports: u64) -> Keypair {
 }
 
 pub fn sample_config() -> SraInitConfig {
+    let mut target_handler = [0u8; 32];
+    let mut target_adapter = [0u8; 32];
+    let mut recipient = [0u8; 32];
+    target_handler[12..].fill(0x11);
+    target_adapter[12..].fill(0x22);
+    recipient[12..].fill(0x33);
+
     SraInitConfig {
         target_chain_id: 42161,
-        target_handler: [0x11u8; 32],
-        target_adapter: [0x22u8; 32],
-        recipient: [0x33u8; 32],
+        target_handler,
+        target_adapter,
+        recipient,
         app_id: [0x44u8; 32],
     }
 }
 
 pub fn sample_target_token() -> [u8; 32] {
-    [0xAB; 32]
+    let mut target_token = [0u8; 32];
+    target_token[12..].fill(0xAB);
+    target_token
 }
 
 pub fn derive_sra_pda(owner: &Pubkey, config: &SraInitConfig, salt: &[u8; 32]) -> (Pubkey, u8) {
@@ -219,6 +261,22 @@ pub fn send_ix(
     svm.send_transaction(tx).map(|_| ()).map_err(Box::new)
 }
 
+pub fn send_instructions(
+    svm: &mut LiteSVM,
+    ixs: &[Instruction],
+    payer: &Keypair,
+    signers: &[&Keypair],
+) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>> {
+    svm.expire_blockhash();
+    let blockhash = svm.latest_blockhash();
+    let msg = Message::new(ixs, Some(&payer.pubkey()));
+    let mut tx = Transaction::new_unsigned(msg);
+    let mut all_signers: Vec<&Keypair> = vec![payer];
+    all_signers.extend_from_slice(signers);
+    tx.sign(&all_signers, blockhash);
+    svm.send_transaction(tx).map_err(Box::new)
+}
+
 pub fn send_ix_expect_err(
     svm: &mut LiteSVM,
     ix: Instruction,
@@ -244,6 +302,20 @@ pub fn fetch_address_book_entry(svm: &LiteSVM, pda: &Pubkey) -> AddressBookEntry
 pub fn fetch_mint_nonce(svm: &LiteSVM, pda: &Pubkey) -> MintNonce {
     let acct = svm.get_account(pda).expect("mint_nonce account exists");
     MintNonce::try_deserialize(&mut acct.data.as_slice()).expect("valid MintNonce")
+}
+
+pub fn seed_mint_nonce_account(svm: &mut LiteSVM, pda: &Pubkey, nonce: u64, bump: u8) {
+    let mut data = <MintNonce as Discriminator>::DISCRIMINATOR.to_vec();
+    MintNonce { nonce, bump }.serialize(&mut data).unwrap();
+
+    let account = solana_sdk::account::Account {
+        lamports: svm.minimum_balance_for_rent_exemption(data.len()),
+        data,
+        owner: PROGRAM_ID,
+        executable: false,
+        rent_epoch: 0,
+    };
+    svm.set_account(*pda, account).unwrap();
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +466,8 @@ pub struct ValidatePrepareFixture {
     pub adapter_program: Pubkey,
     pub accounts: ValidatePrepareAccounts,
     pub owner_ata: Pubkey,
+    pub across_state: Pubkey,
+    pub across_vault: Pubkey,
 }
 
 impl ValidatePrepareFixture {
@@ -430,10 +504,7 @@ impl ValidatePrepareFixture {
             6,
         );
 
-        // `validate_and_prepare` now requires the adapter to be a loader-owned
-        // executable program account, so reuse the loaded handler program as a
-        // stand-in.
-        let adapter_program = PROGRAM_ID;
+        let adapter_program = ADAPTER_PROGRAM_ID;
         let ix = update_adapters_ix(
             &payer.pubkey(),
             &owner.pubkey(),
@@ -448,6 +519,8 @@ impl ValidatePrepareFixture {
         let accounts = ValidatePrepareAccounts::derive(&sra_config, &source_mint, &adapter_program);
 
         let owner_ata = create_ata(svm, &payer, &owner.pubkey(), &source_mint);
+        let across_state = funded_keypair(svm, SOL).pubkey();
+        let across_vault = create_ata(svm, &payer, &across_state, &source_mint);
         mint_to(
             svm,
             &payer,
@@ -468,6 +541,8 @@ impl ValidatePrepareFixture {
             adapter_program,
             accounts,
             owner_ata,
+            across_state,
+            across_vault,
         }
     }
 
@@ -481,22 +556,137 @@ impl ValidatePrepareFixture {
         params: PrepareParams,
     ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
     {
+        self.invoke_with(svm, params, vec![])
+    }
+
+    pub fn invoke_with(
+        &self,
+        svm: &mut LiteSVM,
+        params: PrepareParams,
+        between_ixs: Vec<Instruction>,
+    ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
+    {
         let address_book_entry = self.address_book_entry(&params.target_token);
-        let ix = validate_and_prepare_ix(
+        let validate_ix = validate_and_prepare_ix(
             &self.payer.pubkey(),
             &self.owner.pubkey(),
             &self.accounts,
             &self.owner_ata,
             &address_book_entry,
-            params,
+            params.clone(),
         );
-        svm.expire_blockhash();
-        let blockhash = svm.latest_blockhash();
-        let msg = Message::new(&[ix], Some(&self.payer.pubkey()));
-        let mut tx = Transaction::new_unsigned(msg);
-        tx.sign(&[&self.payer, &self.owner], blockhash);
-        svm.send_transaction(tx).map_err(Box::new)
+        let execute_ix = execute_deposit_across_ix(
+            &self.payer.pubkey(),
+            self,
+            &fetch_sra_config(svm, &self.sra_config),
+            &params,
+            across_params_for(self, &params),
+            current_nonce(svm, &self.accounts.mint_nonce),
+        );
+
+        let mut ixs = vec![validate_ix];
+        ixs.extend(between_ixs);
+        ixs.push(execute_ix);
+        send_instructions(svm, &ixs, &self.payer, &[&self.owner])
     }
+}
+
+pub fn across_params_for(
+    fx: &ValidatePrepareFixture,
+    params: &PrepareParams,
+) -> AcrossDepositParams {
+    AcrossDepositParams {
+        input_amount: params.input_amount,
+        output_amount: sra_common::source_deposit::handler_output_amount_u256(params.output_amount),
+        target_token: params.target_token,
+        action_idxs: params.action_idxs.clone(),
+        exclusive_relayer: fx.payer.pubkey(),
+        fill_deadline_offset: 3_600,
+        exclusivity_period: 900,
+    }
+}
+
+pub fn execute_deposit_across_ix(
+    fee_payer: &Pubkey,
+    fx: &ValidatePrepareFixture,
+    sra_config: &SraConfig,
+    prepare: &PrepareParams,
+    params: AcrossDepositParams,
+    prepared_nonce: u64,
+) -> Instruction {
+    let bundle = sra_across_adapter::utils::build_deposit_now_bundle(
+        &fx.accounts.adapter_authority,
+        sra_config,
+        &fx.source_mint,
+        prepare,
+        &params,
+        prepared_nonce,
+    )
+    .expect("build deposit-now bundle");
+
+    Instruction {
+        program_id: ADAPTER_PROGRAM_ID,
+        accounts: vec![
+            solana_sdk::instruction::AccountMeta::new(*fee_payer, true),
+            solana_sdk::instruction::AccountMeta::new_readonly(
+                anchor_lang::solana_program::sysvar::instructions::ID,
+                false,
+            ),
+            solana_sdk::instruction::AccountMeta::new_readonly(fx.sra_config, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(fx.accounts.mint_nonce, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(
+                fx.accounts.adapter_authority,
+                false,
+            ),
+            solana_sdk::instruction::AccountMeta::new(fx.accounts.adapter_custody, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(fx.source_mint, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(ACROSS_SPOKE_POOL_ID, false),
+            solana_sdk::instruction::AccountMeta::new(fx.across_state, false),
+            solana_sdk::instruction::AccountMeta::new(fx.across_vault, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(bundle.delegate.pda, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(system_program::ID, false),
+        ],
+        data: encode_execute_deposit_data(&params),
+    }
+}
+
+pub fn encode_execute_deposit_data(params: &AcrossDepositParams) -> Vec<u8> {
+    let mut data = instruction_discriminator("execute_deposit_across").to_vec();
+    params.serialize(&mut data).unwrap();
+    data
+}
+
+pub fn compute_budget_ix() -> Instruction {
+    ComputeBudgetInstruction::set_compute_unit_limit(400_000)
+}
+
+pub fn invoke_execute_only(
+    fx: &ValidatePrepareFixture,
+    svm: &mut LiteSVM,
+    prepare: &PrepareParams,
+    params: AcrossDepositParams,
+) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>> {
+    let ix = execute_deposit_across_ix(
+        &fx.payer.pubkey(),
+        fx,
+        &fetch_sra_config(svm, &fx.sra_config),
+        prepare,
+        params,
+        current_nonce(svm, &fx.accounts.mint_nonce),
+    );
+    send_instructions(svm, &[ix], &fx.payer, &[])
+}
+
+pub fn current_nonce(svm: &LiteSVM, mint_nonce: &Pubkey) -> u64 {
+    svm.get_account(mint_nonce)
+        .map(|acct| {
+            MintNonce::try_deserialize(&mut acct.data.as_slice())
+                .expect("valid MintNonce")
+                .nonce
+        })
+        .unwrap_or(0)
 }
 
 // ---------------------------------------------------------------------------

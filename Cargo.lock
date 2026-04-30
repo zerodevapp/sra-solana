@@ -1993,6 +1993,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mock-spoke-pool"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "solana-keccak-hasher",
+]
+
+[[package]]
 name = "num"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5243,6 +5252,7 @@ dependencies = [
  "hex",
  "serde_json",
  "solana-keccak-hasher",
+ "solana-sha256-hasher",
 ]
 
 [[package]]
@@ -5258,6 +5268,7 @@ dependencies = [
  "solana-sdk",
  "solana-sdk-ids",
  "solana-system-interface",
+ "sra-across-adapter",
  "sra-common",
 ]
 
