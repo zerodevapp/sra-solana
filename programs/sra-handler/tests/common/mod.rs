@@ -149,6 +149,14 @@ pub fn derive_adapter_authority_pda(sra_config: &Pubkey, adapter_program: &Pubke
     )
 }
 
+pub fn derive_real_across_state_pda() -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[b"state", &0u64.to_le_bytes()], &ACROSS_SPOKE_POOL_ID)
+}
+
+pub fn derive_real_across_event_authority_pda() -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[b"__event_authority"], &ACROSS_SPOKE_POOL_ID)
+}
+
 pub fn initialize_sra_ix(
     payer: &Pubkey,
     owner: &Pubkey,
@@ -644,6 +652,10 @@ pub fn execute_deposit_across_ix(
             solana_sdk::instruction::AccountMeta::new_readonly(ACROSS_SPOKE_POOL_ID, false),
             solana_sdk::instruction::AccountMeta::new(fx.across_state, false),
             solana_sdk::instruction::AccountMeta::new(fx.across_vault, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(
+                derive_real_across_event_authority_pda().0,
+                false,
+            ),
             solana_sdk::instruction::AccountMeta::new_readonly(bundle.delegate.pda, false),
             solana_sdk::instruction::AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
             solana_sdk::instruction::AccountMeta::new_readonly(ATA_PROGRAM_ID, false),

@@ -73,6 +73,9 @@ pub struct ExecuteDepositAcross<'info> {
         associated_token::authority = across_state,
     )]
     pub across_vault: Box<Account<'info, TokenAccount>>,
+    /// CHECK: Across Anchor event-authority PDA derived from `__event_authority`.
+    #[account(seeds = [b"__event_authority"], bump, seeds::program = across_program.key())]
+    pub across_event_authority: UncheckedAccount<'info>,
     /// CHECK: derived from the full deposit-now seed hash and checked in the handler.
     pub delegate: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
@@ -144,6 +147,8 @@ pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) 
         token_program: ctx.accounts.token_program.to_account_info(),
         associated_token_program: ctx.accounts.associated_token_program.to_account_info(),
         system_program: ctx.accounts.system_program.to_account_info(),
+        event_authority: ctx.accounts.across_event_authority.to_account_info(),
+        program: ctx.accounts.across_program.to_account_info(),
     };
     crate::utils::svm_spoke::cpi::deposit_now(
         CpiContext::new(ctx.accounts.across_program.to_account_info(), cpi_accounts),

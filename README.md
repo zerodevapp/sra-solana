@@ -118,6 +118,16 @@ anchor test
 
 The current TS suite (`tests/sra-handler.ts`) is a smoke test that asserts the generated IDL/client surface — most coverage lives in the Rust LiteSVM tests.
 
+**3. Surfpool source E2E** (real Across path, heavier)
+
+```bash
+NO_DNA=1 anchor build
+NO_DNA=1 surfpool start --ci --network mainnet --legacy-anchor-compatibility
+cargo test -p sra-handler --test source_e2e_surfpool -- --ignored --nocapture
+```
+
+This uses Surfpool's auto-deploy path to load the local `sra-handler` and `sra-across-adapter` programs at their declared Anchor IDs, then runs the Step 21 source deposit flow against the real Across `svm-spoke` program/state.
+
 ## Running on localnet
 
 ```bash
