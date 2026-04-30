@@ -53,7 +53,13 @@
         },
         { "name": "input_mint" },
         { "name": "across_program", "address": "DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru" },
-        { "name": "across_state", "writable": true },
+        {
+          "name": "across_state",
+          "docs": [
+            "passed through to the `deposit_now` CPI."
+          ],
+          "writable": true
+        },
         {
           "name": "across_vault",
           "docs": [

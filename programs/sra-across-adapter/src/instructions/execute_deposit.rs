@@ -60,7 +60,8 @@ pub struct ExecuteDepositAcross<'info> {
     /// CHECK: canonical Across SpokePool program.
     #[account(address = ACROSS_SPOKE_POOL_ID)]
     pub across_program: UncheckedAccount<'info>,
-    /// CHECK: Placeholder until full Across CPI wiring lands.
+    /// CHECK: SpokePool state PDA — owned and validated by `across_program`;
+    /// passed through to the `deposit_now` CPI.
     #[account(mut)]
     pub across_state: UncheckedAccount<'info>,
     /// Pin the destination of the `deposit_now` token movement to the canonical
