@@ -2,7 +2,7 @@
 //!
 //! Solana enforces a hard 1232-byte packet limit. The full source
 //! deposit flow is `validate_and_prepare` (handler) + `execute_deposit_across`
-//! (adapter) packaged as a single versioned transaction. 
+//! (adapter) packaged as a single versioned transaction.
 
 mod common;
 
