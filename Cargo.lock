@@ -5262,6 +5262,7 @@ dependencies = [
  "anchor-lang",
  "anchor-spl",
  "base64 0.22.1",
+ "bincode",
  "litesvm",
  "litesvm-token",
  "solana-program",
