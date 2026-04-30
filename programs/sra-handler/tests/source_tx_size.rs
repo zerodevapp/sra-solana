@@ -59,8 +59,9 @@ fn source_2ix_versioned_tx_max_action_idxs_fits_within_packet_limit() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
 
-    // Worst case: max action_idxs (4 entries × 8 bytes + 4-byte length prefix
-    // = 36 bytes of routing payload, vs ~12 bytes for the typical 2-entry case).
+    // Worst case: max action_idxs (`MAX_ACTION_IDXS` entries × 8 bytes each,
+    // plus the 4-byte vector length prefix, vs ~12 bytes for the typical
+    // 2-entry case).
     let params = PrepareParams {
         input_amount: INPUT,
         output_amount: OUTPUT_WITHIN_SLIPPAGE,
