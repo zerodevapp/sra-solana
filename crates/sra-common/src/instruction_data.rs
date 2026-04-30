@@ -1,6 +1,6 @@
-use anchor_lang::{error, prelude::*, AnchorDeserialize};
 #[cfg(not(target_os = "solana"))]
 use anchor_lang::AnchorSerialize;
+use anchor_lang::{error, prelude::*, AnchorDeserialize};
 use solana_sha256_hasher::hash;
 
 use crate::errors::SraError;

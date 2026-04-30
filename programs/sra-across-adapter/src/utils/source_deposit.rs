@@ -181,8 +181,7 @@ mod tests {
         let adapter_authority = Pubkey::new_unique();
         let input_mint = Pubkey::new_unique();
         let prepare = PrepareParams::new(11, 22, evm_bytes32(0xbb), vec![1, 2]);
-        let deposit =
-            AcrossDepositParams::from_prepare(&prepare, Pubkey::new_unique(), 600, 120);
+        let deposit = AcrossDepositParams::from_prepare(&prepare, Pubkey::new_unique(), 600, 120);
         let sra_config = sample_sra_config();
 
         let build_0 = build_deposit_now_bundle(

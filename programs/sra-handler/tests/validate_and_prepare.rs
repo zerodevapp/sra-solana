@@ -41,34 +41,6 @@ fn build_deposit_bundle(
     .expect("build deposit-now bundle")
 }
 
-fn shell_fixture(
-    config: sra_handler::instructions::source::initialize_sra::SraInitConfig,
-    sra_config: Pubkey,
-    source_mint: Pubkey,
-    target_chain_id: u64,
-    target_token: [u8; 32],
-    adapter_program: Pubkey,
-    accounts: ValidatePrepareAccounts,
-    owner_ata: Pubkey,
-    across_state: Pubkey,
-    across_vault: Pubkey,
-) -> ValidatePrepareFixture {
-    ValidatePrepareFixture {
-        payer: Keypair::new(),
-        owner: Keypair::new(),
-        config,
-        sra_config,
-        source_mint,
-        target_chain_id,
-        target_token,
-        adapter_program,
-        accounts,
-        owner_ata,
-        across_state,
-        across_vault,
-    }
-}
-
 fn invoke_source_flow(
     svm: &mut LiteSVM,
     payer: &Keypair,
@@ -1011,18 +983,20 @@ fn validate_and_prepare_multi_mint_single_sra_independent_nonces() {
         &second_owner_ata,
         OWNER_STARTING_BALANCE,
     );
-    let second_fx = shell_fixture(
-        fx.config.clone(),
-        fx.sra_config,
-        second_mint,
-        fx.target_chain_id,
-        fx.target_token,
-        fx.adapter_program,
-        second_accounts,
-        second_owner_ata,
-        second_across_state,
-        second_across_vault,
-    );
+    let second_fx = ValidatePrepareFixture {
+        payer: Keypair::new(),
+        owner: Keypair::new(),
+        config: fx.config.clone(),
+        sra_config: fx.sra_config,
+        source_mint: second_mint,
+        target_chain_id: fx.target_chain_id,
+        target_token: fx.target_token,
+        adapter_program: fx.adapter_program,
+        accounts: second_accounts,
+        owner_ata: second_owner_ata,
+        across_state: second_across_state,
+        across_vault: second_across_vault,
+    };
 
     let meta_b0 = invoke_source_flow(
         &mut svm,
@@ -1128,10 +1102,7 @@ fn validate_and_prepare_rejection_preserves_nonce() {
         };
         assert_eq!(
             err,
-            TransactionError::InstructionError(
-                0,
-                InstructionError::Custom(expected_err.into()),
-            ),
+            TransactionError::InstructionError(0, InstructionError::Custom(expected_err.into()),),
             "{name}",
         );
         assert_eq!(
