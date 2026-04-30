@@ -1,3 +1,1 @@
-pub mod ix_attestation;
-
-pub use ix_attestation::*;
+pub(crate) mod ix_attestation;

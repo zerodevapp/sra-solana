@@ -18,6 +18,7 @@ idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build", "sra-common/idl-bu
 anchor-debug = []
 custom-heap = []
 custom-panic = []
+test-utils = []
 
 [dependencies]
 anchor-lang = "0.32.1"

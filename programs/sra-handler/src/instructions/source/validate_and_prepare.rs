@@ -12,7 +12,7 @@ use sra_common::{
 };
 
 use crate::events::DepositPrepared;
-use crate::utils::verify_next_adapter_ix;
+use crate::utils::ix_attestation::verify_next_adapter_ix;
 
 fn is_program_owner(owner: &Pubkey) -> bool {
     bpf_loader::check_id(owner)

@@ -10,7 +10,7 @@ use sra_common::{
     types::SraConfig,
 };
 
-use crate::utils::{deposit_now_delegate, DelegateDerivation, DepositNowParams};
+use crate::utils::seed_hash::{deposit_now_delegate, DelegateDerivation, DepositNowParams};
 
 pub struct DepositNowBuild {
     pub params: DepositNowParams,

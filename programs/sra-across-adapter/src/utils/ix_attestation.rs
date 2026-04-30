@@ -14,7 +14,7 @@ const HANDLER_ACCT_SOURCE_MINT: usize = 4;
 const HANDLER_ACCT_ADAPTER_PROGRAM: usize = 9;
 const MIN_HANDLER_ACCOUNTS: usize = HANDLER_ACCT_ADAPTER_PROGRAM + 1;
 
-pub fn verify_previous_handler_ix(
+pub(crate) fn verify_previous_handler_ix(
     instructions_sysvar: &AccountInfo,
     sra_config: &Pubkey,
     source_mint: &Pubkey,

@@ -13,7 +13,7 @@ const ADAPTER_ACCT_SRA_CONFIG: usize = 2;
 const ADAPTER_ACCT_INPUT_MINT: usize = 6;
 const MIN_ADAPTER_ACCOUNTS: usize = ADAPTER_ACCT_INPUT_MINT + 1;
 
-pub fn verify_next_adapter_ix(
+pub(crate) fn verify_next_adapter_ix(
     instructions_sysvar: &AccountInfo,
     adapter_program: &Pubkey,
     sra_config: &Pubkey,

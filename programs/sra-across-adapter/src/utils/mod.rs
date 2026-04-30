@@ -1,9 +1,10 @@
 pub mod across_cpi;
-pub mod ix_attestation;
-pub mod seed_hash;
-pub mod source_deposit;
+pub(crate) mod ix_attestation;
+pub(crate) mod seed_hash;
+pub(crate) mod source_deposit;
 
-pub use across_cpi::*;
-pub use ix_attestation::*;
-pub use seed_hash::*;
-pub use source_deposit::*;
+pub use across_cpi::svm_spoke;
+
+// Test-only re-export. Handler integration tests need `build_deposit_now_bundle`
+#[cfg(feature = "test-utils")]
+pub use source_deposit::{build_deposit_now_bundle, DepositNowBuild};
