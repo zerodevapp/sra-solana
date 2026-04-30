@@ -1,7 +1,7 @@
 //! Source 2-IX versioned-transaction size validation.
 //!
-//! Solana enforces a hard 1232-byte packet limit. The full source
-//! deposit flow is `validate_and_prepare` (handler) + `execute_deposit_across`
+//! Solana enforces a hard packet-size limit. The full source deposit
+//! flow is `validate_and_prepare` (handler) + `execute_deposit_across`
 //! (adapter) packaged as a single versioned transaction.
 
 mod common;
