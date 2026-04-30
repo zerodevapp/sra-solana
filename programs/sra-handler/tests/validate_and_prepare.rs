@@ -59,12 +59,14 @@ fn invoke_source_flow(
         &address_book_entry,
         params.clone(),
     );
+    let mut across = across_params_for(fx, &params);
+    across.exclusive_relayer = payer.pubkey();
     let execute_ix = execute_deposit_across_ix(
         &payer.pubkey(),
         fx,
         &fetch_sra_config(svm, &fx.sra_config),
         &params,
-        across_params_for(fx, &params),
+        across,
         current_nonce(svm, &fx.accounts.mint_nonce),
     );
     send_instructions(svm, &[validate_ix, execute_ix], payer, &[owner])
