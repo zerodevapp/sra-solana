@@ -1,8 +1,8 @@
 use anchor_lang::{error, prelude::*};
 use sra_common::{
     abi::{
-        abi_encode_sra_message, build_extra_envelope, bytes32_to_evm_address, source_token_hash,
-        u256_from_u64, DepositInfo, Message, TokenParam,
+        abi_encode_sra_message, build_extra_envelope, bytes32_to_evm_address, replay_hash,
+        source_token_hash, u256_from_u64, DepositInfo, Message, TokenParam,
     },
     constants::SOLANA_CHAIN_ID,
     errors::SraError,
@@ -15,6 +15,10 @@ use crate::utils::seed_hash::{deposit_now_delegate, DelegateDerivation, DepositN
 pub struct DepositNowBuild {
     pub params: DepositNowParams,
     pub delegate: DelegateDerivation,
+    #[cfg(any(test, feature = "test-utils"))]
+    pub message: Message,
+    #[cfg(any(test, feature = "test-utils"))]
+    pub replay_hash: [u8; 32],
 }
 
 fn narrow_evm_address(value: &[u8; 32]) -> Result<[u8; 20]> {
@@ -62,6 +66,8 @@ pub fn build_deposit_now_bundle(
         &u256_from_u64(SOLANA_CHAIN_ID),
         &message,
     );
+    #[cfg(any(test, feature = "test-utils"))]
+    let replay_hash = replay_hash(&u256_from_u64(SOLANA_CHAIN_ID), &message);
 
     let params = DepositNowParams {
         depositor: *adapter_authority,
@@ -78,7 +84,14 @@ pub fn build_deposit_now_bundle(
     };
     let delegate = deposit_now_delegate(&sra_common::constants::ACROSS_SPOKE_POOL_ID, &params)?;
 
-    Ok(DepositNowBuild { params, delegate })
+    Ok(DepositNowBuild {
+        params,
+        delegate,
+        #[cfg(any(test, feature = "test-utils"))]
+        message,
+        #[cfg(any(test, feature = "test-utils"))]
+        replay_hash,
+    })
 }
 
 #[cfg(test)]
@@ -164,6 +177,8 @@ mod tests {
             build.params.output_token,
             Pubkey::new_from_array(prepare.target_token)
         );
+        assert_eq!(build.message, matching.message);
+        assert_eq!(build.replay_hash, matching.replay_hash);
         assert_eq!(build.params.message, matching.params.message);
     }
 }
