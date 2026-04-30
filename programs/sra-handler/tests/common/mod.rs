@@ -724,7 +724,7 @@ where
         if raw.len() < expected_disc.len() || &raw[..expected_disc.len()] != expected_disc {
             continue;
         }
-        if let Ok(ev) = T::try_from_slice(&raw[expected_disc.len()..]) {
+        if let Ok(ev) = <T as AnchorDeserialize>::try_from_slice(&raw[expected_disc.len()..]) {
             return Some(ev);
         }
     }
