@@ -28,7 +28,7 @@ fn validate_and_prepare_happy_path() {
         .invoke(&mut svm, params.clone())
         .expect("validate_and_prepare should succeed");
 
-    // Tokens flowed owner -> SRA vault -> adapter custody in a single tx.
+    // Tokens flowed owner -> SRA vault -> adapter custody -> Across vault in a single tx.
     assert_eq!(
         fetch_token_balance(&svm, &fx.owner_ata),
         OWNER_STARTING_BALANCE - INPUT,
@@ -569,21 +569,6 @@ fn execute_deposit_wrong_prev_handler_call_rejected() {
 }
 
 #[test]
-fn source_2ix_happy_path_moves_tokens_into_across_vault() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-
-    let meta = fx
-        .invoke(&mut svm, default_prepare_params(&fx))
-        .expect("paired source flow should succeed");
-
-    assert_eq!(fetch_token_balance(&svm, &fx.accounts.adapter_custody), 0);
-    assert_eq!(fetch_token_balance(&svm, &fx.across_vault), INPUT);
-    let ev = extract_deposit_prepared(&meta.logs).expect("DepositPrepared event must be emitted");
-    assert_eq!(ev.input_amount, INPUT);
-}
-
-#[test]
 fn validate_and_prepare_disabled_address_book_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
@@ -810,7 +795,7 @@ fn validate_and_prepare_sequential_nonce_increments() {
         );
     }
 
-    // After 3 successful deposits: adapter_custody holds 3x 100_000, owner is short the same.
+    // After 3 successful deposits: across_vault holds 3x 100_000, owner is short the same.
     assert_eq!(fetch_token_balance(&svm, &fx.across_vault), 300_000);
     assert_eq!(
         fetch_token_balance(&svm, &fx.owner_ata),
