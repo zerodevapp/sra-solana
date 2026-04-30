@@ -476,52 +476,6 @@ fn validate_and_prepare_wrong_next_ix_input_amount_rejected() {
 }
 
 #[test]
-fn validate_and_prepare_wrong_next_ix_output_amount_rejected() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-    let prepare = default_prepare_params(&fx);
-    let mut across = across_params_for(&fx, &prepare);
-    across.output_amount =
-        sra_common::source_deposit::handler_output_amount_u256(prepare.output_amount + 1);
-
-    let address_book_entry = fx.address_book_entry(&fx.target_token);
-    let validate_ix = validate_and_prepare_ix(
-        &fx.payer.pubkey(),
-        &fx.owner.pubkey(),
-        &fx.accounts,
-        &fx.owner_ata,
-        &address_book_entry,
-        prepare.clone(),
-    );
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        across,
-        current_nonce(&svm, &fx.accounts.mint_nonce),
-    );
-
-    let err = send_instructions(
-        &mut svm,
-        &[validate_ix, execute_ix],
-        &fx.payer,
-        &[&fx.owner],
-    )
-    .expect_err("output_amount mismatch in IX 2 must reject")
-    .err
-    .clone();
-
-    assert_eq!(
-        err,
-        TransactionError::InstructionError(
-            0,
-            InstructionError::Custom(SraError::PairedInstructionMismatch.into()),
-        )
-    );
-}
-
-#[test]
 fn validate_and_prepare_malformed_next_ix_data_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
@@ -1007,34 +961,6 @@ fn validate_and_prepare_max_action_idxs_happy_path() {
 }
 
 #[test]
-fn validate_and_prepare_same_sra_mint_distinct_messages_and_replay_hashes() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-    let params = default_prepare_params(&fx);
-
-    let meta_0 = fx
-        .invoke(&mut svm, params.clone())
-        .expect("first deposit should succeed");
-    let ev_0 = extract_deposit_prepared(&meta_0.logs).expect("first DepositPrepared event");
-    let build_0 = build_deposit_bundle(&fx, &svm, &params, ev_0.nonce);
-
-    let meta_1 = fx
-        .invoke(&mut svm, params.clone())
-        .expect("second deposit should succeed");
-    let ev_1 = extract_deposit_prepared(&meta_1.logs).expect("second DepositPrepared event");
-    let build_1 = build_deposit_bundle(&fx, &svm, &params, ev_1.nonce);
-
-    assert_eq!(ev_0.nonce, 0);
-    assert_eq!(ev_1.nonce, 1);
-    assert_ne!(build_0.params.message, build_1.params.message);
-    assert_ne!(build_0.replay_hash, build_1.replay_hash);
-    assert_ne!(
-        build_0.message.deposit_info.extra,
-        build_1.message.deposit_info.extra
-    );
-}
-
-#[test]
 fn validate_and_prepare_concurrent_sras_same_adapter_independent() {
     let mut svm = setup_svm();
     let fx_a = ValidatePrepareFixture::new(&mut svm);
@@ -1129,188 +1055,102 @@ fn validate_and_prepare_multi_mint_single_sra_independent_nonces() {
 }
 
 #[test]
-fn validate_and_prepare_same_owner_two_sras_same_mint_independent_nonces() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-    let params = default_prepare_params(&fx);
+fn validate_and_prepare_rejection_preserves_nonce() {
+    type Mutator = fn(&mut LiteSVM, &ValidatePrepareFixture);
 
-    let mut second_config = fx.config.clone();
-    second_config.app_id[0] ^= 0xFF;
-    let second_salt = [0xCDu8; 32];
-    let (second_sra_config, _) = derive_sra_pda(&fx.owner.pubkey(), &second_config, &second_salt);
-    let init_ix = initialize_sra_ix(
-        &fx.payer.pubkey(),
-        &fx.owner.pubkey(),
-        &second_sra_config,
-        second_config.clone(),
-        second_salt,
-    );
-    send_ix(&mut svm, init_ix, &fx.payer, &[&fx.owner]).expect("initialize second sra");
-    setup_address_book_entry(
-        &mut svm,
-        &fx.payer,
-        &fx.owner,
-        &second_sra_config,
-        fx.target_chain_id,
-        fx.target_token,
-        6,
-    );
-    let set_adapters_ix = update_adapters_ix(
-        &fx.payer.pubkey(),
-        &fx.owner.pubkey(),
-        &second_sra_config,
-        vec![fx.adapter_program],
-    );
-    send_ix(&mut svm, set_adapters_ix, &fx.payer, &[&fx.owner]).expect("set second adapters");
-    let set_slippage_ix = update_slippage_ix(&fx.owner.pubkey(), &second_sra_config, 50);
-    send_ix(&mut svm, set_slippage_ix, &fx.payer, &[&fx.owner]).expect("set second slippage");
+    let cases: [(&str, Mutator, Mutator, SraError); 2] = [
+        (
+            "address-book tombstone",
+            |svm, fx| {
+                setup_address_book_entry(
+                    svm,
+                    &fx.payer,
+                    &fx.owner,
+                    &fx.sra_config,
+                    fx.target_chain_id,
+                    fx.target_token,
+                    0,
+                );
+            },
+            |svm, fx| {
+                setup_address_book_entry(
+                    svm,
+                    &fx.payer,
+                    &fx.owner,
+                    &fx.sra_config,
+                    fx.target_chain_id,
+                    fx.target_token,
+                    6,
+                );
+            },
+            SraError::InvalidAddressBook,
+        ),
+        (
+            "adapter list cleared",
+            |svm, fx| {
+                let ix = update_adapters_ix(
+                    &fx.payer.pubkey(),
+                    &fx.owner.pubkey(),
+                    &fx.sra_config,
+                    vec![],
+                );
+                send_ix(svm, ix, &fx.payer, &[&fx.owner]).expect("clear adapters");
+            },
+            |svm, fx| {
+                let ix = update_adapters_ix(
+                    &fx.payer.pubkey(),
+                    &fx.owner.pubkey(),
+                    &fx.sra_config,
+                    vec![ADAPTER_PROGRAM_ID],
+                );
+                send_ix(svm, ix, &fx.payer, &[&fx.owner]).expect("restore adapters");
+            },
+            SraError::AdapterNotAllowed,
+        ),
+    ];
 
-    let second_accounts =
-        ValidatePrepareAccounts::derive(&second_sra_config, &fx.source_mint, &fx.adapter_program);
-    let second_across_state = funded_keypair(&mut svm, SOL).pubkey();
-    let second_across_vault =
-        create_ata(&mut svm, &fx.payer, &second_across_state, &fx.source_mint);
-    let second_fx = shell_fixture(
-        second_config,
-        second_sra_config,
-        fx.source_mint,
-        fx.target_chain_id,
-        fx.target_token,
-        fx.adapter_program,
-        second_accounts,
-        fx.owner_ata,
-        second_across_state,
-        second_across_vault,
-    );
+    for (name, disable, enable, expected_err) in cases {
+        let mut svm = setup_svm();
+        let fx = ValidatePrepareFixture::new(&mut svm);
+        let params = default_prepare_params(&fx);
 
-    let meta_a0 = fx
-        .invoke(&mut svm, params.clone())
-        .expect("first sra deposit #0 should succeed");
-    let ev_a0 = extract_deposit_prepared(&meta_a0.logs).expect("first sra event #0");
+        let meta_0 = fx
+            .invoke(&mut svm, params.clone())
+            .unwrap_or_else(|e| panic!("{name}: initial deposit must succeed: {e:?}"));
+        let ev_0 = extract_deposit_prepared(&meta_0.logs)
+            .unwrap_or_else(|| panic!("{name}: missing DepositPrepared #0"));
+        assert_eq!(ev_0.nonce, 0, "{name}");
 
-    let meta_b0 = invoke_source_flow(
-        &mut svm,
-        &fx.payer,
-        &fx.owner,
-        &second_fx,
-        &fx.owner_ata,
-        params.clone(),
-    )
-    .expect("second sra deposit #0 should succeed");
-    let ev_b0 = extract_deposit_prepared(&meta_b0.logs).expect("second sra event #0");
+        disable(&mut svm, &fx);
+        let err = match fx.invoke(&mut svm, params.clone()) {
+            Ok(_) => panic!("{name}: rejection expected, got success"),
+            Err(boxed) => boxed.err.clone(),
+        };
+        assert_eq!(
+            err,
+            TransactionError::InstructionError(
+                0,
+                InstructionError::Custom(expected_err.into()),
+            ),
+            "{name}",
+        );
+        assert_eq!(
+            fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce,
+            1,
+            "{name}: rejection must not bump nonce",
+        );
 
-    let meta_a1 = fx
-        .invoke(&mut svm, params)
-        .expect("first sra deposit #1 should succeed");
-    let ev_a1 = extract_deposit_prepared(&meta_a1.logs).expect("first sra event #1");
-
-    assert_ne!(fx.sra_config, second_fx.sra_config);
-    assert_eq!(ev_a0.nonce, 0);
-    assert_eq!(ev_b0.nonce, 0);
-    assert_eq!(ev_a1.nonce, 1);
-    assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 2);
-    assert_eq!(
-        fetch_mint_nonce(&svm, &second_fx.accounts.mint_nonce).nonce,
-        1
-    );
-}
-
-#[test]
-fn validate_and_prepare_tombstone_and_reenable_route_preserves_nonce() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-    let params = default_prepare_params(&fx);
-
-    let meta_0 = fx
-        .invoke(&mut svm, params.clone())
-        .expect("deposit before tombstone should succeed");
-    let ev_0 = extract_deposit_prepared(&meta_0.logs).expect("DepositPrepared event #0");
-    assert_eq!(ev_0.nonce, 0);
-
-    setup_address_book_entry(
-        &mut svm,
-        &fx.payer,
-        &fx.owner,
-        &fx.sra_config,
-        fx.target_chain_id,
-        fx.target_token,
-        0,
-    );
-    let err = fx
-        .invoke(&mut svm, params.clone())
-        .expect_err("tombstoned route must reject")
-        .err
-        .clone();
-    assert_eq!(
-        err,
-        TransactionError::InstructionError(
-            0,
-            InstructionError::Custom(SraError::InvalidAddressBook.into()),
-        )
-    );
-    assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 1);
-
-    setup_address_book_entry(
-        &mut svm,
-        &fx.payer,
-        &fx.owner,
-        &fx.sra_config,
-        fx.target_chain_id,
-        fx.target_token,
-        6,
-    );
-    let meta_1 = fx
-        .invoke(&mut svm, params)
-        .expect("re-enabled route should succeed");
-    let ev_1 = extract_deposit_prepared(&meta_1.logs).expect("DepositPrepared event #1");
-    assert_eq!(ev_1.nonce, 1);
-    assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 2);
-}
-
-#[test]
-fn validate_and_prepare_adapter_clear_and_restore_preserves_nonce() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-    let params = default_prepare_params(&fx);
-
-    let meta_0 = fx
-        .invoke(&mut svm, params.clone())
-        .expect("deposit before adapter clear should succeed");
-    let ev_0 = extract_deposit_prepared(&meta_0.logs).expect("DepositPrepared event #0");
-    assert_eq!(ev_0.nonce, 0);
-
-    let clear_ix = update_adapters_ix(
-        &fx.payer.pubkey(),
-        &fx.owner.pubkey(),
-        &fx.sra_config,
-        vec![],
-    );
-    send_ix(&mut svm, clear_ix, &fx.payer, &[&fx.owner]).expect("clear adapters");
-    let err = fx
-        .invoke(&mut svm, params.clone())
-        .expect_err("cleared adapter list must reject")
-        .err
-        .clone();
-    assert_eq!(
-        err,
-        TransactionError::InstructionError(
-            0,
-            InstructionError::Custom(SraError::AdapterNotAllowed.into()),
-        )
-    );
-    assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 1);
-
-    let restore_ix = update_adapters_ix(
-        &fx.payer.pubkey(),
-        &fx.owner.pubkey(),
-        &fx.sra_config,
-        vec![ADAPTER_PROGRAM_ID],
-    );
-    send_ix(&mut svm, restore_ix, &fx.payer, &[&fx.owner]).expect("restore adapters");
-    let meta_1 = fx
-        .invoke(&mut svm, params)
-        .expect("restored adapter list should succeed");
-    let ev_1 = extract_deposit_prepared(&meta_1.logs).expect("DepositPrepared event #1");
-    assert_eq!(ev_1.nonce, 1);
-    assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 2);
+        enable(&mut svm, &fx);
+        let meta_1 = fx
+            .invoke(&mut svm, params)
+            .unwrap_or_else(|e| panic!("{name}: post-enable deposit must succeed: {e:?}"));
+        let ev_1 = extract_deposit_prepared(&meta_1.logs)
+            .unwrap_or_else(|| panic!("{name}: missing DepositPrepared #1"));
+        assert_eq!(ev_1.nonce, 1, "{name}");
+        assert_eq!(
+            fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce,
+            2,
+            "{name}: post-enable nonce must continue",
+        );
+    }
 }

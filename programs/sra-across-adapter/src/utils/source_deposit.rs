@@ -175,4 +175,40 @@ mod tests {
         assert_eq!(build.replay_hash, matching.replay_hash);
         assert_eq!(build.params.message, matching.params.message);
     }
+
+    #[test]
+    fn build_deposit_now_bundle_distinct_nonces_produce_distinct_messages_and_replay_hashes() {
+        let adapter_authority = Pubkey::new_unique();
+        let input_mint = Pubkey::new_unique();
+        let prepare = PrepareParams::new(11, 22, evm_bytes32(0xbb), vec![1, 2]);
+        let deposit =
+            AcrossDepositParams::from_prepare(&prepare, Pubkey::new_unique(), 600, 120);
+        let sra_config = sample_sra_config();
+
+        let build_0 = build_deposit_now_bundle(
+            &adapter_authority,
+            &sra_config,
+            &input_mint,
+            &prepare,
+            &deposit,
+            0,
+        )
+        .unwrap();
+        let build_1 = build_deposit_now_bundle(
+            &adapter_authority,
+            &sra_config,
+            &input_mint,
+            &prepare,
+            &deposit,
+            1,
+        )
+        .unwrap();
+
+        assert_ne!(build_0.params.message, build_1.params.message);
+        assert_ne!(build_0.replay_hash, build_1.replay_hash);
+        assert_ne!(
+            build_0.message.deposit_info.extra,
+            build_1.message.deposit_info.extra,
+        );
+    }
 }
