@@ -1,4 +1,6 @@
 use anchor_lang::{error, prelude::*};
+#[cfg(any(test, feature = "test-utils"))]
+use sra_common::abi::replay_hash;
 use sra_common::{
     abi::{
         abi_encode_sra_message, build_extra_envelope, bytes32_to_evm_address, source_token_hash,
@@ -15,6 +17,10 @@ use crate::utils::seed_hash::{deposit_now_delegate, DelegateDerivation, DepositN
 pub struct DepositNowBuild {
     pub params: DepositNowParams,
     pub delegate: DelegateDerivation,
+    #[cfg(any(test, feature = "test-utils"))]
+    pub message: Message,
+    #[cfg(any(test, feature = "test-utils"))]
+    pub replay_hash: [u8; 32],
 }
 
 fn narrow_evm_address(value: &[u8; 32]) -> Result<[u8; 20]> {
@@ -62,6 +68,8 @@ pub fn build_deposit_now_bundle(
         &u256_from_u64(SOLANA_CHAIN_ID),
         &message,
     );
+    #[cfg(any(test, feature = "test-utils"))]
+    let replay_hash = replay_hash(&u256_from_u64(SOLANA_CHAIN_ID), &message);
 
     let params = DepositNowParams {
         depositor: *adapter_authority,
@@ -78,7 +86,14 @@ pub fn build_deposit_now_bundle(
     };
     let delegate = deposit_now_delegate(&sra_common::constants::ACROSS_SPOKE_POOL_ID, &params)?;
 
-    Ok(DepositNowBuild { params, delegate })
+    Ok(DepositNowBuild {
+        params,
+        delegate,
+        #[cfg(any(test, feature = "test-utils"))]
+        message,
+        #[cfg(any(test, feature = "test-utils"))]
+        replay_hash,
+    })
 }
 
 #[cfg(test)]
@@ -111,12 +126,7 @@ mod tests {
     fn build_deposit_now_bundle_uses_prepare_intent_fields() {
         let adapter_authority = Pubkey::new_unique();
         let input_mint = Pubkey::new_unique();
-        let prepare = PrepareParams {
-            input_amount: 11,
-            output_amount: 22,
-            target_token: evm_bytes32(0xbb),
-            action_idxs: vec![1, 2],
-        };
+        let prepare = PrepareParams::new(11, 22, evm_bytes32(0xbb), vec![1, 2]);
         let deposit = AcrossDepositParams {
             input_amount: 99,
             output_amount: u256_from_u64(88),
@@ -126,15 +136,12 @@ mod tests {
             fill_deadline_offset: 600,
             exclusivity_period: 120,
         };
-        let matching_deposit = AcrossDepositParams {
-            input_amount: prepare.input_amount,
-            output_amount: u256_from_u64(prepare.output_amount),
-            target_token: prepare.target_token,
-            action_idxs: prepare.action_idxs.clone(),
-            exclusive_relayer: deposit.exclusive_relayer,
-            fill_deadline_offset: deposit.fill_deadline_offset,
-            exclusivity_period: deposit.exclusivity_period,
-        };
+        let matching_deposit = AcrossDepositParams::from_prepare(
+            &prepare,
+            deposit.exclusive_relayer,
+            deposit.fill_deadline_offset,
+            deposit.exclusivity_period,
+        );
 
         let build = build_deposit_now_bundle(
             &adapter_authority,
@@ -164,6 +171,43 @@ mod tests {
             build.params.output_token,
             Pubkey::new_from_array(prepare.target_token)
         );
+        assert_eq!(build.message, matching.message);
+        assert_eq!(build.replay_hash, matching.replay_hash);
         assert_eq!(build.params.message, matching.params.message);
+    }
+
+    #[test]
+    fn build_deposit_now_bundle_distinct_nonces_produce_distinct_messages_and_replay_hashes() {
+        let adapter_authority = Pubkey::new_unique();
+        let input_mint = Pubkey::new_unique();
+        let prepare = PrepareParams::new(11, 22, evm_bytes32(0xbb), vec![1, 2]);
+        let deposit = AcrossDepositParams::from_prepare(&prepare, Pubkey::new_unique(), 600, 120);
+        let sra_config = sample_sra_config();
+
+        let build_0 = build_deposit_now_bundle(
+            &adapter_authority,
+            &sra_config,
+            &input_mint,
+            &prepare,
+            &deposit,
+            0,
+        )
+        .unwrap();
+        let build_1 = build_deposit_now_bundle(
+            &adapter_authority,
+            &sra_config,
+            &input_mint,
+            &prepare,
+            &deposit,
+            1,
+        )
+        .unwrap();
+
+        assert_ne!(build_0.params.message, build_1.params.message);
+        assert_ne!(build_0.replay_hash, build_1.replay_hash);
+        assert_ne!(
+            build_0.message.deposit_info.extra,
+            build_1.message.deposit_info.extra,
+        );
     }
 }

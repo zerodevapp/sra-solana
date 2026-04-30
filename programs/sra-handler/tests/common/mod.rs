@@ -28,7 +28,7 @@ use solana_sdk::{
 use solana_system_interface::program as system_program;
 use sra_common::{
     constants::ACROSS_SPOKE_POOL_ID,
-    instruction_data::instruction_discriminator,
+    instruction_data::encode_anchor_instruction_data,
     seeds::{SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_SRA},
     source_deposit::{AcrossDepositParams, PrepareParams},
     types::{AddressBookEntry, MintNonce, SraConfig},
@@ -604,15 +604,7 @@ pub fn across_params_for(
     fx: &ValidatePrepareFixture,
     params: &PrepareParams,
 ) -> AcrossDepositParams {
-    AcrossDepositParams {
-        input_amount: params.input_amount,
-        output_amount: sra_common::source_deposit::handler_output_amount_u256(params.output_amount),
-        target_token: params.target_token,
-        action_idxs: params.action_idxs.clone(),
-        exclusive_relayer: fx.payer.pubkey(),
-        fill_deadline_offset: 3_600,
-        exclusivity_period: 900,
-    }
+    AcrossDepositParams::from_prepare(params, fx.payer.pubkey(), 3_600, 900)
 }
 
 pub fn execute_deposit_across_ix(
@@ -657,14 +649,8 @@ pub fn execute_deposit_across_ix(
             solana_sdk::instruction::AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
             solana_sdk::instruction::AccountMeta::new_readonly(system_program::ID, false),
         ],
-        data: encode_execute_deposit_data(&params),
+        data: encode_anchor_instruction_data("execute_deposit_across", &params),
     }
-}
-
-pub fn encode_execute_deposit_data(params: &AcrossDepositParams) -> Vec<u8> {
-    let mut data = instruction_discriminator("execute_deposit_across").to_vec();
-    params.serialize(&mut data).unwrap();
-    data
 }
 
 pub fn compute_budget_ix() -> Instruction {
