@@ -21,6 +21,41 @@ pub struct AcrossDepositParams {
     pub exclusivity_period: u32,
 }
 
+impl PrepareParams {
+    pub fn new(
+        input_amount: u64,
+        output_amount: u64,
+        target_token: [u8; 32],
+        action_idxs: Vec<u64>,
+    ) -> Self {
+        Self {
+            input_amount,
+            output_amount,
+            target_token,
+            action_idxs,
+        }
+    }
+}
+
+impl AcrossDepositParams {
+    pub fn from_prepare(
+        prepare: &PrepareParams,
+        exclusive_relayer: Pubkey,
+        fill_deadline_offset: u32,
+        exclusivity_period: u32,
+    ) -> Self {
+        Self {
+            input_amount: prepare.input_amount,
+            output_amount: handler_output_amount_u256(prepare.output_amount),
+            target_token: prepare.target_token,
+            action_idxs: prepare.action_idxs.clone(),
+            exclusive_relayer,
+            fill_deadline_offset,
+            exclusivity_period,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NormalizedDepositIntent {
     pub input_amount: u64,
@@ -64,21 +99,9 @@ mod tests {
 
     #[test]
     fn normalized_intent_compares_semantic_fields() {
-        let prepare = PrepareParams {
-            input_amount: 11,
-            output_amount: 22,
-            target_token: [7u8; 32],
-            action_idxs: vec![3, 5],
-        };
-        let across = AcrossDepositParams {
-            input_amount: 11,
-            output_amount: handler_output_amount_u256(22),
-            target_token: [7u8; 32],
-            action_idxs: vec![3, 5],
-            exclusive_relayer: Pubkey::new_from_array([1u8; 32]),
-            fill_deadline_offset: 60,
-            exclusivity_period: 30,
-        };
+        let prepare = PrepareParams::new(11, 22, [7u8; 32], vec![3, 5]);
+        let across =
+            AcrossDepositParams::from_prepare(&prepare, Pubkey::new_from_array([1u8; 32]), 60, 30);
 
         assert_eq!(
             NormalizedDepositIntent::from_prepare(&prepare),

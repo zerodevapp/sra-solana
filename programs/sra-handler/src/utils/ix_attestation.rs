@@ -57,107 +57,15 @@ mod tests {
     use super::*;
     use anchor_lang::{
         error,
-        solana_program::{
-            instruction::{AccountMeta, Instruction},
-            sysvar::{
-                self,
-                instructions::{
-                    construct_instructions_data, store_current_index_checked, BorrowedAccountMeta,
-                    BorrowedInstruction, ID as INSTRUCTIONS_ID,
-                },
-            },
-        },
-        AnchorSerialize,
+        solana_program::instruction::{AccountMeta, Instruction},
     };
-
-    struct InstructionsSysvarFixture {
-        key: Pubkey,
-        owner: Pubkey,
-        lamports: u64,
-        data: Vec<u8>,
-    }
-
-    impl InstructionsSysvarFixture {
-        fn new(current_index: u16, ixs: &[Instruction]) -> Self {
-            let borrowed = ixs.iter().map(borrow_instruction).collect::<Vec<_>>();
-            let mut data = construct_instructions_data(&borrowed);
-            store_current_index_checked(&mut data, current_index).unwrap();
-            Self {
-                key: INSTRUCTIONS_ID,
-                owner: sysvar::ID,
-                lamports: 0,
-                data,
-            }
-        }
-
-        fn account_info(&mut self) -> AccountInfo<'_> {
-            AccountInfo::new(
-                &self.key,
-                false,
-                false,
-                &mut self.lamports,
-                &mut self.data,
-                &self.owner,
-                false,
-                0,
-            )
-        }
-    }
-
-    fn borrow_instruction(ix: &Instruction) -> BorrowedInstruction<'_> {
-        BorrowedInstruction {
-            program_id: &ix.program_id,
-            accounts: ix
-                .accounts
-                .iter()
-                .map(|meta| BorrowedAccountMeta {
-                    pubkey: &meta.pubkey,
-                    is_signer: meta.is_signer,
-                    is_writable: meta.is_writable,
-                })
-                .collect(),
-            data: &ix.data,
-        }
-    }
-
-    fn sample_prepare() -> PrepareParams {
-        PrepareParams {
-            input_amount: 123,
-            output_amount: 456,
-            target_token: [0xAB; 32],
-            action_idxs: vec![3, 7],
-        }
-    }
-
-    fn sample_across(prepare: &PrepareParams) -> AcrossDepositParams {
-        AcrossDepositParams {
-            input_amount: prepare.input_amount,
-            output_amount: sra_common::source_deposit::handler_output_amount_u256(
-                prepare.output_amount,
-            ),
-            target_token: prepare.target_token,
-            action_idxs: prepare.action_idxs.clone(),
-            exclusive_relayer: Pubkey::new_unique(),
-            fill_deadline_offset: 60,
-            exclusivity_period: 30,
-        }
-    }
-
-    fn encode_execute_deposit_data(params: &AcrossDepositParams) -> Vec<u8> {
-        let mut data =
-            sra_common::instruction_data::instruction_discriminator("execute_deposit_across")
-                .to_vec();
-        params.serialize(&mut data).unwrap();
-        data
-    }
-
-    fn current_ix() -> Instruction {
-        Instruction {
-            program_id: Pubkey::new_unique(),
-            accounts: vec![],
-            data: vec![],
-        }
-    }
+    use sra_common::{
+        instruction_data::encode_anchor_instruction_data,
+        test_utils::{
+            empty_instruction, sample_across_deposit, sample_prepare_params,
+            InstructionsSysvarFixture,
+        },
+    };
 
     fn matching_next_ix(
         adapter_program: Pubkey,
@@ -169,14 +77,20 @@ mod tests {
             program_id: adapter_program,
             accounts: vec![
                 AccountMeta::new(Pubkey::new_unique(), true),
-                AccountMeta::new_readonly(INSTRUCTIONS_ID, false),
+                AccountMeta::new_readonly(
+                    anchor_lang::solana_program::sysvar::instructions::ID,
+                    false,
+                ),
                 AccountMeta::new_readonly(sra_config, false),
                 AccountMeta::new_readonly(Pubkey::new_unique(), false),
                 AccountMeta::new_readonly(Pubkey::new_unique(), false),
                 AccountMeta::new(Pubkey::new_unique(), false),
                 AccountMeta::new_readonly(source_mint, false),
             ],
-            data: encode_execute_deposit_data(&sample_across(prepare)),
+            data: encode_anchor_instruction_data(
+                "execute_deposit_across",
+                &sample_across_deposit(prepare),
+            ),
         }
     }
 
@@ -197,11 +111,11 @@ mod tests {
     }
 
     fn mutate_wrong_output_amount(ix: &mut Instruction) {
-        let prepare = sample_prepare();
-        let mut deposit = sample_across(&prepare);
+        let prepare = sample_prepare_params();
+        let mut deposit = sample_across_deposit(&prepare);
         deposit.output_amount =
             sra_common::source_deposit::handler_output_amount_u256(prepare.output_amount + 1);
-        ix.data = encode_execute_deposit_data(&deposit);
+        ix.data = encode_anchor_instruction_data("execute_deposit_across", &deposit);
     }
 
     fn mutate_malformed_data(ix: &mut Instruction) {
@@ -210,11 +124,11 @@ mod tests {
 
     #[test]
     fn verify_next_adapter_ix_accepts_matching_instruction() {
-        let prepare = sample_prepare();
+        let prepare = sample_prepare_params();
         let adapter_program = Pubkey::new_unique();
         let sra_config = Pubkey::new_unique();
         let source_mint = Pubkey::new_unique();
-        let current = current_ix();
+        let current = empty_instruction();
         let next = matching_next_ix(adapter_program, sra_config, source_mint, &prepare);
         let mut sysvar = InstructionsSysvarFixture::new(0, &[current, next]);
         let account_info = sysvar.account_info();
@@ -231,11 +145,11 @@ mod tests {
 
     #[test]
     fn verify_next_adapter_ix_rejects_missing_next_instruction() {
-        let prepare = sample_prepare();
+        let prepare = sample_prepare_params();
         let adapter_program = Pubkey::new_unique();
         let sra_config = Pubkey::new_unique();
         let source_mint = Pubkey::new_unique();
-        let mut sysvar = InstructionsSysvarFixture::new(0, &[current_ix()]);
+        let mut sysvar = InstructionsSysvarFixture::new(0, &[empty_instruction()]);
         let account_info = sysvar.account_info();
 
         let err = verify_next_adapter_ix(
@@ -252,7 +166,7 @@ mod tests {
 
     #[test]
     fn verify_next_adapter_ix_rejects_mismatch_batch() {
-        let prepare = sample_prepare();
+        let prepare = sample_prepare_params();
         let adapter_program = Pubkey::new_unique();
         let sra_config = Pubkey::new_unique();
         let source_mint = Pubkey::new_unique();
@@ -290,7 +204,7 @@ mod tests {
         ];
 
         for (name, mutate, expected) in cases {
-            let current = current_ix();
+            let current = empty_instruction();
             let mut next = matching_next_ix(adapter_program, sra_config, source_mint, &prepare);
             mutate(&mut next);
             let mut sysvar = InstructionsSysvarFixture::new(0, &[current, next]);

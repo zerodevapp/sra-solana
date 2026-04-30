@@ -1,4 +1,4 @@
-use anchor_lang::{error, prelude::*, AnchorDeserialize};
+use anchor_lang::{error, prelude::*, AnchorDeserialize, AnchorSerialize};
 use solana_sha256_hasher::hash;
 
 use crate::errors::SraError;
@@ -10,6 +10,12 @@ pub fn instruction_discriminator(name: &str) -> [u8; 8] {
     let preimage = [GLOBAL_IX_NAMESPACE, name.as_bytes()].concat();
     discriminator.copy_from_slice(&hash(&preimage).to_bytes()[..8]);
     discriminator
+}
+
+pub fn encode_anchor_instruction_data<T: AnchorSerialize>(name: &str, value: &T) -> Vec<u8> {
+    let mut data = instruction_discriminator(name).to_vec();
+    value.serialize(&mut data).unwrap();
+    data
 }
 
 pub fn decode_anchor_instruction_data<T: AnchorDeserialize>(name: &str, data: &[u8]) -> Result<T> {
@@ -25,13 +31,6 @@ pub fn decode_anchor_instruction_data<T: AnchorDeserialize>(name: &str, data: &[
 mod tests {
     use super::*;
     use crate::source_deposit::PrepareParams;
-    use anchor_lang::AnchorSerialize;
-
-    fn encode_ix_data<T: AnchorSerialize>(name: &str, value: &T) -> Vec<u8> {
-        let mut data = instruction_discriminator(name).to_vec();
-        value.serialize(&mut data).unwrap();
-        data
-    }
 
     #[test]
     fn decode_rejects_wrong_discriminator() {
@@ -41,7 +40,7 @@ mod tests {
             target_token: [3u8; 32],
             action_idxs: vec![4],
         };
-        let data = encode_ix_data("wrong_name", &params);
+        let data = encode_anchor_instruction_data("wrong_name", &params);
 
         let err = decode_anchor_instruction_data::<PrepareParams>("validate_and_prepare", &data)
             .expect_err("wrong discriminator must reject");

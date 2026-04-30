@@ -7,42 +7,26 @@ use solana_sdk::{
     transaction::TransactionError,
 };
 use sra_common::{
-    abi::u256_from_u64,
-    constants::MAX_ACTION_IDXS,
-    errors::SraError,
-    source_deposit::{AcrossDepositParams, PrepareParams},
+    abi::u256_from_u64, constants::MAX_ACTION_IDXS, errors::SraError,
+    source_deposit::PrepareParams, test_utils::DEFAULT_ACTION_IDXS,
 };
 
 const INPUT: u64 = 1_000_000;
 // 50 bps slippage tolerance -> min acceptable = 995_000 for INPUT = 1_000_000.
 const OUTPUT_WITHIN_SLIPPAGE: u64 = 999_500;
-const DEFAULT_ACTION_IDXS: [u64; 2] = [3, 7];
 
 fn default_prepare_params(fx: &ValidatePrepareFixture) -> PrepareParams {
-    PrepareParams {
-        input_amount: INPUT,
-        output_amount: OUTPUT_WITHIN_SLIPPAGE,
-        target_token: fx.target_token,
-        action_idxs: DEFAULT_ACTION_IDXS.to_vec(),
-    }
-}
-
-fn default_across_params(payer: &Keypair, params: &PrepareParams) -> AcrossDepositParams {
-    AcrossDepositParams {
-        input_amount: params.input_amount,
-        output_amount: sra_common::source_deposit::handler_output_amount_u256(params.output_amount),
-        target_token: params.target_token,
-        action_idxs: params.action_idxs.clone(),
-        exclusive_relayer: payer.pubkey(),
-        fill_deadline_offset: 3_600,
-        exclusivity_period: 900,
-    }
+    PrepareParams::new(
+        INPUT,
+        OUTPUT_WITHIN_SLIPPAGE,
+        fx.target_token,
+        DEFAULT_ACTION_IDXS.to_vec(),
+    )
 }
 
 fn build_deposit_bundle(
     fx: &ValidatePrepareFixture,
     svm: &LiteSVM,
-    payer: &Keypair,
     params: &PrepareParams,
     prepared_nonce: u64,
 ) -> sra_across_adapter::utils::DepositNowBuild {
@@ -51,7 +35,7 @@ fn build_deposit_bundle(
         &fetch_sra_config(svm, &fx.sra_config),
         &fx.source_mint,
         params,
-        &default_across_params(payer, params),
+        &across_params_for(fx, params),
         prepared_nonce,
     )
     .expect("build deposit-now bundle")
@@ -108,7 +92,7 @@ fn invoke_source_flow(
         fx,
         &fetch_sra_config(svm, &fx.sra_config),
         &params,
-        default_across_params(payer, &params),
+        across_params_for(fx, &params),
         current_nonce(svm, &fx.accounts.mint_nonce),
     );
     send_instructions(svm, &[validate_ix, execute_ix], payer, &[owner])
@@ -938,12 +922,12 @@ fn validate_and_prepare_sequential_nonce_increments() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
 
-    let params = PrepareParams {
-        input_amount: 100_000,
-        output_amount: 99_500,
-        target_token: fx.target_token,
-        action_idxs: DEFAULT_ACTION_IDXS.to_vec(),
-    };
+    let params = PrepareParams::new(
+        100_000,
+        99_500,
+        fx.target_token,
+        DEFAULT_ACTION_IDXS.to_vec(),
+    );
 
     for expected_pre_nonce in 0u64..3 {
         let meta = fx
@@ -1011,7 +995,7 @@ fn validate_and_prepare_max_action_idxs_happy_path() {
     let ev = extract_deposit_prepared(&meta.logs).expect("DepositPrepared event");
     assert_eq!(ev.action_idxs, action_idxs);
 
-    let build = build_deposit_bundle(&fx, &svm, &fx.payer, &params, ev.nonce);
+    let build = build_deposit_bundle(&fx, &svm, &params, ev.nonce);
     assert_eq!(
         build.message.action_idxs,
         action_idxs
@@ -1032,13 +1016,13 @@ fn validate_and_prepare_same_sra_mint_distinct_messages_and_replay_hashes() {
         .invoke(&mut svm, params.clone())
         .expect("first deposit should succeed");
     let ev_0 = extract_deposit_prepared(&meta_0.logs).expect("first DepositPrepared event");
-    let build_0 = build_deposit_bundle(&fx, &svm, &fx.payer, &params, ev_0.nonce);
+    let build_0 = build_deposit_bundle(&fx, &svm, &params, ev_0.nonce);
 
     let meta_1 = fx
         .invoke(&mut svm, params.clone())
         .expect("second deposit should succeed");
     let ev_1 = extract_deposit_prepared(&meta_1.logs).expect("second DepositPrepared event");
-    let build_1 = build_deposit_bundle(&fx, &svm, &fx.payer, &params, ev_1.nonce);
+    let build_1 = build_deposit_bundle(&fx, &svm, &params, ev_1.nonce);
 
     assert_eq!(ev_0.nonce, 0);
     assert_eq!(ev_1.nonce, 1);

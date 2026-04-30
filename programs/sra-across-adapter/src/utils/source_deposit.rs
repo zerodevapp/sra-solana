@@ -1,8 +1,10 @@
 use anchor_lang::{error, prelude::*};
+#[cfg(any(test, feature = "test-utils"))]
+use sra_common::abi::replay_hash;
 use sra_common::{
     abi::{
-        abi_encode_sra_message, build_extra_envelope, bytes32_to_evm_address, replay_hash,
-        source_token_hash, u256_from_u64, DepositInfo, Message, TokenParam,
+        abi_encode_sra_message, build_extra_envelope, bytes32_to_evm_address, source_token_hash,
+        u256_from_u64, DepositInfo, Message, TokenParam,
     },
     constants::SOLANA_CHAIN_ID,
     errors::SraError,
@@ -124,12 +126,7 @@ mod tests {
     fn build_deposit_now_bundle_uses_prepare_intent_fields() {
         let adapter_authority = Pubkey::new_unique();
         let input_mint = Pubkey::new_unique();
-        let prepare = PrepareParams {
-            input_amount: 11,
-            output_amount: 22,
-            target_token: evm_bytes32(0xbb),
-            action_idxs: vec![1, 2],
-        };
+        let prepare = PrepareParams::new(11, 22, evm_bytes32(0xbb), vec![1, 2]);
         let deposit = AcrossDepositParams {
             input_amount: 99,
             output_amount: u256_from_u64(88),
@@ -139,15 +136,12 @@ mod tests {
             fill_deadline_offset: 600,
             exclusivity_period: 120,
         };
-        let matching_deposit = AcrossDepositParams {
-            input_amount: prepare.input_amount,
-            output_amount: u256_from_u64(prepare.output_amount),
-            target_token: prepare.target_token,
-            action_idxs: prepare.action_idxs.clone(),
-            exclusive_relayer: deposit.exclusive_relayer,
-            fill_deadline_offset: deposit.fill_deadline_offset,
-            exclusivity_period: deposit.exclusivity_period,
-        };
+        let matching_deposit = AcrossDepositParams::from_prepare(
+            &prepare,
+            deposit.exclusive_relayer,
+            deposit.fill_deadline_offset,
+            deposit.exclusivity_period,
+        );
 
         let build = build_deposit_now_bundle(
             &adapter_authority,
