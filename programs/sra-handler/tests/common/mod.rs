@@ -412,6 +412,7 @@ pub fn setup_address_book_entry(
 // validate_and_prepare helpers
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
 pub struct ValidatePrepareAccounts {
     pub sra_config: Pubkey,
     pub mint_nonce: Pubkey,

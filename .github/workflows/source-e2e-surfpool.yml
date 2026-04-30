@@ -2,6 +2,17 @@ name: Source E2E Surfpool
 
 on:
   pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Anchor.toml"
+      - "rust-toolchain.toml"
+      - "crates/**"
+      - "programs/**"
+      - "idl/**"
+      - "idls/**"
+      - "tests/**"
+      - ".github/workflows/source-e2e-surfpool.yml"
   push:
     branches: [main]
   workflow_dispatch:
@@ -13,6 +24,7 @@ concurrency:
 env:
   SOLANA_VERSION: "3.1.11"
   ANCHOR_VERSION: "0.32.1"
+  SURFPOOL_VERSION: "v1.2.0"
   NODE_VERSION: "20"
   CARGO_TERM_COLOR: always
 
@@ -20,6 +32,7 @@ jobs:
   source-e2e-surfpool:
     name: Source E2E (Surfpool + real Across)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -74,6 +87,8 @@ jobs:
           solana-keygen new --no-bip39-passphrase --force --silent --outfile ~/.config/solana/id.json
 
       - name: Install Surfpool
+        env:
+          VERSION: ${{ env.SURFPOOL_VERSION }}
         run: curl -sL https://run.surfpool.run/ | bash
 
       - name: Verify tool versions

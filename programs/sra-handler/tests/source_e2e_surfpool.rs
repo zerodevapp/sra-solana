@@ -20,15 +20,22 @@ use sra_common::{
     types::{MintNonce, SraConfig},
 };
 use sra_handler::instructions::source::initialize_sra::SraInitConfig;
-use std::{
-    env, error::Error, path::PathBuf, sync::Mutex, thread::sleep, time::Duration,
-};
+use std::{env, error::Error, path::PathBuf, sync::Mutex, thread::sleep, time::Duration};
 
 const INPUT_AMOUNT: u64 = 1_000_000;
+const SLIPPAGE_BPS: u16 = 50;
+// Quoted output must remain within `SLIPPAGE_BPS` of `INPUT_AMOUNT`, i.e.
+// >= INPUT_AMOUNT * (BPS_DENOMINATOR - SLIPPAGE_BPS) / BPS_DENOMINATOR.
+// 1_000_000 * 9_950 / 10_000 = 995_000, so 999_500 is comfortably within.
 const OUTPUT_WITHIN_SLIPPAGE: u64 = 999_500;
+const TARGET_TOKEN_DECIMALS: u8 = 6;
+// Across deposit window: 1h fill deadline, 15m exclusive-relayer window.
+const FILL_DEADLINE_OFFSET_SECS: u32 = 3_600;
+const EXCLUSIVITY_PERIOD_SECS: u32 = 900;
 const SURFPOOL_RPC_URL: &str = "http://127.0.0.1:8899";
 const SURFPOOL_RETRY_COUNT: usize = 30;
 const SURFPOOL_RETRY_DELAY_MS: u64 = 1_000;
+const SURFPOOL_HTTP_TIMEOUT_SECS: u64 = 30;
 
 type TestResult<T> = Result<T, Box<dyn Error>>;
 
@@ -60,7 +67,10 @@ fn wait_for_surfpool(rpc: &RpcClient) -> TestResult<()> {
 
 fn wait_for_program_deploys(rpc: &RpcClient, program_ids: &[Pubkey]) -> TestResult<()> {
     for _ in 0..SURFPOOL_RETRY_COUNT {
-        if program_ids.iter().all(|program_id| rpc.get_account(program_id).is_ok()) {
+        if program_ids
+            .iter()
+            .all(|program_id| rpc.get_account(program_id).is_ok())
+        {
             return Ok(());
         }
         sleep(Duration::from_millis(SURFPOOL_RETRY_DELAY_MS));
@@ -82,7 +92,8 @@ fn send_legacy_transaction(
     let blockhash = rpc.get_latest_blockhash()?;
     let mut all_signers = vec![payer];
     all_signers.extend_from_slice(signers);
-    let tx = Transaction::new_signed_with_payer(ixs, Some(&payer.pubkey()), &all_signers, blockhash);
+    let tx =
+        Transaction::new_signed_with_payer(ixs, Some(&payer.pubkey()), &all_signers, blockhash);
     Ok(rpc.send_and_confirm_transaction(&tx)?)
 }
 
@@ -124,13 +135,16 @@ impl SurfpoolSourceFixture {
         let rpc = rpc_client();
         wait_for_surfpool(&rpc)?;
 
-        let http = Client::builder().build()?;
+        let http = Client::builder()
+            .timeout(Duration::from_secs(SURFPOOL_HTTP_TIMEOUT_SECS))
+            .build()?;
         let payer = read_keypair_file(payer_keypair_path())?;
         let owner = Keypair::new();
         let config = sample_config();
         let salt = [0xAB; 32];
         let (sra_config, _) = derive_sra_pda(&owner.pubkey(), &config, &salt);
-        let accounts = ValidatePrepareAccounts::derive(&sra_config, &USDC_MINT, &ADAPTER_PROGRAM_ID);
+        let accounts =
+            ValidatePrepareAccounts::derive(&sra_config, &USDC_MINT, &ADAPTER_PROGRAM_ID);
         let target_token = sample_target_token();
         let owner_ata = derive_ata(&owner.pubkey(), &USDC_MINT);
         let (across_state, _) = derive_real_across_state_pda();
@@ -163,7 +177,8 @@ impl SurfpoolSourceFixture {
         );
         send_legacy_transaction(&rpc, &payer, &[&owner], &[initialize_ix])?;
 
-        let address_book_entry = derive_address_book_pda(&sra_config, config.target_chain_id, &target_token).0;
+        let address_book_entry =
+            derive_address_book_pda(&sra_config, config.target_chain_id, &target_token).0;
         let address_book_ix = set_address_book_entry_ix(
             &payer.pubkey(),
             &owner.pubkey(),
@@ -171,7 +186,7 @@ impl SurfpoolSourceFixture {
             &address_book_entry,
             config.target_chain_id,
             target_token,
-            6,
+            TARGET_TOKEN_DECIMALS,
         );
         send_legacy_transaction(&rpc, &payer, &[&owner], &[address_book_ix])?;
 
@@ -183,7 +198,7 @@ impl SurfpoolSourceFixture {
         );
         send_legacy_transaction(&rpc, &payer, &[&owner], &[update_adapters_ix])?;
 
-        let update_slippage_ix = update_slippage_ix(&owner.pubkey(), &sra_config, 50);
+        let update_slippage_ix = update_slippage_ix(&owner.pubkey(), &sra_config, SLIPPAGE_BPS);
         send_legacy_transaction(&rpc, &payer, &[&owner], &[update_slippage_ix])?;
 
         let fixture = Self {
@@ -237,7 +252,7 @@ impl SurfpoolSourceFixture {
         Ok(response["result"].clone())
     }
 
-    fn invoke_source_flow(&mut self, params: PrepareParams) -> TestResult<Vec<String>> {
+    fn invoke_source_flow(&self, params: PrepareParams) -> TestResult<Vec<String>> {
         let address_book_entry = derive_address_book_pda(
             &self.sra_config,
             self.config.target_chain_id,
@@ -263,14 +278,19 @@ impl SurfpoolSourceFixture {
                 target_chain_id: self.config.target_chain_id,
                 target_token: self.target_token,
                 adapter_program: ADAPTER_PROGRAM_ID,
-                accounts: ValidatePrepareAccounts::derive(&self.sra_config, &USDC_MINT, &ADAPTER_PROGRAM_ID),
+                accounts: self.accounts.clone(),
                 owner_ata: self.owner_ata,
                 across_state: self.across_state,
                 across_vault: self.across_vault,
             },
             &read_anchor_account::<SraConfig>(&self.rpc, &self.sra_config)?,
             &params,
-            AcrossDepositParams::from_prepare(&params, self.payer.pubkey(), 3_600, 900),
+            AcrossDepositParams::from_prepare(
+                &params,
+                self.payer.pubkey(),
+                FILL_DEADLINE_OFFSET_SECS,
+                EXCLUSIVITY_PERIOD_SECS,
+            ),
             self.current_nonce()?,
         );
         let signature = send_versioned_transaction(
@@ -352,41 +372,78 @@ impl SurfpoolSourceFixture {
 #[test]
 #[ignore = "requires Surfpool at http://127.0.0.1:8899"]
 fn source_e2e_real_across_happy_path() {
-    let _guard = SURFPOOL_TEST_MUTEX.lock().expect("lock Step 21 surfpool mutex");
-    let mut fx = SurfpoolSourceFixture::bootstrap().expect("bootstrap fixture");
-    let pre_owner = fx.owner_token_amount().expect("read owner ATA before deposit");
-    let pre_vault = fx.across_vault_amount().expect("read Across vault before deposit");
+    let _guard = SURFPOOL_TEST_MUTEX
+        .lock()
+        .expect("lock surfpool mutex");
+    let fx = SurfpoolSourceFixture::bootstrap().expect("bootstrap fixture");
+    let pre_owner = fx
+        .owner_token_amount()
+        .expect("read owner ATA before deposit");
+    let pre_vault = fx
+        .across_vault_amount()
+        .expect("read Across vault before deposit");
 
     let logs = fx
         .invoke_source_flow(default_prepare_params_rpc(&fx))
         .expect("paired source flow should succeed against real Across");
-    let post_owner = fx.owner_token_amount().unwrap();
-    let post_sra_vault = fx.sra_vault_amount().unwrap();
-    let post_adapter_custody = fx.adapter_custody_amount().unwrap();
-    let post_across_vault = fx.across_vault_amount().unwrap();
+    let post_owner = fx
+        .owner_token_amount()
+        .expect("read owner ATA after deposit");
+    let post_sra_vault = fx.sra_vault_amount().expect("read SRA vault after deposit");
+    let post_adapter_custody = fx
+        .adapter_custody_amount()
+        .expect("read adapter custody after deposit");
+    let post_across_vault = fx
+        .across_vault_amount()
+        .expect("read Across vault after deposit");
 
+    let invoke_prefix = format!("Program {} invoke", ACROSS_SPOKE_POOL_ID);
+    let success_prefix = format!("Program {} success", ACROSS_SPOKE_POOL_ID);
+    let across_invokes = logs
+        .iter()
+        .filter(|line| line.contains(&invoke_prefix))
+        .count();
+    let across_successes = logs
+        .iter()
+        .filter(|line| line.contains(&success_prefix))
+        .count();
     assert!(
-        logs.iter()
-            .any(|line| line.contains(&format!("Program {} invoke", ACROSS_SPOKE_POOL_ID))),
-        "transaction logs must show the real Across program invocation"
+        across_invokes >= 2,
+        "expected ≥2 Across invocations (deposit_now + emit_cpi event), got {across_invokes}"
+    );
+    assert!(
+        across_successes >= 2,
+        "expected ≥2 Across success lines (deposit_now + emit_cpi event), got {across_successes}"
     );
     assert_eq!(post_owner, pre_owner - INPUT_AMOUNT);
     assert_eq!(post_sra_vault, 0);
     assert_eq!(post_adapter_custody, 0);
     assert_eq!(post_across_vault, pre_vault + INPUT_AMOUNT);
-    assert_eq!(fx.mint_nonce().unwrap().nonce, 1);
+    assert_eq!(
+        fx.mint_nonce()
+            .expect("read mint nonce after deposit")
+            .nonce,
+        1
+    );
 }
 
 #[test]
 #[ignore = "requires Surfpool at http://127.0.0.1:8899"]
 fn source_e2e_real_across_nonce_increments() {
-    let _guard = SURFPOOL_TEST_MUTEX.lock().expect("lock Step 21 surfpool mutex");
-    let mut fx = SurfpoolSourceFixture::bootstrap().expect("bootstrap fixture");
+    let _guard = SURFPOOL_TEST_MUTEX
+        .lock()
+        .expect("lock surfpool mutex");
+    let fx = SurfpoolSourceFixture::bootstrap().expect("bootstrap fixture");
 
     fx.invoke_source_flow(default_prepare_params_rpc(&fx))
         .expect("first deposit succeeds");
     fx.invoke_source_flow(default_prepare_params_rpc(&fx))
         .expect("second deposit succeeds");
 
-    assert_eq!(fx.mint_nonce().unwrap().nonce, 2);
+    assert_eq!(
+        fx.mint_nonce()
+            .expect("read mint nonce after second deposit")
+            .nonce,
+        2
+    );
 }
