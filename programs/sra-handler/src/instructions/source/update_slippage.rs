@@ -1,6 +1,8 @@
 use anchor_lang::prelude::*;
 use sra_common::{constants::MAX_SLIPPAGE_BPS, errors::SraError, types::SraConfig};
 
+use crate::events::SlippageUpdated;
+
 #[derive(Accounts)]
 pub struct UpdateSlippage<'info> {
     pub owner: Signer<'info>,
@@ -15,5 +17,11 @@ pub(crate) fn handler(ctx: Context<UpdateSlippage>, allowed_slippage_bps: u16) -
     );
 
     ctx.accounts.sra_config.allowed_slippage_bps = allowed_slippage_bps;
+
+    emit!(SlippageUpdated {
+        sra_config: ctx.accounts.sra_config.key(),
+        allowed_slippage_bps,
+    });
+
     Ok(())
 }

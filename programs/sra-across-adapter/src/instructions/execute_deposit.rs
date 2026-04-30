@@ -10,6 +10,7 @@ use sra_common::{
     types::{MintNonce, SraConfig},
 };
 
+use crate::events::AcrossDepositExecuted;
 use crate::{utils::source_deposit::build_deposit_now_bundle, AcrossAdapterError};
 
 /// Recover the pre-bump nonce written by the paired `validate_and_prepare`.
@@ -158,6 +159,22 @@ pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) 
         deposit.params.exclusivity_period,
         deposit.params.message,
     )?;
+
+    emit!(AcrossDepositExecuted {
+        sra_config: ctx.accounts.sra_config.key(),
+        input_mint: ctx.accounts.input_mint.key(),
+        nonce: prepared_nonce,
+        delegate: deposit.delegate.pda,
+        across_state: ctx.accounts.across_state.key(),
+        across_vault: ctx.accounts.across_vault.key(),
+        input_amount: params.input_amount,
+        output_amount: params.output_amount,
+        target_token: params.target_token,
+        action_idxs: params.action_idxs.clone(),
+        exclusive_relayer: params.exclusive_relayer,
+        fill_deadline_offset: params.fill_deadline_offset,
+        exclusivity_period: params.exclusivity_period,
+    });
 
     Ok(())
 }

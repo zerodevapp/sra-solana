@@ -1,5 +1,37 @@
 use anchor_lang::prelude::*;
 
+#[event]
+pub struct SraInitialized {
+    pub sra_config: Pubkey,
+    pub owner: Pubkey,
+    pub target_chain_id: u64,
+    pub target_handler: [u8; 32],
+    pub target_adapter: [u8; 32],
+    pub recipient: [u8; 32],
+    pub app_id: [u8; 32],
+    pub salt: [u8; 32],
+}
+
+#[event]
+pub struct AdaptersUpdated {
+    pub sra_config: Pubkey,
+    pub adapters: Vec<Pubkey>,
+}
+
+#[event]
+pub struct SlippageUpdated {
+    pub sra_config: Pubkey,
+    pub allowed_slippage_bps: u16,
+}
+
+#[event]
+pub struct AddressBookEntrySet {
+    pub sra_config: Pubkey,
+    pub target_chain_id: u64,
+    pub target_token: [u8; 32],
+    pub target_decimals: u8,
+}
+
 /// Emitted by `validate_and_prepare` once the owner's tokens are in adapter
 /// custody. Off-chain relayers combine these raw routing fields with the
 /// immutable SraConfig to build whatever target-specific bridge message IX 2

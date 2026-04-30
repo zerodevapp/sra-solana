@@ -34,6 +34,32 @@ fn initialize_sra_happy_path() {
 }
 
 #[test]
+fn initialize_sra_emits_sra_initialized() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+
+    let config = sample_config();
+    let salt = [0xA5u8; 32];
+    let (pda, _) = derive_sra_pda(&owner.pubkey(), &config, &salt);
+
+    let ix = initialize_sra_ix(&payer.pubkey(), &owner.pubkey(), &pda, config.clone(), salt);
+    let meta =
+        send_ix_with_meta(&mut svm, ix, &payer, &[&owner]).expect("initialize_sra should succeed");
+
+    let ev = extract_anchor_event::<sra_handler::events::SraInitialized>(&meta.logs)
+        .expect("SraInitialized event must be emitted");
+    assert_eq!(ev.sra_config, pda);
+    assert_eq!(ev.owner, owner.pubkey());
+    assert_eq!(ev.target_chain_id, config.target_chain_id);
+    assert_eq!(ev.target_handler, config.target_handler);
+    assert_eq!(ev.target_adapter, config.target_adapter);
+    assert_eq!(ev.recipient, config.recipient);
+    assert_eq!(ev.app_id, config.app_id);
+    assert_eq!(ev.salt, salt);
+}
+
+#[test]
 fn initialize_sra_config_hash_matches_expected() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);

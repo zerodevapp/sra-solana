@@ -4,6 +4,8 @@ use sra_common::{
     types::SraConfig,
 };
 
+use crate::events::SraInitialized;
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct SraInitConfig {
     pub target_chain_id: u64,
@@ -64,5 +66,17 @@ pub(crate) fn handler(
     sra_config.allowed_adapters = Vec::new();
     sra_config.allowed_slippage_bps = 0;
     sra_config.bump = ctx.bumps.sra_config;
+
+    emit!(SraInitialized {
+        sra_config: sra_config.key(),
+        owner: sra_config.owner,
+        target_chain_id: sra_config.target_chain_id,
+        target_handler: sra_config.target_handler,
+        target_adapter: sra_config.target_adapter,
+        recipient: sra_config.recipient,
+        app_id: sra_config.app_id,
+        salt: sra_config.salt,
+    });
+
     Ok(())
 }

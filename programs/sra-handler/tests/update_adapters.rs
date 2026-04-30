@@ -30,6 +30,24 @@ fn update_adapters_owner_sets_list() {
 }
 
 #[test]
+fn update_adapters_emits_adapters_updated() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let pda = init_sra(&mut svm, &payer, &owner);
+
+    let adapters = vec![Pubkey::new_unique(), Pubkey::new_unique()];
+    let ix = update_adapters_ix(&payer.pubkey(), &owner.pubkey(), &pda, adapters.clone());
+    let meta =
+        send_ix_with_meta(&mut svm, ix, &payer, &[&owner]).expect("update_adapters should succeed");
+
+    let ev = extract_anchor_event::<sra_handler::events::AdaptersUpdated>(&meta.logs)
+        .expect("AdaptersUpdated event must be emitted");
+    assert_eq!(ev.sra_config, pda);
+    assert_eq!(ev.adapters, adapters);
+}
+
+#[test]
 fn update_adapters_owner_replaces_list() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
