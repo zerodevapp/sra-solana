@@ -5,6 +5,8 @@ use sra_common::{
     types::{AddressBookEntry, SraConfig},
 };
 
+use crate::events::AddressBookEntrySet;
+
 /// Owner-authorized upsert for an SRA-scoped target-token mapping; any payer
 /// may cover the rent.
 ///
@@ -60,5 +62,13 @@ pub(crate) fn set_entry_handler(
     address_book_entry.target_token = target_token;
     address_book_entry.target_decimals = target_decimals;
     address_book_entry.bump = ctx.bumps.address_book_entry;
+
+    emit!(AddressBookEntrySet {
+        sra_config: address_book_entry.sra_config,
+        target_chain_id: address_book_entry.target_chain_id,
+        target_token: address_book_entry.target_token,
+        target_decimals: address_book_entry.target_decimals,
+    });
+
     Ok(())
 }

@@ -43,6 +43,36 @@ fn set_address_book_entry_happy_path() {
 }
 
 #[test]
+fn set_address_book_entry_emits_address_book_entry_set() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let sra_config = init_sra(&mut svm, &payer, &owner);
+    let (target_chain_id, target_token) = sample_address_book_args();
+    let (address_book_entry, _) =
+        derive_address_book_pda(&sra_config, target_chain_id, &target_token);
+
+    let ix = set_address_book_entry_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        &sra_config,
+        &address_book_entry,
+        target_chain_id,
+        target_token,
+        SAMPLE_DECIMALS,
+    );
+    let meta = send_ix_with_meta(&mut svm, ix, &payer, &[&owner])
+        .expect("set_address_book_entry should succeed");
+
+    let ev = extract_anchor_event::<sra_handler::events::AddressBookEntrySet>(&meta.logs)
+        .expect("AddressBookEntrySet event must be emitted");
+    assert_eq!(ev.sra_config, sra_config);
+    assert_eq!(ev.target_chain_id, target_chain_id);
+    assert_eq!(ev.target_token, target_token);
+    assert_eq!(ev.target_decimals, SAMPLE_DECIMALS);
+}
+
+#[test]
 fn set_address_book_entry_updates_existing_decimals() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);

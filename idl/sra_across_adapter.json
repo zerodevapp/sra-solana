@@ -9,20 +9,94 @@
   "instructions": [
     {
       "name": "execute_deposit_across",
-      "discriminator": [56, 106, 68, 97, 74, 166, 218, 58],
+      "discriminator": [
+        56,
+        106,
+        68,
+        97,
+        74,
+        166,
+        218,
+        58
+      ],
       "accounts": [
-        { "name": "fee_payer", "writable": true, "signer": true },
-        { "name": "instructions_sysvar", "address": "Sysvar1nstructions1111111111111111111111111" },
-        { "name": "sra_config" },
+        {
+          "name": "fee_payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "sra_config"
+        },
         {
           "name": "mint_nonce",
           "pda": {
             "seeds": [
-              { "kind": "const", "value": [109,105,110,116,95,110,111,110,99,101] },
-              { "kind": "account", "path": "sra_config" },
-              { "kind": "account", "path": "input_mint" }
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  110,
+                  111,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "sra_config"
+              },
+              {
+                "kind": "account",
+                "path": "input_mint"
+              }
             ],
-            "program": { "kind": "const", "value": [236,25,226,124,149,84,49,102,240,125,72,154,188,56,24,194,247,108,116,138,179,251,226,172,235,226,115,225,98,46,101,74] }
+            "program": {
+              "kind": "const",
+              "value": [
+                236,
+                25,
+                226,
+                124,
+                149,
+                84,
+                49,
+                102,
+                240,
+                125,
+                72,
+                154,
+                188,
+                56,
+                24,
+                194,
+                247,
+                108,
+                116,
+                138,
+                179,
+                251,
+                226,
+                172,
+                235,
+                226,
+                115,
+                225,
+                98,
+                46,
+                101,
+                74
+              ]
+            }
           }
         },
         {
@@ -34,8 +108,32 @@
           ],
           "pda": {
             "seeds": [
-              { "kind": "const", "value": [97,100,97,112,116,101,114,95,97,117,116,104,111,114,105,116,121] },
-              { "kind": "account", "path": "sra_config" }
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  97,
+                  112,
+                  116,
+                  101,
+                  114,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "sra_config"
+              }
             ]
           }
         },
@@ -44,15 +142,98 @@
           "writable": true,
           "pda": {
             "seeds": [
-              { "kind": "account", "path": "adapter_authority" },
-              { "kind": "const", "value": [6,221,246,225,215,101,161,147,217,203,225,70,206,235,121,172,28,180,133,237,95,91,55,145,58,140,245,133,126,255,0,169] },
-              { "kind": "account", "path": "input_mint" }
+              {
+                "kind": "account",
+                "path": "adapter_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "input_mint"
+              }
             ],
-            "program": { "kind": "const", "value": [140,151,37,143,78,36,137,241,187,61,16,41,20,142,13,131,11,90,19,153,218,255,16,132,4,142,123,216,219,233,248,89] }
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
           }
         },
-        { "name": "input_mint" },
-        { "name": "across_program", "address": "DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru" },
+        {
+          "name": "input_mint"
+        },
+        {
+          "name": "across_program",
+          "address": "DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru"
+        },
         {
           "name": "across_state",
           "docs": [
@@ -69,48 +250,297 @@
           "writable": true,
           "pda": {
             "seeds": [
-              { "kind": "account", "path": "across_state" },
-              { "kind": "const", "value": [6,221,246,225,215,101,161,147,217,203,225,70,206,235,121,172,28,180,133,237,95,91,55,145,58,140,245,133,126,255,0,169] },
-              { "kind": "account", "path": "input_mint" }
+              {
+                "kind": "account",
+                "path": "across_state"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "input_mint"
+              }
             ],
-            "program": { "kind": "const", "value": [140,151,37,143,78,36,137,241,187,61,16,41,20,142,13,131,11,90,19,153,218,255,16,132,4,142,123,216,219,233,248,89] }
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
           }
         },
-        { "name": "delegate" },
-        { "name": "token_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" },
-        { "name": "associated_token_program", "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL" },
-        { "name": "system_program", "address": "11111111111111111111111111111111" }
+        {
+          "name": "delegate"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
       ],
       "args": [
         {
           "name": "params",
-          "type": { "defined": { "name": "AcrossDepositParams" } }
+          "type": {
+            "defined": {
+              "name": "AcrossDepositParams"
+            }
+          }
         }
       ]
     }
   ],
   "accounts": [
-    { "name": "MintNonce", "discriminator": [207,90,192,29,25,162,153,119] },
-    { "name": "SraConfig", "discriminator": [218,163,165,102,168,101,23,222] }
+    {
+      "name": "MintNonce",
+      "discriminator": [
+        207,
+        90,
+        192,
+        29,
+        25,
+        162,
+        153,
+        119
+      ]
+    },
+    {
+      "name": "SraConfig",
+      "discriminator": [
+        218,
+        163,
+        165,
+        102,
+        168,
+        101,
+        23,
+        222
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "AcrossDepositExecuted",
+      "discriminator": [
+        148,
+        255,
+        91,
+        212,
+        15,
+        143,
+        61,
+        23
+      ]
+    }
   ],
   "errors": [
-    { "code": 6000, "name": "DepositNowSeedSerializationFailed", "msg": "Failed to serialize deposit-now seed data" },
-    { "code": 6001, "name": "PreparedNonceUnavailable", "msg": "Mint nonce does not contain a prepared deposit" },
-    { "code": 6002, "name": "InvalidDelegateAccount", "msg": "Delegate account does not match the derived Across PDA" }
+    {
+      "code": 6000,
+      "name": "DepositNowSeedSerializationFailed",
+      "msg": "Failed to serialize deposit-now seed data"
+    },
+    {
+      "code": 6001,
+      "name": "PreparedNonceUnavailable",
+      "msg": "Mint nonce does not contain a prepared deposit"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidDelegateAccount",
+      "msg": "Delegate account does not match the derived Across PDA"
+    }
   ],
   "types": [
+    {
+      "name": "AcrossDepositExecuted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sra_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "input_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "delegate",
+            "type": "pubkey"
+          },
+          {
+            "name": "across_state",
+            "type": "pubkey"
+          },
+          {
+            "name": "across_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "input_amount",
+            "type": "u64"
+          },
+          {
+            "name": "output_amount",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_token",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "action_idxs",
+            "type": {
+              "vec": "u64"
+            }
+          },
+          {
+            "name": "exclusive_relayer",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_deadline_offset",
+            "type": "u32"
+          },
+          {
+            "name": "exclusivity_period",
+            "type": "u32"
+          }
+        ]
+      }
+    },
     {
       "name": "AcrossDepositParams",
       "type": {
         "kind": "struct",
         "fields": [
-          { "name": "input_amount", "type": "u64" },
-          { "name": "output_amount", "type": { "array": ["u8", 32] } },
-          { "name": "target_token", "type": { "array": ["u8", 32] } },
-          { "name": "action_idxs", "type": { "vec": "u64" } },
-          { "name": "exclusive_relayer", "type": "pubkey" },
-          { "name": "fill_deadline_offset", "type": "u32" },
-          { "name": "exclusivity_period", "type": "u32" }
+          {
+            "name": "input_amount",
+            "type": "u64"
+          },
+          {
+            "name": "output_amount",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_token",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "action_idxs",
+            "type": {
+              "vec": "u64"
+            }
+          },
+          {
+            "name": "exclusive_relayer",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_deadline_offset",
+            "type": "u32"
+          },
+          {
+            "name": "exclusivity_period",
+            "type": "u32"
+          }
         ]
       }
     },
@@ -124,8 +554,14 @@
       "type": {
         "kind": "struct",
         "fields": [
-          { "name": "nonce", "type": "u64" },
-          { "name": "bump", "type": "u8" }
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
         ]
       }
     },
@@ -140,16 +576,73 @@
       "type": {
         "kind": "struct",
         "fields": [
-          { "name": "owner", "type": "pubkey" },
-          { "name": "target_chain_id", "type": "u64" },
-          { "name": "target_handler", "type": { "array": ["u8", 32] } },
-          { "name": "target_adapter", "type": { "array": ["u8", 32] } },
-          { "name": "recipient", "type": { "array": ["u8", 32] } },
-          { "name": "app_id", "type": { "array": ["u8", 32] } },
-          { "name": "salt", "type": { "array": ["u8", 32] } },
-          { "name": "allowed_adapters", "type": { "vec": "pubkey" } },
-          { "name": "allowed_slippage_bps", "type": "u16" },
-          { "name": "bump", "type": "u8" }
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "target_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "target_handler",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_adapter",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "recipient",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "salt",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "allowed_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "allowed_slippage_bps",
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
         ]
       }
     }

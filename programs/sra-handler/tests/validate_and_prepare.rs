@@ -72,6 +72,35 @@ fn validate_and_prepare_happy_path() {
 }
 
 #[test]
+fn execute_deposit_emits_across_deposit_executed() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+
+    let params = default_prepare_params(&fx);
+    let meta = fx
+        .invoke(&mut svm, params.clone())
+        .expect("paired source flow should succeed");
+
+    let ev = extract_anchor_event::<sra_across_adapter::events::AcrossDepositExecuted>(&meta.logs)
+        .expect("AcrossDepositExecuted event must be emitted");
+    assert_eq!(ev.sra_config, fx.sra_config);
+    assert_eq!(ev.input_mint, fx.source_mint);
+    assert_eq!(ev.nonce, 0);
+    assert_eq!(ev.across_state, fx.across_state);
+    assert_eq!(ev.across_vault, fx.across_vault);
+    assert_eq!(ev.input_amount, params.input_amount);
+    assert_eq!(
+        ev.output_amount,
+        sra_common::source_deposit::handler_output_amount_u256(params.output_amount)
+    );
+    assert_eq!(ev.target_token, params.target_token);
+    assert_eq!(ev.action_idxs, params.action_idxs);
+    assert_eq!(ev.exclusive_relayer, fx.payer.pubkey());
+    assert_eq!(ev.fill_deadline_offset, 3_600);
+    assert_eq!(ev.exclusivity_period, 900);
+}
+
+#[test]
 fn validate_and_prepare_standalone_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);

@@ -261,6 +261,15 @@ pub fn send_ix(
     svm.send_transaction(tx).map(|_| ()).map_err(Box::new)
 }
 
+pub fn send_ix_with_meta(
+    svm: &mut LiteSVM,
+    ix: Instruction,
+    payer: &Keypair,
+    signers: &[&Keypair],
+) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>> {
+    send_instructions(svm, &[ix], payer, signers)
+}
+
 pub fn send_instructions(
     svm: &mut LiteSVM,
     ixs: &[Instruction],
@@ -694,14 +703,16 @@ pub fn current_nonce(svm: &LiteSVM, mint_nonce: &Pubkey) -> u64 {
 // ---------------------------------------------------------------------------
 
 /// Scan program logs for a `Program data: <base64>` line whose discriminator
-/// matches `DepositPrepared`, and borsh-deserialize the remainder.
-pub fn extract_deposit_prepared(logs: &[String]) -> Option<sra_handler::events::DepositPrepared> {
+/// matches `T`, and borsh-deserialize the remainder.
+pub fn extract_anchor_event<T>(logs: &[String]) -> Option<T>
+where
+    T: anchor_lang::AnchorDeserialize + anchor_lang::Discriminator,
+{
     use anchor_lang::{AnchorDeserialize, Discriminator};
     use base64::Engine;
 
     let engine = base64::engine::general_purpose::STANDARD;
-    let expected_disc: &[u8] =
-        <sra_handler::events::DepositPrepared as Discriminator>::DISCRIMINATOR;
+    let expected_disc: &[u8] = <T as Discriminator>::DISCRIMINATOR;
 
     for log in logs {
         let Some(b64) = log.strip_prefix("Program data: ") else {
@@ -713,11 +724,13 @@ pub fn extract_deposit_prepared(logs: &[String]) -> Option<sra_handler::events::
         if raw.len() < expected_disc.len() || &raw[..expected_disc.len()] != expected_disc {
             continue;
         }
-        if let Ok(ev) =
-            sra_handler::events::DepositPrepared::try_from_slice(&raw[expected_disc.len()..])
-        {
+        if let Ok(ev) = <T as AnchorDeserialize>::try_from_slice(&raw[expected_disc.len()..]) {
             return Some(ev);
         }
     }
     None
+}
+
+pub fn extract_deposit_prepared(logs: &[String]) -> Option<sra_handler::events::DepositPrepared> {
+    extract_anchor_event(logs)
 }

@@ -20,6 +20,24 @@ fn update_slippage_owner_sets_value() {
 }
 
 #[test]
+fn update_slippage_emits_slippage_updated() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let pda = init_sra(&mut svm, &payer, &owner);
+
+    let allowed_slippage_bps = 75;
+    let ix = update_slippage_ix(&owner.pubkey(), &pda, allowed_slippage_bps);
+    let meta =
+        send_ix_with_meta(&mut svm, ix, &payer, &[&owner]).expect("update_slippage should succeed");
+
+    let ev = extract_anchor_event::<sra_handler::events::SlippageUpdated>(&meta.logs)
+        .expect("SlippageUpdated event must be emitted");
+    assert_eq!(ev.sra_config, pda);
+    assert_eq!(ev.allowed_slippage_bps, allowed_slippage_bps);
+}
+
+#[test]
 fn update_slippage_owner_replaces_value() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
