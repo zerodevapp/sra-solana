@@ -372,9 +372,7 @@ impl SurfpoolSourceFixture {
 #[test]
 #[ignore = "requires Surfpool at http://127.0.0.1:8899"]
 fn source_e2e_real_across_happy_path() {
-    let _guard = SURFPOOL_TEST_MUTEX
-        .lock()
-        .expect("lock surfpool mutex");
+    let _guard = SURFPOOL_TEST_MUTEX.lock().expect("lock surfpool mutex");
     let fx = SurfpoolSourceFixture::bootstrap().expect("bootstrap fixture");
     let pre_owner = fx
         .owner_token_amount()
@@ -430,9 +428,7 @@ fn source_e2e_real_across_happy_path() {
 #[test]
 #[ignore = "requires Surfpool at http://127.0.0.1:8899"]
 fn source_e2e_real_across_nonce_increments() {
-    let _guard = SURFPOOL_TEST_MUTEX
-        .lock()
-        .expect("lock surfpool mutex");
+    let _guard = SURFPOOL_TEST_MUTEX.lock().expect("lock surfpool mutex");
     let fx = SurfpoolSourceFixture::bootstrap().expect("bootstrap fixture");
 
     fx.invoke_source_flow(default_prepare_params_rpc(&fx))
