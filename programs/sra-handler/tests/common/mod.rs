@@ -708,7 +708,7 @@ pub fn extract_anchor_event<T>(logs: &[String]) -> Option<T>
 where
     T: anchor_lang::AnchorDeserialize + anchor_lang::Discriminator,
 {
-    use anchor_lang::Discriminator;
+    use anchor_lang::{AnchorDeserialize, Discriminator};
     use base64::Engine;
 
     let engine = base64::engine::general_purpose::STANDARD;
