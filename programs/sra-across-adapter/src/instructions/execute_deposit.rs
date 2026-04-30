@@ -63,7 +63,13 @@ pub struct ExecuteDepositAcross<'info> {
     /// CHECK: Placeholder until full Across CPI wiring lands.
     #[account(mut)]
     pub across_state: UncheckedAccount<'info>,
-    #[account(mut, constraint = across_vault.mint == input_mint.key())]
+    /// Pin the destination of the `deposit_now` token movement to the canonical
+    /// ATA(`across_state`, `input_mint`).
+    #[account(
+        mut,
+        associated_token::mint = input_mint,
+        associated_token::authority = across_state,
+    )]
     pub across_vault: Box<Account<'info, TokenAccount>>,
     /// CHECK: derived from the full deposit-now seed hash and checked in the handler.
     pub delegate: UncheckedAccount<'info>,
