@@ -1,0 +1,129 @@
+name: Source E2E Surfpool
+
+on:
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Anchor.toml"
+      - "rust-toolchain.toml"
+      - "crates/**"
+      - "programs/**"
+      - "idl/**"
+      - "idls/**"
+      - "tests/**"
+      - ".github/workflows/source-e2e-surfpool.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: source-e2e-surfpool-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOLANA_VERSION: "3.1.11"
+  ANCHOR_VERSION: "0.32.1"
+  SURFPOOL_VERSION: "v1.2.0"
+  NODE_VERSION: "20"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  source-e2e-surfpool:
+    name: Source E2E (Surfpool + real Across)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.89.0
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: source-e2e-surfpool
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: yarn
+
+      - name: Install yarn deps
+        run: yarn install --frozen-lockfile
+
+      - name: Cache Solana + Anchor toolchain
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/solana
+            ~/.avm
+            ~/.cargo/bin/avm
+            ~/.cargo/bin/anchor
+          key: toolchain-solana-${{ env.SOLANA_VERSION }}-anchor-${{ env.ANCHOR_VERSION }}-v1
+
+      - name: Install Solana CLI
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
+
+      - name: Add Solana to PATH
+        run: echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Install avm + Anchor
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor --tag v${ANCHOR_VERSION} avm --force
+          avm install ${ANCHOR_VERSION}
+          avm use ${ANCHOR_VERSION}
+
+      - name: Generate local keypair
+        run: |
+          mkdir -p ~/.config/solana
+          solana-keygen new --no-bip39-passphrase --force --silent --outfile ~/.config/solana/id.json
+
+      - name: Install Surfpool
+        env:
+          VERSION: ${{ env.SURFPOOL_VERSION }}
+        run: curl -sL https://run.surfpool.run/ | bash
+
+      - name: Verify tool versions
+        run: |
+          surfpool --version
+          solana --version
+          anchor --version
+          rustc --version
+
+      - name: Build local programs
+        run: NO_DNA=1 anchor build
+
+      - name: Start Surfpool
+        run: NO_DNA=1 surfpool start --ci --network mainnet --legacy-anchor-compatibility --airdrop-keypair-path ~/.config/solana/id.json > /tmp/surfpool.log 2>&1 &
+
+      - name: Wait for Surfpool RPC
+        run: |
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8899 \
+              -H 'content-type: application/json' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"getHealth","params":[]}' >/dev/null && exit 0
+            sleep 2
+          done
+          cat /tmp/surfpool.log
+          exit 1
+
+      - name: Wait for local program auto-deploy
+        run: |
+          for i in $(seq 1 60); do
+            solana account --url http://127.0.0.1:8899 Gte7LViTnE2UixBF59Xfu2sSqcmHhMNANj42yUkYpkdo >/dev/null 2>&1 && \
+            solana account --url http://127.0.0.1:8899 8n167Xs4Xx7zEq5fuyCDVgYd3vUjFmHAkGTdK2SCpmXD >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          cat /tmp/surfpool.log
+          exit 1
+
+      - name: Run Step 21 Surfpool test
+        run: NO_DNA=1 cargo test -p sra-handler --test source_e2e_surfpool -- --ignored --nocapture

@@ -51,6 +51,12 @@
         },
         {
           "name": "system_program"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
         }
       ],
       "args": [
