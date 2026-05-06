@@ -1,8 +1,5 @@
 use anchor_lang::{error, prelude::*, solana_program::sysvar::instructions};
-use sra_common::{
-    errors::SraError,
-    instruction_data::instruction_data_hash,
-};
+use sra_common::{errors::SraError, instruction_data::instruction_data_hash};
 
 // Account-slot indices in the adapter's `ExecuteDepositAcross` ix that the
 // handler verifier needs to pin. Drift would silently break attestation, so

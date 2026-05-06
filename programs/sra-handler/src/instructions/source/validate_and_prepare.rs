@@ -26,7 +26,10 @@ fn validate_adapter_program(adapter_program: &AccountInfo) -> Result<()> {
         !adapter_program.data_is_empty() && adapter_program.executable,
         SraError::InvalidAdapterProgram
     );
-    require!(is_program_owner(adapter_program.owner), SraError::InvalidAdapterProgram);
+    require!(
+        is_program_owner(adapter_program.owner),
+        SraError::InvalidAdapterProgram
+    );
     Ok(())
 }
 

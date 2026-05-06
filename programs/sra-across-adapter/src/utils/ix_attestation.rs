@@ -1,7 +1,9 @@
 use anchor_lang::{error, prelude::*, solana_program::sysvar::instructions};
 use sra_common::{
     errors::SraError,
-    instruction_data::{decode_anchor_instruction_data, encode_anchor_instruction_data, instruction_data_hash},
+    instruction_data::{
+        decode_anchor_instruction_data, encode_anchor_instruction_data, instruction_data_hash,
+    },
     source_deposit::{AcrossDepositParams, PrepareParams, ValidateAndPrepareArgs},
 };
 
@@ -50,8 +52,10 @@ pub(crate) fn verify_previous_handler_ix(
         &prev_ix.data,
     )?;
     require!(
-        instruction_data_hash(&encode_anchor_instruction_data("execute_deposit_across", deposit))
-            == args.paired_adapter_ix_data_hash,
+        instruction_data_hash(&encode_anchor_instruction_data(
+            "execute_deposit_across",
+            deposit
+        )) == args.paired_adapter_ix_data_hash,
         SraError::PairedInstructionMismatch
     );
     require!(
@@ -158,9 +162,10 @@ mod tests {
     fn verify_previous_handler_ix_accepts_matching_instruction() {
         let prepare = sample_prepare_params();
         let deposit = sample_across_deposit(&prepare);
-        let expected_hash = instruction_data_hash(
-            &encode_anchor_instruction_data("execute_deposit_across", &deposit),
-        );
+        let expected_hash = instruction_data_hash(&encode_anchor_instruction_data(
+            "execute_deposit_across",
+            &deposit,
+        ));
         let sra_config = Pubkey::new_unique();
         let source_mint = Pubkey::new_unique();
         let adapter_program = Pubkey::new_unique();
@@ -212,12 +217,10 @@ mod tests {
     #[test]
     fn verify_previous_handler_ix_rejects_mismatch_batch() {
         let prepare = sample_prepare_params();
-        let expected_hash = instruction_data_hash(
-            &encode_anchor_instruction_data(
-                "execute_deposit_across",
-                &sample_across_deposit(&prepare),
-            ),
-        );
+        let expected_hash = instruction_data_hash(&encode_anchor_instruction_data(
+            "execute_deposit_across",
+            &sample_across_deposit(&prepare),
+        ));
         let sra_config = Pubkey::new_unique();
         let source_mint = Pubkey::new_unique();
         let adapter_program = Pubkey::new_unique();
@@ -260,14 +263,13 @@ mod tests {
         ];
 
         for (name, mutate, expected) in cases {
-            let mut previous =
-                previous_validate_ix(
-                    sra_config,
-                    source_mint,
-                    adapter_program,
-                    &prepare,
-                    expected_hash,
-                );
+            let mut previous = previous_validate_ix(
+                sra_config,
+                source_mint,
+                adapter_program,
+                &prepare,
+                expected_hash,
+            );
             let current = empty_instruction();
             let mut deposit = sample_across_deposit(&prepare);
             mutate(&mut previous, &mut deposit);
@@ -291,9 +293,10 @@ mod tests {
     fn verify_previous_handler_ix_rejects_data_hash_mismatch() {
         let prepare = sample_prepare_params();
         let mut deposit = sample_across_deposit(&prepare);
-        let expected_hash = instruction_data_hash(
-            &encode_anchor_instruction_data("execute_deposit_across", &deposit),
-        );
+        let expected_hash = instruction_data_hash(&encode_anchor_instruction_data(
+            "execute_deposit_across",
+            &deposit,
+        ));
         let sra_config = Pubkey::new_unique();
         let source_mint = Pubkey::new_unique();
         let adapter_program = Pubkey::new_unique();

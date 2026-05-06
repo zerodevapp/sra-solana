@@ -421,10 +421,15 @@ fn validate_and_prepare_wrong_next_ix_exclusive_relayer_rejected() {
         current_nonce(&svm, &fx.accounts.mint_nonce),
     );
 
-    let err = send_instructions(&mut svm, &[validate_ix, execute_ix], &fx.payer, &[&fx.owner])
-        .expect_err("exclusive_relayer mismatch must reject")
-        .err
-        .clone();
+    let err = send_instructions(
+        &mut svm,
+        &[validate_ix, execute_ix],
+        &fx.payer,
+        &[&fx.owner],
+    )
+    .expect_err("exclusive_relayer mismatch must reject")
+    .err
+    .clone();
 
     assert_eq!(
         err,

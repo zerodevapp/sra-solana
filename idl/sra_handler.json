@@ -645,6 +645,15 @@
               "name": "PrepareParams"
             }
           }
+        },
+        {
+          "name": "paired_adapter_ix_data_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
         }
       ]
     }
