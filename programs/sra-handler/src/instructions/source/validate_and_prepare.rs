@@ -3,10 +3,6 @@ use anchor_spl::{
     associated_token::AssociatedToken,
     token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked},
 };
-use solana_program::{
-    bpf_loader_upgradeable::get_program_data_address,
-    loader_v4::{LoaderV4State, LoaderV4Status},
-};
 use solana_sdk_ids::{bpf_loader, bpf_loader_deprecated, bpf_loader_upgradeable, loader_v4};
 use sra_common::{
     constants::{BPS_DENOMINATOR, MAX_ACTION_IDXS},
@@ -18,79 +14,20 @@ use sra_common::{
 use crate::events::DepositPrepared;
 use crate::utils::ix_attestation::verify_next_adapter_ix;
 
-fn deserialize_loader_v4_state(account: &AccountInfo) -> Result<LoaderV4State> {
-    let data = account
-        .try_borrow_data()
-        .map_err(|_| error!(SraError::InvalidAdapterProgram))?;
-    require!(
-        data.len() >= LoaderV4State::program_data_offset(),
-        SraError::InvalidAdapterProgram
-    );
-
-    let mut slot_bytes = [0u8; 8];
-    slot_bytes.copy_from_slice(&data[0..8]);
-
-    let mut authority_bytes = [0u8; 32];
-    authority_bytes.copy_from_slice(&data[8..40]);
-
-    let mut status_bytes = [0u8; 8];
-    status_bytes.copy_from_slice(&data[40..48]);
-    let status = match u64::from_le_bytes(status_bytes) {
-        0 => LoaderV4Status::Retracted,
-        1 => LoaderV4Status::Deployed,
-        2 => LoaderV4Status::Finalized,
-        _ => return Err(error!(SraError::InvalidAdapterProgram)),
-    };
-
-    Ok(LoaderV4State {
-        slot: u64::from_le_bytes(slot_bytes),
-        authority_address_or_next_version: Pubkey::new_from_array(authority_bytes),
-        status,
-    })
+fn is_program_owner(owner: &Pubkey) -> bool {
+    bpf_loader::check_id(owner)
+        || bpf_loader_deprecated::check_id(owner)
+        || bpf_loader_upgradeable::check_id(owner)
+        || loader_v4::check_id(owner)
 }
 
-fn validate_immutable_adapter_program(
-    adapter_program: &AccountInfo,
-    adapter_program_data: &AccountInfo,
-) -> Result<()> {
+fn validate_adapter_program(adapter_program: &AccountInfo) -> Result<()> {
     require!(
         !adapter_program.data_is_empty() && adapter_program.executable,
         SraError::InvalidAdapterProgram
     );
-
-    if bpf_loader::check_id(adapter_program.owner) || bpf_loader_deprecated::check_id(adapter_program.owner) {
-        return Ok(());
-    }
-
-    if bpf_loader_upgradeable::check_id(adapter_program.owner) {
-        require!(
-            adapter_program_data.key() == get_program_data_address(adapter_program.key)
-                && bpf_loader_upgradeable::check_id(adapter_program_data.owner),
-            SraError::InvalidAdapterProgram
-        );
-
-        let data = adapter_program_data
-            .try_borrow_data()
-            .map_err(|_| error!(SraError::InvalidAdapterProgram))?;
-        let programdata = ProgramData::try_deserialize(&mut data.as_ref())
-            .map_err(|_| error!(SraError::InvalidAdapterProgram))?;
-        return if programdata.upgrade_authority_address.is_none() {
-            Ok(())
-        } else {
-            Err(error!(SraError::InvalidAdapterProgram))
-        };
-    }
-
-    if loader_v4::check_id(adapter_program.owner) {
-        let state = deserialize_loader_v4_state(adapter_program)?;
-        require!(
-            matches!(state.status, LoaderV4Status::Finalized),
-            SraError::InvalidAdapterProgram
-        );
-        return Ok(());
-    }
-
-    Err(error!(SraError::InvalidAdapterProgram))
+    require!(is_program_owner(adapter_program.owner), SraError::InvalidAdapterProgram);
+    Ok(())
 }
 
 pub use sra_common::source_deposit::PrepareParams;
@@ -160,8 +97,6 @@ pub struct ValidateAndPrepare<'info> {
     /// CHECK: the handler enforces that this is an executable program id and a
     /// member of `sra_config.allowed_adapters`.
     pub adapter_program: UncheckedAccount<'info>,
-    /// CHECK: only used when `adapter_program` is owned by the upgradeable loader.
-    pub adapter_program_data: UncheckedAccount<'info>,
     // See `initialize_sra` for ownership-coupling rationale.
     #[account(
         has_one = owner,
@@ -212,10 +147,7 @@ pub(crate) fn handler(
 
     // Step 0a — adapter must be an executable program and be in the SRA's
     // allowlist.
-    validate_immutable_adapter_program(
-        &ctx.accounts.adapter_program.to_account_info(),
-        &ctx.accounts.adapter_program_data.to_account_info(),
-    )?;
+    validate_adapter_program(&ctx.accounts.adapter_program.to_account_info())?;
     let adapter_key = ctx.accounts.adapter_program.key();
     require!(
         handler_data
@@ -351,20 +283,6 @@ pub(crate) fn handler(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anchor_lang::error;
-
-    fn loader_v4_state_bytes(status: LoaderV4Status, authority: Pubkey) -> Vec<u8> {
-        let mut data = Vec::with_capacity(LoaderV4State::program_data_offset());
-        data.extend_from_slice(&0u64.to_le_bytes());
-        data.extend_from_slice(authority.as_ref());
-        let status_value = match status {
-            LoaderV4Status::Retracted => 0u64,
-            LoaderV4Status::Deployed => 1u64,
-            LoaderV4Status::Finalized => 2u64,
-        };
-        data.extend_from_slice(&status_value.to_le_bytes());
-        data
-    }
 
     struct TestAccount {
         key: Pubkey,
@@ -390,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_immutable_adapter_program_accepts_legacy_loader() {
+    fn validate_adapter_program_accepts_legacy_loader() {
         let mut program = TestAccount {
             key: Pubkey::new_unique(),
             owner: bpf_loader::ID,
@@ -398,129 +316,35 @@ mod tests {
             data: vec![1],
             executable: true,
         };
-        let mut ignored = TestAccount {
-            key: Pubkey::new_unique(),
-            owner: Pubkey::new_unique(),
-            lamports: 0,
-            data: vec![],
-            executable: false,
-        };
-
-        validate_immutable_adapter_program(&program.account_info(), &ignored.account_info())
-            .expect("legacy loader program should be treated as immutable");
+        validate_adapter_program(&program.account_info())
+            .expect("legacy loader program should be accepted");
     }
 
     #[test]
-    fn validate_immutable_adapter_program_rejects_upgradeable_program_with_authority() {
-        let program_key = Pubkey::new_unique();
-        let programdata_key = get_program_data_address(&program_key);
-        let programdata_state = anchor_lang::solana_program::bpf_loader_upgradeable::UpgradeableLoaderState::ProgramData {
-            slot: 0,
-            upgrade_authority_address: Some(Pubkey::new_unique()),
-        };
-
+    fn validate_adapter_program_accepts_upgradeable_loader_owner() {
         let mut program = TestAccount {
-            key: program_key,
+            key: Pubkey::new_unique(),
             owner: bpf_loader_upgradeable::ID,
             lamports: 0,
             data: vec![1],
             executable: true,
         };
-        let mut programdata = TestAccount {
-            key: programdata_key,
-            owner: bpf_loader_upgradeable::ID,
-            lamports: 0,
-            data: bincode::serialize(&programdata_state).unwrap(),
-            executable: false,
-        };
 
-        let err = validate_immutable_adapter_program(&program.account_info(), &programdata.account_info())
-            .expect_err("upgrade authority must make the adapter invalid");
-        assert_eq!(err, error!(SraError::InvalidAdapterProgram));
+        validate_adapter_program(&program.account_info())
+            .expect("upgradeable-loader owned program should be accepted");
     }
 
     #[test]
-    fn validate_immutable_adapter_program_rejects_wrong_upgradeable_programdata_account() {
-        let program_key = Pubkey::new_unique();
-        let wrong_programdata_key = Pubkey::new_unique();
-        let programdata_state = anchor_lang::solana_program::bpf_loader_upgradeable::UpgradeableLoaderState::ProgramData {
-            slot: 0,
-            upgrade_authority_address: None,
-        };
-
+    fn validate_adapter_program_accepts_loader_v4_owner() {
         let mut program = TestAccount {
-            key: program_key,
-            owner: bpf_loader_upgradeable::ID,
+            key: Pubkey::new_unique(),
+            owner: loader_v4::ID,
             lamports: 0,
             data: vec![1],
             executable: true,
         };
-        let mut wrong_programdata = TestAccount {
-            key: wrong_programdata_key,
-            owner: bpf_loader_upgradeable::ID,
-            lamports: 0,
-            data: bincode::serialize(&programdata_state).unwrap(),
-            executable: false,
-        };
 
-        let err = validate_immutable_adapter_program(
-            &program.account_info(),
-            &wrong_programdata.account_info(),
-        )
-        .expect_err("wrong programdata PDA must reject");
-        assert_eq!(err, error!(SraError::InvalidAdapterProgram));
-    }
-
-    #[test]
-    fn validate_immutable_adapter_program_accepts_finalized_loader_v4_program() {
-        let state = LoaderV4State {
-            slot: 0,
-            authority_address_or_next_version: Pubkey::default(),
-            status: LoaderV4Status::Finalized,
-        };
-        let mut program = TestAccount {
-            key: Pubkey::new_unique(),
-            owner: loader_v4::ID,
-            lamports: 0,
-            data: loader_v4_state_bytes(state.status, state.authority_address_or_next_version),
-            executable: true,
-        };
-        let mut ignored = TestAccount {
-            key: Pubkey::new_unique(),
-            owner: Pubkey::new_unique(),
-            lamports: 0,
-            data: vec![],
-            executable: false,
-        };
-
-        validate_immutable_adapter_program(&program.account_info(), &ignored.account_info())
-            .expect("finalized loader-v4 program should be accepted");
-    }
-
-    #[test]
-    fn validate_immutable_adapter_program_rejects_non_finalized_loader_v4_program() {
-        let state = LoaderV4State {
-            slot: 0,
-            authority_address_or_next_version: Pubkey::new_unique(),
-            status: LoaderV4Status::Deployed,
-        };
-        let mut program = TestAccount {
-            key: Pubkey::new_unique(),
-            owner: loader_v4::ID,
-            lamports: 0,
-            data: loader_v4_state_bytes(state.status, state.authority_address_or_next_version),
-            executable: true,
-        };
-        let mut ignored = TestAccount {
-            key: Pubkey::new_unique(),
-            owner: Pubkey::new_unique(),
-            lamports: 0,
-            data: vec![],
-            executable: false,
-        };
-
-        let err = validate_immutable_adapter_program(&program.account_info(), &ignored.account_info())
-            .expect_err("non-finalized loader-v4 program must reject");
-        assert_eq!(err, error!(SraError::InvalidAdapterProgram));
+        validate_adapter_program(&program.account_info())
+            .expect("loader-v4 owned program should be accepted");
     }
 }

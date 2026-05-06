@@ -505,7 +505,6 @@ pub fn validate_and_prepare_ix(
             adapter_authority: accounts.adapter_authority,
             adapter_custody: accounts.adapter_custody,
             adapter_program: accounts.adapter_program,
-            adapter_program_data: accounts.adapter_program,
             address_book_root: *address_book_root,
             address_book_entry: *address_book_entry,
             token_program: TOKEN_PROGRAM_ID,

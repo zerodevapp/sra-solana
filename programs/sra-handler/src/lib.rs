@@ -46,11 +46,6 @@ pub mod sra_handler {
         params: PrepareParams,
         paired_adapter_ix_data_hash: [u8; 32],
     ) -> Result<()> {
-        instructions::source::validate_and_prepare::handler(
-            ctx,
-            handler_data,
-            params,
-            paired_adapter_ix_data_hash,
-        )
+        instructions::source::validate_and_prepare::handler(ctx, handler_data, params, paired_adapter_ix_data_hash)
     }
 }

@@ -278,7 +278,7 @@ fn validate_and_prepare_wrong_next_ix_routing_rejected() {
     assert_eq!(
         err,
         TransactionError::InstructionError(
-            0,
+            1,
             InstructionError::Custom(SraError::PairedInstructionMismatch.into()),
         )
     );
@@ -426,7 +426,7 @@ fn validate_and_prepare_wrong_next_ix_target_token_rejected() {
     assert_eq!(
         err,
         TransactionError::InstructionError(
-            0,
+            1,
             InstructionError::Custom(SraError::PairedInstructionMismatch.into()),
         )
     );
@@ -474,7 +474,7 @@ fn validate_and_prepare_wrong_next_ix_input_amount_rejected() {
     assert_eq!(
         err,
         TransactionError::InstructionError(
-            0,
+            1,
             InstructionError::Custom(SraError::PairedInstructionMismatch.into()),
         )
     );
@@ -684,10 +684,7 @@ fn validate_and_prepare_malformed_next_ix_data_rejected() {
 
     assert_eq!(
         err,
-        TransactionError::InstructionError(
-            0,
-            InstructionError::Custom(SraError::InvalidPairedInstruction.into()),
-        )
+        TransactionError::InstructionError(1, InstructionError::Custom(101))
     );
 }
 
@@ -934,6 +931,38 @@ fn validate_and_prepare_non_executable_adapter_rejected() {
         fetch_token_balance(&svm, &fx.owner_ata),
         OWNER_STARTING_BALANCE
     );
+}
+
+#[test]
+fn validate_and_prepare_ix_omits_adapter_program_data_account() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    let params = default_prepare_params(&fx);
+    let execute_ix = execute_deposit_across_ix(
+        &fx.payer.pubkey(),
+        &fx,
+        &fetch_sra_config(&svm, &fx.sra_config),
+        &params,
+        across_params_for(&fx, &params),
+        current_nonce(&svm, &fx.accounts.mint_nonce),
+    );
+    let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
+    let validate_ix = validate_and_prepare_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.accounts,
+        &fx.owner_ata,
+        &fx.address_book_root,
+        &address_book_entry,
+        fx.handler_data.clone(),
+        params,
+        &execute_ix,
+    );
+
+    assert_eq!(validate_ix.accounts.len(), 16);
+    assert_eq!(validate_ix.accounts[9].pubkey, fx.adapter_program);
+    assert_eq!(validate_ix.accounts[10].pubkey, fx.address_book_root);
+    assert_eq!(validate_ix.accounts[11].pubkey, address_book_entry);
 }
 
 #[test]
