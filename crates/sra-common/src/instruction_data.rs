@@ -40,8 +40,13 @@ mod tests {
         let params = PrepareParams {
             input_amount: 1,
             output_amount: 2,
+            target_chain_id: 42_161,
+            target_handler: [4u8; 32],
+            target_adapter: [5u8; 32],
+            recipient: [6u8; 32],
+            app_id: [7u8; 32],
             target_token: [3u8; 32],
-            action_idxs: vec![4],
+            action_idxs: vec![8],
         };
         let data = encode_anchor_instruction_data("wrong_name", &params);
 

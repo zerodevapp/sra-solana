@@ -3,9 +3,29 @@ use sra_common::{
     source_deposit::{AcrossDepositParams, NormalizedDepositIntent, PrepareParams},
 };
 
+fn evm_bytes32(byte: u8) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    out[12..].fill(byte);
+    out
+}
+
+fn sample_prepare_params() -> PrepareParams {
+    PrepareParams::new(
+        7,
+        9,
+        42_161,
+        evm_bytes32(0x11),
+        evm_bytes32(0x22),
+        evm_bytes32(0x33),
+        [0x44u8; 32],
+        evm_bytes32(0x55),
+        vec![1, 2],
+    )
+}
+
 #[test]
 fn decode_prepare_params_round_trips_valid_data() {
-    let params = PrepareParams::new(7, 9, [4u8; 32], vec![1, 2]);
+    let params = sample_prepare_params();
     let data = encode_anchor_instruction_data("validate_and_prepare", &params);
 
     let decoded =
@@ -15,7 +35,7 @@ fn decode_prepare_params_round_trips_valid_data() {
 
 #[test]
 fn decode_across_deposit_params_round_trips_valid_data() {
-    let prepare = PrepareParams::new(7, 9, [4u8; 32], vec![1, 2]);
+    let prepare = sample_prepare_params();
     let params = AcrossDepositParams::from_prepare(
         &prepare,
         anchor_lang::prelude::Pubkey::new_from_array([6u8; 32]),
@@ -32,7 +52,7 @@ fn decode_across_deposit_params_round_trips_valid_data() {
 
 #[test]
 fn decode_prepare_params_rejects_wrong_discriminator() {
-    let params = PrepareParams::new(7, 9, [4u8; 32], vec![1, 2]);
+    let params = sample_prepare_params();
     let data = encode_anchor_instruction_data("wrong_name", &params);
 
     let err = decode_anchor_instruction_data::<PrepareParams>("validate_and_prepare", &data)
@@ -52,7 +72,17 @@ fn decode_across_deposit_params_rejects_truncated_data() {
 
 #[test]
 fn normalized_intent_matches_when_handler_output_is_promoted_to_u256() {
-    let prepare = PrepareParams::new(11, 22, [7u8; 32], vec![3, 5]);
+    let prepare = PrepareParams::new(
+        11,
+        22,
+        42_161,
+        evm_bytes32(0x11),
+        evm_bytes32(0x22),
+        evm_bytes32(0x33),
+        [0x44u8; 32],
+        evm_bytes32(0x77),
+        vec![3, 5],
+    );
     let across = AcrossDepositParams::from_prepare(
         &prepare,
         anchor_lang::prelude::Pubkey::new_from_array([1u8; 32]),
@@ -68,7 +98,17 @@ fn normalized_intent_matches_when_handler_output_is_promoted_to_u256() {
 
 #[test]
 fn normalized_intent_differs_when_action_idxs_change() {
-    let prepare = PrepareParams::new(11, 22, [7u8; 32], vec![3, 5]);
+    let prepare = PrepareParams::new(
+        11,
+        22,
+        42_161,
+        evm_bytes32(0x11),
+        evm_bytes32(0x22),
+        evm_bytes32(0x33),
+        [0x44u8; 32],
+        evm_bytes32(0x77),
+        vec![3, 5],
+    );
     let mut across = AcrossDepositParams::from_prepare(
         &prepare,
         anchor_lang::prelude::Pubkey::new_from_array([1u8; 32]),
@@ -76,6 +116,23 @@ fn normalized_intent_differs_when_action_idxs_change() {
         30,
     );
     across.action_idxs[1] += 1;
+
+    assert_ne!(
+        NormalizedDepositIntent::from_prepare(&prepare),
+        NormalizedDepositIntent::from_across(&across),
+    );
+}
+
+#[test]
+fn normalized_intent_differs_when_route_fields_change() {
+    let prepare = sample_prepare_params();
+    let mut across = AcrossDepositParams::from_prepare(
+        &prepare,
+        anchor_lang::prelude::Pubkey::new_from_array([1u8; 32]),
+        60,
+        30,
+    );
+    across.target_chain_id += 1;
 
     assert_ne!(
         NormalizedDepositIntent::from_prepare(&prepare),

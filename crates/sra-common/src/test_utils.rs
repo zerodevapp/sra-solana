@@ -16,6 +16,12 @@ use crate::source_deposit::{AcrossDepositParams, PrepareParams};
 
 pub const DEFAULT_ACTION_IDXS: [u64; 2] = [3, 7];
 
+fn evm_bytes32(byte: u8) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    out[12..].fill(byte);
+    out
+}
+
 pub struct InstructionsSysvarFixture {
     key: Pubkey,
     owner: Pubkey,
@@ -59,7 +65,17 @@ pub fn empty_instruction() -> Instruction {
 }
 
 pub fn sample_prepare_params() -> PrepareParams {
-    PrepareParams::new(123, 456, [0xAB; 32], DEFAULT_ACTION_IDXS.to_vec())
+    PrepareParams::new(
+        123,
+        456,
+        42_161,
+        evm_bytes32(0x11),
+        evm_bytes32(0x22),
+        evm_bytes32(0x33),
+        [0x44u8; 32],
+        evm_bytes32(0xAB),
+        DEFAULT_ACTION_IDXS.to_vec(),
+    )
 }
 
 pub fn sample_across_deposit(prepare: &PrepareParams) -> AcrossDepositParams {

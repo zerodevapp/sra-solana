@@ -78,4 +78,7 @@ pub enum SraError {
 
     #[msg("Paired instruction does not match the expected deposit intent")]
     PairedInstructionMismatch,
+
+    #[msg("Source handler data does not match immutable SRA identity")]
+    InvalidHandlerData,
 }

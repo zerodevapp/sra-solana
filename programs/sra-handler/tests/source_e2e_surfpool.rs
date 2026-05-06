@@ -10,20 +10,23 @@ use solana_sdk::{
     commitment_config::CommitmentConfig,
     message::{v0, VersionedMessage},
     pubkey::Pubkey,
+    clock::Slot,
     signature::{read_keypair_file, Keypair, Signature, Signer},
     transaction::{Transaction, VersionedTransaction},
+};
+use solana_program::address_lookup_table::{
+    instruction::{create_lookup_table, extend_lookup_table},
+    state::AddressLookupTable,
+    AddressLookupTableAccount,
 };
 use sra_common::{
     constants::{ACROSS_SPOKE_POOL_ID, USDC_MINT},
     source_deposit::{AcrossDepositParams, PrepareParams},
-    test_utils::DEFAULT_ACTION_IDXS,
-    types::{MintNonce, SraConfig},
+    types::{MintNonce, SourceHandlerData, SraConfig},
 };
-use sra_handler::instructions::source::initialize_sra::SraInitConfig;
 use std::{env, error::Error, path::PathBuf, sync::Mutex, thread::sleep, time::Duration};
 
 const INPUT_AMOUNT: u64 = 1_000_000;
-const SLIPPAGE_BPS: u16 = 50;
 // Quoted output must remain within `SLIPPAGE_BPS` of `INPUT_AMOUNT`, i.e.
 // >= INPUT_AMOUNT * (BPS_DENOMINATOR - SLIPPAGE_BPS) / BPS_DENOMINATOR.
 // 1_000_000 * 9_950 / 10_000 = 995_000, so 999_500 is comfortably within.
@@ -42,12 +45,10 @@ type TestResult<T> = Result<T, Box<dyn Error>>;
 static SURFPOOL_TEST_MUTEX: Mutex<()> = Mutex::new(());
 
 fn default_prepare_params_rpc(fx: &SurfpoolSourceFixture) -> PrepareParams {
-    PrepareParams::new(
-        INPUT_AMOUNT,
-        OUTPUT_WITHIN_SLIPPAGE,
-        fx.target_token,
-        DEFAULT_ACTION_IDXS.to_vec(),
-    )
+    let mut params = sample_prepare_params(fx.target_token);
+    params.input_amount = INPUT_AMOUNT;
+    params.output_amount = OUTPUT_WITHIN_SLIPPAGE;
+    params
 }
 
 fn payer_keypair_path() -> PathBuf {
@@ -102,13 +103,56 @@ fn send_versioned_transaction(
     payer: &Keypair,
     signers: &[&Keypair],
     ixs: &[solana_sdk::instruction::Instruction],
+    lookup_tables: &[AddressLookupTableAccount],
 ) -> TestResult<Signature> {
     let blockhash = rpc.get_latest_blockhash()?;
-    let message = v0::Message::try_compile(&payer.pubkey(), ixs, &[], blockhash)?;
+    let message = v0::Message::try_compile(&payer.pubkey(), ixs, lookup_tables, blockhash)?;
     let mut all_signers = vec![payer];
     all_signers.extend_from_slice(signers);
     let tx = VersionedTransaction::try_new(VersionedMessage::V0(message), &all_signers)?;
     Ok(rpc.send_and_confirm_transaction(&tx)?)
+}
+
+fn representative_lookup_table(ixs: &[solana_sdk::instruction::Instruction]) -> Vec<Pubkey> {
+    let mut addresses = Vec::new();
+
+    for ix in ixs {
+        for meta in &ix.accounts {
+            if meta.is_signer || addresses.contains(&meta.pubkey) {
+                continue;
+            }
+            addresses.push(meta.pubkey);
+        }
+    }
+
+    addresses
+}
+
+fn lookup_table_is_active(current_slot: Slot, last_extended_slot: Slot) -> bool {
+    current_slot > last_extended_slot
+}
+
+fn lookup_table_account_from_rpc(
+    rpc: &RpcClient,
+    lookup_table_address: &Pubkey,
+) -> TestResult<(AddressLookupTableAccount, Slot)> {
+    let account = rpc.get_account(lookup_table_address)?;
+    let table = AddressLookupTable::deserialize(account.data.as_slice())
+        .map_err(|err| format!("failed to deserialize ALT: {err:?}"))?;
+    Ok((
+        AddressLookupTableAccount {
+            key: *lookup_table_address,
+            addresses: table.addresses.into_owned(),
+        },
+        table.meta.last_extended_slot,
+    ))
+}
+
+#[test]
+fn lookup_table_activation_waits_for_last_extended_slot() {
+    assert!(!lookup_table_is_active(10, 10));
+    assert!(!lookup_table_is_active(10, 11));
+    assert!(lookup_table_is_active(12, 11));
 }
 
 fn read_anchor_account<T: AccountDeserialize>(rpc: &RpcClient, address: &Pubkey) -> TestResult<T> {
@@ -121,7 +165,8 @@ struct SurfpoolSourceFixture {
     http: Client,
     payer: Keypair,
     owner: Keypair,
-    config: SraInitConfig,
+    address_book_root: Pubkey,
+    handler_data: SourceHandlerData,
     sra_config: Pubkey,
     target_token: [u8; 32],
     owner_ata: Pubkey,
@@ -140,12 +185,15 @@ impl SurfpoolSourceFixture {
             .build()?;
         let payer = read_keypair_file(payer_keypair_path())?;
         let owner = Keypair::new();
-        let config = sample_config();
+        let address_book_root = Keypair::new();
+        let address_book_root_pubkey = address_book_root.pubkey();
+        let handler_data = sample_handler_data(address_book_root_pubkey);
+        let target_token = sample_target_token();
+        let target_chain_id = sample_prepare_params(target_token).target_chain_id;
         let salt = [0xAB; 32];
-        let (sra_config, _) = derive_sra_pda(&owner.pubkey(), &config, &salt);
+        let (sra_config, _) = derive_sra_pda(&owner.pubkey(), &handler_data, &salt);
         let accounts =
             ValidatePrepareAccounts::derive(&sra_config, &USDC_MINT, &ADAPTER_PROGRAM_ID);
-        let target_token = sample_target_token();
         let owner_ata = derive_ata(&owner.pubkey(), &USDC_MINT);
         let (across_state, _) = derive_real_across_state_pda();
         let across_vault = derive_ata(&across_state, &USDC_MINT);
@@ -159,6 +207,18 @@ impl SurfpoolSourceFixture {
         let owner_airdrop = rpc.request_airdrop(&owner.pubkey(), SOL)?;
         rpc.confirm_transaction(&owner_airdrop)?;
 
+        let initialize_address_book_root_ix = initialize_address_book_root_ix(
+            &payer.pubkey(),
+            &owner.pubkey(),
+            &address_book_root_pubkey,
+        );
+        send_legacy_transaction(
+            &rpc,
+            &payer,
+            &[&owner, &address_book_root],
+            &[initialize_address_book_root_ix],
+        )?;
+
         let create_owner_ata_ix =
             spl_associated_token_account::instruction::create_associated_token_account_idempotent(
                 &payer.pubkey(),
@@ -171,42 +231,33 @@ impl SurfpoolSourceFixture {
         let initialize_ix = initialize_sra_ix(
             &payer.pubkey(),
             &owner.pubkey(),
+            &address_book_root_pubkey,
             &sra_config,
-            config.clone(),
+            handler_data.clone(),
             salt,
         );
         send_legacy_transaction(&rpc, &payer, &[&owner], &[initialize_ix])?;
 
         let address_book_entry =
-            derive_address_book_pda(&sra_config, config.target_chain_id, &target_token).0;
+            derive_address_book_pda(&address_book_root_pubkey, target_chain_id, &target_token).0;
         let address_book_ix = set_address_book_entry_ix(
             &payer.pubkey(),
             &owner.pubkey(),
-            &sra_config,
+            &address_book_root_pubkey,
             &address_book_entry,
-            config.target_chain_id,
+            target_chain_id,
             target_token,
             TARGET_TOKEN_DECIMALS,
         );
         send_legacy_transaction(&rpc, &payer, &[&owner], &[address_book_ix])?;
-
-        let update_adapters_ix = update_adapters_ix(
-            &payer.pubkey(),
-            &owner.pubkey(),
-            &sra_config,
-            vec![ADAPTER_PROGRAM_ID],
-        );
-        send_legacy_transaction(&rpc, &payer, &[&owner], &[update_adapters_ix])?;
-
-        let update_slippage_ix = update_slippage_ix(&owner.pubkey(), &sra_config, SLIPPAGE_BPS);
-        send_legacy_transaction(&rpc, &payer, &[&owner], &[update_slippage_ix])?;
 
         let fixture = Self {
             rpc,
             http,
             payer,
             owner,
-            config,
+            address_book_root: address_book_root_pubkey,
+            handler_data,
             sra_config,
             target_token,
             owner_ata,
@@ -254,8 +305,8 @@ impl SurfpoolSourceFixture {
 
     fn invoke_source_flow(&self, params: PrepareParams) -> TestResult<Vec<String>> {
         let address_book_entry = derive_address_book_pda(
-            &self.sra_config,
-            self.config.target_chain_id,
+            &self.address_book_root,
+            params.target_chain_id,
             &params.target_token,
         )
         .0;
@@ -264,7 +315,9 @@ impl SurfpoolSourceFixture {
             &self.owner.pubkey(),
             &self.accounts,
             &self.owner_ata,
+            &self.address_book_root,
             &address_book_entry,
+            self.handler_data.clone(),
             params.clone(),
         );
         let execute_ix = execute_deposit_across_ix(
@@ -272,10 +325,11 @@ impl SurfpoolSourceFixture {
             &ValidatePrepareFixture {
                 payer: self.payer.insecure_clone(),
                 owner: self.owner.insecure_clone(),
-                config: self.config.clone(),
+                address_book_root: self.address_book_root,
+                handler_data: self.handler_data.clone(),
                 sra_config: self.sra_config,
                 source_mint: USDC_MINT,
-                target_chain_id: self.config.target_chain_id,
+                target_chain_id: params.target_chain_id,
                 target_token: self.target_token,
                 adapter_program: ADAPTER_PROGRAM_ID,
                 accounts: self.accounts.clone(),
@@ -293,11 +347,44 @@ impl SurfpoolSourceFixture {
             ),
             self.current_nonce()?,
         );
+
+        let lookup_addresses = representative_lookup_table(&[validate_ix.clone(), execute_ix.clone()]);
+        let recent_slot: Slot = self.rpc.get_slot()?;
+        let (create_lookup_table_ix, lookup_table_address) =
+            create_lookup_table(self.payer.pubkey(), self.payer.pubkey(), recent_slot);
+        let extend_lookup_table_ix = extend_lookup_table(
+            lookup_table_address,
+            self.payer.pubkey(),
+            Some(self.payer.pubkey()),
+            lookup_addresses,
+        );
+        send_legacy_transaction(
+            &self.rpc,
+            &self.payer,
+            &[],
+            &[create_lookup_table_ix, extend_lookup_table_ix],
+        )?;
+
+        // Solana only activates newly extended ALT addresses in a later slot.
+        let mut lookup_table = None;
+        for _ in 0..SURFPOOL_RETRY_COUNT {
+            let current_slot = self.rpc.get_slot()?;
+            let (candidate_lookup_table, last_extended_slot) =
+                lookup_table_account_from_rpc(&self.rpc, &lookup_table_address)?;
+            if lookup_table_is_active(current_slot, last_extended_slot) {
+                lookup_table = Some(candidate_lookup_table);
+                break;
+            }
+            sleep(Duration::from_millis(200));
+        }
+        let lookup_table = lookup_table.ok_or("lookup table did not become active")?;
+
         let signature = send_versioned_transaction(
             &self.rpc,
             &self.payer,
             &[&self.owner],
             &[compute_budget_ix(), validate_ix, execute_ix],
+            &[lookup_table],
         )?;
 
         self.logs_for_signature(&signature)

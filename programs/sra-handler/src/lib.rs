@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use sra_common::{source_deposit::PrepareParams, types::SourceHandlerData};
 
 pub mod events;
 pub mod instructions;
@@ -14,18 +15,14 @@ pub mod sra_handler {
 
     pub fn initialize_sra(
         ctx: Context<InitializeSra>,
-        config: SraInitConfig,
+        handler_data: SourceHandlerData,
         salt: [u8; 32],
     ) -> Result<()> {
-        instructions::source::initialize_sra::handler(ctx, config, salt)
+        instructions::source::initialize_sra::handler(ctx, handler_data, salt)
     }
 
-    pub fn update_adapters(ctx: Context<UpdateAdapters>, adapters: Vec<Pubkey>) -> Result<()> {
-        instructions::source::update_adapters::handler(ctx, adapters)
-    }
-
-    pub fn update_slippage(ctx: Context<UpdateSlippage>, allowed_slippage_bps: u16) -> Result<()> {
-        instructions::source::update_slippage::handler(ctx, allowed_slippage_bps)
+    pub fn initialize_address_book_root(ctx: Context<InitializeAddressBookRoot>) -> Result<()> {
+        instructions::source::address_book::initialize_root_handler(ctx)
     }
 
     pub fn set_address_book_entry(
@@ -44,8 +41,9 @@ pub mod sra_handler {
 
     pub fn validate_and_prepare(
         ctx: Context<ValidateAndPrepare>,
+        handler_data: SourceHandlerData,
         params: PrepareParams,
     ) -> Result<()> {
-        instructions::source::validate_and_prepare::handler(ctx, params)
+        instructions::source::validate_and_prepare::handler(ctx, handler_data, params)
     }
 }

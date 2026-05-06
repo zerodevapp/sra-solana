@@ -3,6 +3,7 @@ use sra_common::{
     errors::SraError,
     instruction_data::decode_anchor_instruction_data,
     source_deposit::{AcrossDepositParams, NormalizedDepositIntent, PrepareParams},
+    types::SourceHandlerData,
 };
 
 // Account-slot indices in the handler's `ValidateAndPrepare` ix that the
@@ -13,6 +14,13 @@ const HANDLER_ACCT_SRA_CONFIG: usize = 2;
 const HANDLER_ACCT_SOURCE_MINT: usize = 4;
 const HANDLER_ACCT_ADAPTER_PROGRAM: usize = 9;
 const MIN_HANDLER_ACCOUNTS: usize = HANDLER_ACCT_ADAPTER_PROGRAM + 1;
+
+#[derive(AnchorSerialize, AnchorDeserialize)]
+struct ValidateAndPrepareArgs {
+    #[allow(dead_code)]
+    handler_data: SourceHandlerData,
+    params: PrepareParams,
+}
 
 pub(crate) fn verify_previous_handler_ix(
     instructions_sysvar: &AccountInfo,
@@ -45,8 +53,11 @@ pub(crate) fn verify_previous_handler_ix(
         SraError::PairedInstructionMismatch
     );
 
-    let prepare =
-        decode_anchor_instruction_data::<PrepareParams>("validate_and_prepare", &prev_ix.data)?;
+    let prepare = decode_anchor_instruction_data::<ValidateAndPrepareArgs>(
+        "validate_and_prepare",
+        &prev_ix.data,
+    )?
+    .params;
     require!(
         NormalizedDepositIntent::from_prepare(&prepare)
             == NormalizedDepositIntent::from_across(deposit),
@@ -68,7 +79,18 @@ mod tests {
             empty_instruction, sample_across_deposit, sample_prepare_params,
             InstructionsSysvarFixture,
         },
+        types::SourceHandlerData,
     };
+
+    fn sample_handler_data() -> SourceHandlerData {
+        SourceHandlerData {
+            address_book_root: Pubkey::new_unique(),
+            fallback_recipient: [0xF0; 32],
+            allowed_slippage_bps: 50,
+            allowed_adapters: vec![Pubkey::new_unique()],
+            action_config_hash: [0x44; 32],
+        }
+    }
 
     fn previous_validate_ix(
         sra_config: Pubkey,
@@ -90,7 +112,13 @@ mod tests {
                 AccountMeta::new(Pubkey::new_unique(), false),
                 AccountMeta::new_readonly(adapter_program, false),
             ],
-            data: encode_anchor_instruction_data("validate_and_prepare", prepare),
+            data: encode_anchor_instruction_data(
+                "validate_and_prepare",
+                &ValidateAndPrepareArgs {
+                    handler_data: sample_handler_data(),
+                    params: prepare.clone(),
+                },
+            ),
         }
     }
 
