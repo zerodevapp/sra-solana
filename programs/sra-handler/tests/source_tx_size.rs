@@ -45,6 +45,14 @@ fn build_source_versioned_tx_with_lookup_tables(
     lookup_tables: &[AddressLookupTableAccount],
 ) -> VersionedTransaction {
     let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
+    let execute_ix = execute_deposit_across_ix(
+        &fx.payer.pubkey(),
+        fx,
+        &fetch_sra_config(svm, &fx.sra_config),
+        &params,
+        across_params_for(fx, &params),
+        current_nonce(svm, &fx.accounts.mint_nonce),
+    );
     let validate_ix = validate_and_prepare_ix(
         &fx.payer.pubkey(),
         &fx.owner.pubkey(),
@@ -54,14 +62,7 @@ fn build_source_versioned_tx_with_lookup_tables(
         &address_book_entry,
         fx.handler_data.clone(),
         params.clone(),
-    );
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        fx,
-        &fetch_sra_config(svm, &fx.sra_config),
-        &params,
-        across_params_for(fx, &params),
-        current_nonce(svm, &fx.accounts.mint_nonce),
+        &execute_ix,
     );
 
     let blockhash = svm.latest_blockhash();
@@ -83,6 +84,14 @@ fn build_source_versioned_tx(
     params: PrepareParams,
 ) -> VersionedTransaction {
     let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
+    let execute_ix = execute_deposit_across_ix(
+        &fx.payer.pubkey(),
+        fx,
+        &fetch_sra_config(svm, &fx.sra_config),
+        &params,
+        across_params_for(fx, &params),
+        current_nonce(svm, &fx.accounts.mint_nonce),
+    );
     let validate_ix = validate_and_prepare_ix(
         &fx.payer.pubkey(),
         &fx.owner.pubkey(),
@@ -92,14 +101,7 @@ fn build_source_versioned_tx(
         &address_book_entry,
         fx.handler_data.clone(),
         params.clone(),
-    );
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        fx,
-        &fetch_sra_config(svm, &fx.sra_config),
-        &params,
-        across_params_for(fx, &params),
-        current_nonce(svm, &fx.accounts.mint_nonce),
+        &execute_ix,
     );
 
     // The immutable-source payload no longer fits in a 2-IX v0 packet unless
