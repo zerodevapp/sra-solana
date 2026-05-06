@@ -26,7 +26,9 @@ describe("sra-handler", () => {
     assert.sameMembers(instructionNames, expectedInstructionNames);
 
     for (const methodName of expectedInstructionNames) {
-      assert.isFunction((program.methods as Record<string, unknown>)[methodName]);
+      assert.isFunction(
+        (program.methods as Record<string, unknown>)[methodName]
+      );
     }
 
     for (const removedInstructionName of removedInstructionNames) {

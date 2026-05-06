@@ -7,8 +7,7 @@ use solana_sdk::{
     transaction::TransactionError,
 };
 use sra_common::{
-    abi::u256_from_u64, constants::MAX_ACTION_IDXS, errors::SraError,
-    source_deposit::PrepareParams,
+    abi::u256_from_u64, constants::MAX_ACTION_IDXS, errors::SraError, source_deposit::PrepareParams,
 };
 
 const INPUT: u64 = 1_000_000;
@@ -44,8 +43,12 @@ fn invoke_source_flow(
     owner_ata: &Pubkey,
     params: PrepareParams,
 ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>> {
-    let address_book_entry =
-        derive_address_book_pda(&fx.address_book_root, params.target_chain_id, &params.target_token).0;
+    let address_book_entry = derive_address_book_pda(
+        &fx.address_book_root,
+        params.target_chain_id,
+        &params.target_token,
+    )
+    .0;
     let validate_ix = validate_and_prepare_ix(
         &payer.pubkey(),
         &owner.pubkey(),
@@ -704,7 +707,8 @@ fn validate_and_prepare_disabled_address_book_rejected() {
 #[test]
 fn validate_and_prepare_unregistered_adapter_rejected() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new_with_adapter_policy(&mut svm, ADAPTER_PROGRAM_ID, 50, vec![]);
+    let fx =
+        ValidatePrepareFixture::new_with_adapter_policy(&mut svm, ADAPTER_PROGRAM_ID, 50, vec![]);
 
     let err = fx
         .invoke(&mut svm, default_prepare_params(&fx))
@@ -763,7 +767,12 @@ fn validate_and_prepare_wrong_handler_data_rejected() {
     wrong_handler_data.allowed_adapters.clear();
 
     let err = fx
-        .invoke_with_handler_data(&mut svm, wrong_handler_data, default_prepare_params(&fx), vec![])
+        .invoke_with_handler_data(
+            &mut svm,
+            wrong_handler_data,
+            default_prepare_params(&fx),
+            vec![],
+        )
         .expect_err("altered handler_data must reject")
         .err
         .clone();
@@ -789,7 +798,12 @@ fn validate_and_prepare_wrong_address_book_root_in_handler_data_rejected() {
     wrong_handler_data.address_book_root = Pubkey::new_unique();
 
     let err = fx
-        .invoke_with_handler_data(&mut svm, wrong_handler_data, default_prepare_params(&fx), vec![])
+        .invoke_with_handler_data(
+            &mut svm,
+            wrong_handler_data,
+            default_prepare_params(&fx),
+            vec![],
+        )
         .expect_err("mismatched address_book_root must reject")
         .err
         .clone();
@@ -1115,9 +1129,9 @@ fn validate_and_prepare_same_sra_multiple_destinations() {
         .expect("deposit to destination A must succeed");
     let ev_a = extract_deposit_prepared(&meta_a.logs).expect("DepositPrepared #A");
 
-    let meta_b = fx
-        .invoke(&mut svm, params_b.clone())
-        .expect("deposit to destination B (different chain/handler/adapter/recipient) must succeed");
+    let meta_b = fx.invoke(&mut svm, params_b.clone()).expect(
+        "deposit to destination B (different chain/handler/adapter/recipient) must succeed",
+    );
     let ev_b = extract_deposit_prepared(&meta_b.logs).expect("DepositPrepared #B");
 
     // Same SRA serviced both deposits — the address did not depend on routing.

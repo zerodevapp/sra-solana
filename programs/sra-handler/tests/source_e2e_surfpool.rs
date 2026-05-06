@@ -6,18 +6,18 @@ use common::*;
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::{
-    commitment_config::CommitmentConfig,
-    message::{v0, VersionedMessage},
-    pubkey::Pubkey,
-    clock::Slot,
-    signature::{read_keypair_file, Keypair, Signature, Signer},
-    transaction::{Transaction, VersionedTransaction},
-};
 use solana_program::address_lookup_table::{
     instruction::{create_lookup_table, extend_lookup_table},
     state::AddressLookupTable,
     AddressLookupTableAccount,
+};
+use solana_sdk::{
+    clock::Slot,
+    commitment_config::CommitmentConfig,
+    message::{v0, VersionedMessage},
+    pubkey::Pubkey,
+    signature::{read_keypair_file, Keypair, Signature, Signer},
+    transaction::{Transaction, VersionedTransaction},
 };
 use sra_common::{
     constants::{ACROSS_SPOKE_POOL_ID, USDC_MINT},
@@ -348,7 +348,8 @@ impl SurfpoolSourceFixture {
             self.current_nonce()?,
         );
 
-        let lookup_addresses = representative_lookup_table(&[validate_ix.clone(), execute_ix.clone()]);
+        let lookup_addresses =
+            representative_lookup_table(&[validate_ix.clone(), execute_ix.clone()]);
         let recent_slot: Slot = self.rpc.get_slot()?;
         let (create_lookup_table_ix, lookup_table_address) =
             create_lookup_table(self.payer.pubkey(), self.payer.pubkey(), recent_slot);

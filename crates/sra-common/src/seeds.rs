@@ -40,7 +40,11 @@ pub fn handler_data_hash(handler_data: &SourceHandlerData) -> [u8; 32] {
 
 /// PDA seeds: ["sra", owner, config_hash, salt]
 /// config_hash = keccak256(owner ‖ final_handler ‖ handler_data_hash)
-pub fn config_hash(owner: &Pubkey, final_handler: &Pubkey, handler_data_hash: &[u8; 32]) -> [u8; 32] {
+pub fn config_hash(
+    owner: &Pubkey,
+    final_handler: &Pubkey,
+    handler_data_hash: &[u8; 32],
+) -> [u8; 32] {
     let mut data = Vec::with_capacity(32 + 32 + 32);
     data.extend_from_slice(owner.as_ref());
     data.extend_from_slice(final_handler.as_ref());
@@ -167,16 +171,8 @@ mod tests {
     #[test]
     fn config_hash_deterministic() {
         let data_hash = handler_data_hash(&test_handler_data());
-        let h1 = config_hash(
-            &test_owner(),
-            &test_final_handler(),
-            &data_hash,
-        );
-        let h2 = config_hash(
-            &test_owner(),
-            &test_final_handler(),
-            &data_hash,
-        );
+        let h1 = config_hash(&test_owner(), &test_final_handler(), &data_hash);
+        let h2 = config_hash(&test_owner(), &test_final_handler(), &data_hash);
         assert_eq!(h1, h2);
         assert_ne!(h1, [0u8; 32]);
     }
@@ -184,11 +180,7 @@ mod tests {
     #[test]
     fn config_hash_different_final_handler() {
         let data_hash = handler_data_hash(&test_handler_data());
-        let h1 = config_hash(
-            &test_owner(),
-            &test_final_handler(),
-            &data_hash,
-        );
+        let h1 = config_hash(&test_owner(), &test_final_handler(), &data_hash);
         let h2 = config_hash(
             &test_owner(),
             &Pubkey::new_from_array([7u8; 32]),
@@ -201,11 +193,7 @@ mod tests {
     fn config_hash_different_owner() {
         let owner2 = Pubkey::new_from_array([99u8; 32]);
         let data_hash = handler_data_hash(&test_handler_data());
-        let h1 = config_hash(
-            &test_owner(),
-            &test_final_handler(),
-            &data_hash,
-        );
+        let h1 = config_hash(&test_owner(), &test_final_handler(), &data_hash);
         let h2 = config_hash(&owner2, &test_final_handler(), &data_hash);
         assert_ne!(h1, h2);
     }
@@ -217,11 +205,7 @@ mod tests {
         different_handler_data.action_config_hash = [8u8; 32];
         let different_handler_data_hash = handler_data_hash(&different_handler_data);
 
-        let h1 = config_hash(
-            &test_owner(),
-            &test_final_handler(),
-            &data_hash,
-        );
+        let h1 = config_hash(&test_owner(), &test_final_handler(), &data_hash);
         let h2 = config_hash(
             &test_owner(),
             &test_final_handler(),

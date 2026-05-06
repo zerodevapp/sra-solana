@@ -146,7 +146,10 @@ pub(crate) fn handler(
     );
     let adapter_key = ctx.accounts.adapter_program.key();
     require!(
-        handler_data.allowed_adapters.iter().any(|a| a == &adapter_key),
+        handler_data
+            .allowed_adapters
+            .iter()
+            .any(|a| a == &adapter_key),
         SraError::AdapterNotAllowed
     );
 
@@ -206,7 +209,10 @@ pub(crate) fn handler(
 
     // Step 5 — transfer SRA vault → adapter custody, signed by the SRA PDA.
     {
-        let ch = handler_data.config_hash(&ctx.accounts.sra_config.owner, &ctx.accounts.sra_config.final_handler);
+        let ch = handler_data.config_hash(
+            &ctx.accounts.sra_config.owner,
+            &ctx.accounts.sra_config.final_handler,
+        );
         let owner_bytes = ctx.accounts.sra_config.owner.to_bytes();
         let salt = ctx.accounts.sra_config.salt;
         let bump_arr = [ctx.accounts.sra_config.bump];

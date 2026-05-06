@@ -182,7 +182,10 @@ mod tests {
             Pubkey::new_from_array(prepare.target_token)
         );
         assert_eq!(build.params.destination_chain_id, prepare.target_chain_id);
-        assert_eq!(build.params.recipient, Pubkey::new_from_array(prepare.target_adapter));
+        assert_eq!(
+            build.params.recipient,
+            Pubkey::new_from_array(prepare.target_adapter)
+        );
         assert_eq!(build.message, matching.message);
         assert_eq!(build.replay_hash, matching.replay_hash);
         assert_eq!(build.params.message, matching.params.message);

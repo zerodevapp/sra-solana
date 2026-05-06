@@ -3,9 +3,7 @@ mod common;
 use anchor_lang::error::ErrorCode;
 use common::*;
 use solana_sdk::{
-    instruction::InstructionError,
-    signature::Keypair,
-    signer::Signer,
+    instruction::InstructionError, signature::Keypair, signer::Signer,
     transaction::TransactionError,
 };
 use sra_common::errors::SraError;
@@ -141,8 +139,10 @@ fn set_address_book_entry_same_token_allowed_for_different_roots() {
     let root_a = init_address_book_root(&mut svm, &payer, &owner_a);
     let root_b = init_address_book_root(&mut svm, &payer, &owner_b);
     let (target_chain_id, target_token) = sample_address_book_args();
-    let (address_book_entry_a, _) = derive_address_book_pda(&root_a, target_chain_id, &target_token);
-    let (address_book_entry_b, _) = derive_address_book_pda(&root_b, target_chain_id, &target_token);
+    let (address_book_entry_a, _) =
+        derive_address_book_pda(&root_a, target_chain_id, &target_token);
+    let (address_book_entry_b, _) =
+        derive_address_book_pda(&root_b, target_chain_id, &target_token);
 
     let ix_a = set_address_book_entry_ix(
         &payer.pubkey(),
@@ -295,7 +295,8 @@ fn set_address_book_entry_wrong_pda_rejected() {
     let root_a = init_address_book_root(&mut svm, &payer, &owner_a);
     let root_b = init_address_book_root(&mut svm, &payer, &owner_b);
     let (target_chain_id, target_token) = sample_address_book_args();
-    let (wrong_address_book_entry, _) = derive_address_book_pda(&root_b, target_chain_id, &target_token);
+    let (wrong_address_book_entry, _) =
+        derive_address_book_pda(&root_b, target_chain_id, &target_token);
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),

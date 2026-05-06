@@ -643,7 +643,7 @@
       "docs": [
         "One source-side SRA per `(owner, final_handler, handler_data_hash, salt)`.",
         "PDA seeds: [\"sra\", owner, config_hash, salt]",
-        "config_hash = keccak256(borsh(owner, final_handler, handler_data_hash))"
+        "config_hash = keccak256(owner ‖ final_handler ‖ handler_data_hash)"
       ],
       "type": {
         "kind": "struct",

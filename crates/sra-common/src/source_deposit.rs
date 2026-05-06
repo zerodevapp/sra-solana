@@ -32,6 +32,7 @@ pub struct AcrossDepositParams {
 }
 
 impl PrepareParams {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_amount: u64,
         output_amount: u64,

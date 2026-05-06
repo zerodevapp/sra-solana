@@ -164,11 +164,11 @@ pub fn derive_mint_nonce_pda(sra_config: &Pubkey, source_mint: &Pubkey) -> (Pubk
     )
 }
 
-pub fn derive_adapter_authority_pda(
-    sra_config: &Pubkey,
-    adapter_program: &Pubkey,
-) -> (Pubkey, u8) {
-    Pubkey::find_program_address(&[SEED_ADAPTER_AUTHORITY, sra_config.as_ref()], adapter_program)
+pub fn derive_adapter_authority_pda(sra_config: &Pubkey, adapter_program: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[SEED_ADAPTER_AUTHORITY, sra_config.as_ref()],
+        adapter_program,
+    )
 }
 
 pub fn derive_real_across_state_pda() -> (Pubkey, u8) {
@@ -644,7 +644,8 @@ impl ValidatePrepareFixture {
         between_ixs: Vec<Instruction>,
     ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
     {
-        let address_book_entry = self.address_book_entry(params.target_chain_id, &params.target_token);
+        let address_book_entry =
+            self.address_book_entry(params.target_chain_id, &params.target_token);
         let validate_ix = validate_and_prepare_ix(
             &self.payer.pubkey(),
             &self.owner.pubkey(),
@@ -700,10 +701,7 @@ pub fn execute_deposit_across_ix(
         program_id: ADAPTER_PROGRAM_ID,
         accounts: vec![
             AccountMeta::new(*fee_payer, true),
-            AccountMeta::new_readonly(
-                anchor_lang::solana_program::sysvar::instructions::ID,
-                false,
-            ),
+            AccountMeta::new_readonly(anchor_lang::solana_program::sysvar::instructions::ID, false),
             AccountMeta::new_readonly(fx.sra_config, false),
             AccountMeta::new_readonly(fx.accounts.mint_nonce, false),
             AccountMeta::new_readonly(fx.accounts.adapter_authority, false),
