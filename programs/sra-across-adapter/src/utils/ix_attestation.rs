@@ -1,10 +1,10 @@
 use anchor_lang::{error, prelude::*, solana_program::sysvar::instructions};
 use sra_common::{
     errors::SraError,
-    instruction_data::decode_anchor_instruction_data,
-    source_deposit::{
-        AcrossDepositParams, NormalizedDepositIntent, PrepareParams, ValidateAndPrepareArgs,
+    instruction_data::{
+        decode_anchor_instruction_data, encode_anchor_instruction_data, instruction_data_hash,
     },
+    source_deposit::{AcrossDepositParams, PrepareParams, ValidateAndPrepareArgs},
 };
 
 // Account-slot indices in the handler's `ValidateAndPrepare` ix that the
@@ -47,17 +47,27 @@ pub(crate) fn verify_previous_handler_ix(
         SraError::PairedInstructionMismatch
     );
 
-    let prepare = decode_anchor_instruction_data::<ValidateAndPrepareArgs>(
+    let args = decode_anchor_instruction_data::<ValidateAndPrepareArgs>(
         "validate_and_prepare",
         &prev_ix.data,
-    )?
-    .params;
+    )?;
     require!(
-        NormalizedDepositIntent::from_prepare(&prepare)
-            == NormalizedDepositIntent::from_across(deposit),
+        instruction_data_hash(&encode_anchor_instruction_data(
+            "execute_deposit_across",
+            deposit
+        )) == args.paired_adapter_ix_data_hash,
         SraError::PairedInstructionMismatch
     );
-    Ok(prepare)
+    require!(
+        AcrossDepositParams::from_prepare(
+            &args.params,
+            deposit.exclusive_relayer,
+            deposit.fill_deadline_offset,
+            deposit.exclusivity_period,
+        ) == *deposit,
+        SraError::PairedInstructionMismatch
+    );
+    Ok(args.params)
 }
 
 #[cfg(test)]
@@ -68,7 +78,7 @@ mod tests {
         solana_program::instruction::{AccountMeta, Instruction},
     };
     use sra_common::{
-        instruction_data::encode_anchor_instruction_data,
+        instruction_data::{encode_anchor_instruction_data, instruction_data_hash},
         test_utils::{
             empty_instruction, sample_across_deposit, sample_prepare_params,
             InstructionsSysvarFixture,
@@ -91,6 +101,7 @@ mod tests {
         source_mint: Pubkey,
         adapter_program: Pubkey,
         prepare: &PrepareParams,
+        paired_adapter_ix_data_hash: [u8; 32],
     ) -> Instruction {
         Instruction {
             program_id: sra_common::ID,
@@ -111,6 +122,7 @@ mod tests {
                 &ValidateAndPrepareArgs {
                     handler_data: sample_handler_data(),
                     params: prepare.clone(),
+                    paired_adapter_ix_data_hash,
                 },
             ),
         }
@@ -150,10 +162,20 @@ mod tests {
     fn verify_previous_handler_ix_accepts_matching_instruction() {
         let prepare = sample_prepare_params();
         let deposit = sample_across_deposit(&prepare);
+        let expected_hash = instruction_data_hash(&encode_anchor_instruction_data(
+            "execute_deposit_across",
+            &deposit,
+        ));
         let sra_config = Pubkey::new_unique();
         let source_mint = Pubkey::new_unique();
         let adapter_program = Pubkey::new_unique();
-        let previous = previous_validate_ix(sra_config, source_mint, adapter_program, &prepare);
+        let previous = previous_validate_ix(
+            sra_config,
+            source_mint,
+            adapter_program,
+            &prepare,
+            expected_hash,
+        );
         let current = empty_instruction();
         let mut sysvar = InstructionsSysvarFixture::new(1, &[previous, current]);
         let account_info = sysvar.account_info();
@@ -195,6 +217,10 @@ mod tests {
     #[test]
     fn verify_previous_handler_ix_rejects_mismatch_batch() {
         let prepare = sample_prepare_params();
+        let expected_hash = instruction_data_hash(&encode_anchor_instruction_data(
+            "execute_deposit_across",
+            &sample_across_deposit(&prepare),
+        ));
         let sra_config = Pubkey::new_unique();
         let source_mint = Pubkey::new_unique();
         let adapter_program = Pubkey::new_unique();
@@ -237,8 +263,13 @@ mod tests {
         ];
 
         for (name, mutate, expected) in cases {
-            let mut previous =
-                previous_validate_ix(sra_config, source_mint, adapter_program, &prepare);
+            let mut previous = previous_validate_ix(
+                sra_config,
+                source_mint,
+                adapter_program,
+                &prepare,
+                expected_hash,
+            );
             let current = empty_instruction();
             let mut deposit = sample_across_deposit(&prepare);
             mutate(&mut previous, &mut deposit);
@@ -256,5 +287,41 @@ mod tests {
 
             assert_eq!(err, expected, "{name} must reject");
         }
+    }
+
+    #[test]
+    fn verify_previous_handler_ix_rejects_data_hash_mismatch() {
+        let prepare = sample_prepare_params();
+        let mut deposit = sample_across_deposit(&prepare);
+        let expected_hash = instruction_data_hash(&encode_anchor_instruction_data(
+            "execute_deposit_across",
+            &deposit,
+        ));
+        let sra_config = Pubkey::new_unique();
+        let source_mint = Pubkey::new_unique();
+        let adapter_program = Pubkey::new_unique();
+        let previous = previous_validate_ix(
+            sra_config,
+            source_mint,
+            adapter_program,
+            &prepare,
+            expected_hash,
+        );
+
+        deposit.fill_deadline_offset += 1;
+        let current = empty_instruction();
+        let mut sysvar = InstructionsSysvarFixture::new(1, &[previous, current]);
+        let account_info = sysvar.account_info();
+
+        let err = verify_previous_handler_ix(
+            &account_info,
+            &sra_config,
+            &source_mint,
+            &adapter_program,
+            &deposit,
+        )
+        .expect_err("current adapter data hash must match the previous handler attestation");
+
+        assert_eq!(err, error!(SraError::PairedInstructionMismatch));
     }
 }

@@ -310,16 +310,6 @@ impl SurfpoolSourceFixture {
             &params.target_token,
         )
         .0;
-        let validate_ix = validate_and_prepare_ix(
-            &self.payer.pubkey(),
-            &self.owner.pubkey(),
-            &self.accounts,
-            &self.owner_ata,
-            &self.address_book_root,
-            &address_book_entry,
-            self.handler_data.clone(),
-            params.clone(),
-        );
         let execute_ix = execute_deposit_across_ix(
             &self.payer.pubkey(),
             &ValidatePrepareFixture {
@@ -346,6 +336,17 @@ impl SurfpoolSourceFixture {
                 EXCLUSIVITY_PERIOD_SECS,
             ),
             self.current_nonce()?,
+        );
+        let validate_ix = validate_and_prepare_ix(
+            &self.payer.pubkey(),
+            &self.owner.pubkey(),
+            &self.accounts,
+            &self.owner_ata,
+            &self.address_book_root,
+            &address_book_entry,
+            self.handler_data.clone(),
+            params.clone(),
+            &execute_ix,
         );
 
         let lookup_addresses =
