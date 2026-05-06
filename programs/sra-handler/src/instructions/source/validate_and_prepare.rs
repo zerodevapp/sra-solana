@@ -308,43 +308,24 @@ mod tests {
     }
 
     #[test]
-    fn validate_adapter_program_accepts_legacy_loader() {
-        let mut program = TestAccount {
-            key: Pubkey::new_unique(),
-            owner: bpf_loader::ID,
-            lamports: 0,
-            data: vec![1],
-            executable: true,
-        };
-        validate_adapter_program(&program.account_info())
-            .expect("legacy loader program should be accepted");
-    }
+    fn validate_adapter_program_accepts_supported_loader_owners() {
+        let cases = [
+            ("legacy", bpf_loader::ID),
+            ("upgradeable", bpf_loader_upgradeable::ID),
+            ("loader_v4", loader_v4::ID),
+        ];
 
-    #[test]
-    fn validate_adapter_program_accepts_upgradeable_loader_owner() {
-        let mut program = TestAccount {
-            key: Pubkey::new_unique(),
-            owner: bpf_loader_upgradeable::ID,
-            lamports: 0,
-            data: vec![1],
-            executable: true,
-        };
+        for (name, owner) in cases {
+            let mut program = TestAccount {
+                key: Pubkey::new_unique(),
+                owner,
+                lamports: 0,
+                data: vec![1],
+                executable: true,
+            };
 
-        validate_adapter_program(&program.account_info())
-            .expect("upgradeable-loader owned program should be accepted");
-    }
-
-    #[test]
-    fn validate_adapter_program_accepts_loader_v4_owner() {
-        let mut program = TestAccount {
-            key: Pubkey::new_unique(),
-            owner: loader_v4::ID,
-            lamports: 0,
-            data: vec![1],
-            executable: true,
-        };
-
-        validate_adapter_program(&program.account_info())
-            .expect("loader-v4 owned program should be accepted");
+            validate_adapter_program(&program.account_info())
+                .unwrap_or_else(|_| panic!("{name} loader-owned program should be accepted"));
+        }
     }
 }

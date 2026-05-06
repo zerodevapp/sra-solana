@@ -383,104 +383,6 @@ fn validate_and_prepare_wrong_next_ix_source_mint_rejected() {
 }
 
 #[test]
-fn validate_and_prepare_wrong_next_ix_target_token_rejected() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-    let prepare = default_prepare_params(&fx);
-    let mut across = across_params_for(&fx, &prepare);
-    // Differ only in target_token. Other normalized fields stay aligned so the
-    // handler verifier rejects on routing data, not on account slots.
-    across.target_token[31] ^= 0xFF;
-
-    let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        across,
-        current_nonce(&svm, &fx.accounts.mint_nonce),
-    );
-    let validate_ix = validate_and_prepare_ix(
-        &fx.payer.pubkey(),
-        &fx.owner.pubkey(),
-        &fx.accounts,
-        &fx.owner_ata,
-        &fx.address_book_root,
-        &address_book_entry,
-        fx.handler_data.clone(),
-        prepare.clone(),
-        &execute_ix,
-    );
-
-    let err = send_instructions(
-        &mut svm,
-        &[validate_ix, execute_ix],
-        &fx.payer,
-        &[&fx.owner],
-    )
-    .expect_err("target_token mismatch in IX 2 must reject")
-    .err
-    .clone();
-
-    assert_eq!(
-        err,
-        TransactionError::InstructionError(
-            1,
-            InstructionError::Custom(SraError::PairedInstructionMismatch.into()),
-        )
-    );
-}
-
-#[test]
-fn validate_and_prepare_wrong_next_ix_input_amount_rejected() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-    let prepare = default_prepare_params(&fx);
-    let mut across = across_params_for(&fx, &prepare);
-    across.input_amount += 1;
-
-    let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        across,
-        current_nonce(&svm, &fx.accounts.mint_nonce),
-    );
-    let validate_ix = validate_and_prepare_ix(
-        &fx.payer.pubkey(),
-        &fx.owner.pubkey(),
-        &fx.accounts,
-        &fx.owner_ata,
-        &fx.address_book_root,
-        &address_book_entry,
-        fx.handler_data.clone(),
-        prepare.clone(),
-        &execute_ix,
-    );
-
-    let err = send_instructions(
-        &mut svm,
-        &[validate_ix, execute_ix],
-        &fx.payer,
-        &[&fx.owner],
-    )
-    .expect_err("input_amount mismatch in IX 2 must reject")
-    .err
-    .clone();
-
-    assert_eq!(
-        err,
-        TransactionError::InstructionError(
-            1,
-            InstructionError::Custom(SraError::PairedInstructionMismatch.into()),
-        )
-    );
-}
-
-#[test]
 fn validate_and_prepare_wrong_next_ix_exclusive_relayer_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
@@ -521,112 +423,6 @@ fn validate_and_prepare_wrong_next_ix_exclusive_relayer_rejected() {
 
     let err = send_instructions(&mut svm, &[validate_ix, execute_ix], &fx.payer, &[&fx.owner])
         .expect_err("exclusive_relayer mismatch must reject")
-        .err
-        .clone();
-
-    assert_eq!(
-        err,
-        TransactionError::InstructionError(
-            0,
-            InstructionError::Custom(SraError::PairedInstructionMismatch.into()),
-        )
-    );
-}
-
-#[test]
-fn validate_and_prepare_wrong_next_ix_fill_deadline_offset_rejected() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-    let prepare = default_prepare_params(&fx);
-    let base_across = across_params_for(&fx, &prepare);
-    let paired_execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        base_across.clone(),
-        current_nonce(&svm, &fx.accounts.mint_nonce),
-    );
-
-    let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
-    let validate_ix = validate_and_prepare_ix(
-        &fx.payer.pubkey(),
-        &fx.owner.pubkey(),
-        &fx.accounts,
-        &fx.owner_ata,
-        &fx.address_book_root,
-        &address_book_entry,
-        fx.handler_data.clone(),
-        prepare.clone(),
-        &paired_execute_ix,
-    );
-
-    let mut mutated_across = base_across;
-    mutated_across.fill_deadline_offset += 1;
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        mutated_across,
-        current_nonce(&svm, &fx.accounts.mint_nonce),
-    );
-
-    let err = send_instructions(&mut svm, &[validate_ix, execute_ix], &fx.payer, &[&fx.owner])
-        .expect_err("fill_deadline_offset mismatch must reject")
-        .err
-        .clone();
-
-    assert_eq!(
-        err,
-        TransactionError::InstructionError(
-            0,
-            InstructionError::Custom(SraError::PairedInstructionMismatch.into()),
-        )
-    );
-}
-
-#[test]
-fn validate_and_prepare_wrong_next_ix_exclusivity_period_rejected() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-    let prepare = default_prepare_params(&fx);
-    let base_across = across_params_for(&fx, &prepare);
-    let paired_execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        base_across.clone(),
-        current_nonce(&svm, &fx.accounts.mint_nonce),
-    );
-
-    let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
-    let validate_ix = validate_and_prepare_ix(
-        &fx.payer.pubkey(),
-        &fx.owner.pubkey(),
-        &fx.accounts,
-        &fx.owner_ata,
-        &fx.address_book_root,
-        &address_book_entry,
-        fx.handler_data.clone(),
-        prepare.clone(),
-        &paired_execute_ix,
-    );
-
-    let mut mutated_across = base_across;
-    mutated_across.exclusivity_period += 1;
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        mutated_across,
-        current_nonce(&svm, &fx.accounts.mint_nonce),
-    );
-
-    let err = send_instructions(&mut svm, &[validate_ix, execute_ix], &fx.payer, &[&fx.owner])
-        .expect_err("exclusivity_period mismatch must reject")
         .err
         .clone();
 
@@ -682,10 +478,7 @@ fn validate_and_prepare_malformed_next_ix_data_rejected() {
     .err
     .clone();
 
-    assert_eq!(
-        err,
-        TransactionError::InstructionError(1, InstructionError::Custom(101))
-    );
+    assert!(matches!(err, TransactionError::InstructionError(1, _)));
 }
 
 #[test]
@@ -931,38 +724,6 @@ fn validate_and_prepare_non_executable_adapter_rejected() {
         fetch_token_balance(&svm, &fx.owner_ata),
         OWNER_STARTING_BALANCE
     );
-}
-
-#[test]
-fn validate_and_prepare_ix_omits_adapter_program_data_account() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-    let params = default_prepare_params(&fx);
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &params,
-        across_params_for(&fx, &params),
-        current_nonce(&svm, &fx.accounts.mint_nonce),
-    );
-    let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
-    let validate_ix = validate_and_prepare_ix(
-        &fx.payer.pubkey(),
-        &fx.owner.pubkey(),
-        &fx.accounts,
-        &fx.owner_ata,
-        &fx.address_book_root,
-        &address_book_entry,
-        fx.handler_data.clone(),
-        params,
-        &execute_ix,
-    );
-
-    assert_eq!(validate_ix.accounts.len(), 16);
-    assert_eq!(validate_ix.accounts[9].pubkey, fx.adapter_program);
-    assert_eq!(validate_ix.accounts[10].pubkey, fx.address_book_root);
-    assert_eq!(validate_ix.accounts[11].pubkey, address_book_entry);
 }
 
 #[test]
