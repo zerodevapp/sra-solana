@@ -4,29 +4,20 @@ use anchor_lang::prelude::*;
 pub struct SraInitialized {
     pub sra_config: Pubkey,
     pub owner: Pubkey,
-    pub target_chain_id: u64,
-    pub target_handler: [u8; 32],
-    pub target_adapter: [u8; 32],
-    pub recipient: [u8; 32],
-    pub app_id: [u8; 32],
+    pub final_handler: Pubkey,
+    pub handler_data_hash: [u8; 32],
     pub salt: [u8; 32],
 }
 
 #[event]
-pub struct AdaptersUpdated {
-    pub sra_config: Pubkey,
-    pub adapters: Vec<Pubkey>,
-}
-
-#[event]
-pub struct SlippageUpdated {
-    pub sra_config: Pubkey,
-    pub allowed_slippage_bps: u16,
+pub struct AddressBookRootInitialized {
+    pub address_book_root: Pubkey,
+    pub owner: Pubkey,
 }
 
 #[event]
 pub struct AddressBookEntrySet {
-    pub sra_config: Pubkey,
+    pub address_book_root: Pubkey,
     pub target_chain_id: u64,
     pub target_token: [u8; 32],
     pub target_decimals: u8,
@@ -42,8 +33,8 @@ pub struct DepositPrepared {
     pub sra_config: Pubkey,
     /// Source mint that was locked.
     pub source_mint: Pubkey,
-    /// Adapter program that IX 2 will CPI into. Must be a member of
-    /// `sra_config.allowed_adapters` at the time of this emission.
+    /// Adapter program that IX 2 will CPI into. Must be a member of the
+    /// immutable `handler_data.allowed_adapters` committed by the SRA.
     pub adapter_program: Pubkey,
     /// Pre-increment nonce captured before IX 1 bumps `mint_nonce`.
     pub nonce: u64,
@@ -53,8 +44,7 @@ pub struct DepositPrepared {
     /// Minimum output amount the destination must honor; enforced here via
     /// the slippage check and re-honored by the target-specific adapter flow.
     pub output_amount: u64,
-    /// Immutable target chain id from SraConfig, copied into the event so
-    /// relayers do not need an extra account read to route the deposit.
+    /// Runtime target chain id from `PrepareParams`.
     pub target_chain_id: u64,
     /// Opaque 32-byte target handler identifier. EVM handlers are left-padded
     /// addresses; non-EVM targets may use all 32 bytes.
@@ -64,7 +54,7 @@ pub struct DepositPrepared {
     pub target_adapter: [u8; 32],
     /// Destination account / recipient identifier.
     pub recipient: [u8; 32],
-    /// App identifier copied from SraConfig.
+    /// Runtime app identifier from `PrepareParams`.
     pub app_id: [u8; 32],
     /// Per-deposit target token identifier. Stored as raw bytes32 so Solana
     /// pubkeys and other non-EVM ids are not truncated.

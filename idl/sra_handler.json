@@ -8,6 +8,40 @@
   },
   "instructions": [
     {
+      "name": "initialize_address_book_root",
+      "discriminator": [
+        165,
+        119,
+        193,
+        17,
+        173,
+        203,
+        159,
+        20
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "address_book_root",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "initialize_sra",
       "discriminator": [
         141,
@@ -30,6 +64,9 @@
           "signer": true
         },
         {
+          "name": "address_book_root"
+        },
+        {
           "name": "sra_config",
           "writable": true,
           "pda": {
@@ -48,7 +85,7 @@
               },
               {
                 "kind": "arg",
-                "path": "config.hash(& owner"
+                "path": "config_hash"
               },
               {
                 "kind": "arg",
@@ -64,10 +101,19 @@
       ],
       "args": [
         {
-          "name": "config",
+          "name": "config_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "handler_data",
           "type": {
             "defined": {
-              "name": "SraInitConfig"
+              "name": "SourceHandlerData"
             }
           }
         },
@@ -104,11 +150,11 @@
           "name": "owner",
           "signer": true,
           "relations": [
-            "sra_config"
+            "address_book_root"
           ]
         },
         {
-          "name": "sra_config"
+          "name": "address_book_root"
         },
         {
           "name": "address_book_entry",
@@ -134,7 +180,7 @@
               },
               {
                 "kind": "account",
-                "path": "sra_config"
+                "path": "address_book_root"
               },
               {
                 "kind": "arg",
@@ -173,81 +219,6 @@
       ]
     },
     {
-      "name": "update_adapters",
-      "discriminator": [
-        214,
-        16,
-        245,
-        127,
-        109,
-        143,
-        222,
-        149
-      ],
-      "accounts": [
-        {
-          "name": "payer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "owner",
-          "signer": true,
-          "relations": [
-            "sra_config"
-          ]
-        },
-        {
-          "name": "sra_config",
-          "writable": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "adapters",
-          "type": {
-            "vec": "pubkey"
-          }
-        }
-      ]
-    },
-    {
-      "name": "update_slippage",
-      "discriminator": [
-        62,
-        148,
-        250,
-        172,
-        118,
-        36,
-        254,
-        125
-      ],
-      "accounts": [
-        {
-          "name": "owner",
-          "signer": true,
-          "relations": [
-            "sra_config"
-          ]
-        },
-        {
-          "name": "sra_config",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "allowed_slippage_bps",
-          "type": "u16"
-        }
-      ]
-    },
-    {
       "name": "validate_and_prepare",
       "discriminator": [
         94,
@@ -275,14 +246,12 @@
           ],
           "signer": true,
           "relations": [
-            "sra_config"
+            "sra_config",
+            "address_book_root"
           ]
         },
         {
-          "name": "sra_config",
-          "relations": [
-            "address_book_entry"
-          ]
+          "name": "sra_config"
         },
         {
           "name": "mint_nonce",
@@ -635,6 +604,9 @@
           ]
         },
         {
+          "name": "address_book_root"
+        },
+        {
           "name": "address_book_entry"
         },
         {
@@ -659,6 +631,14 @@
       ],
       "args": [
         {
+          "name": "handler_data",
+          "type": {
+            "defined": {
+              "name": "SourceHandlerData"
+            }
+          }
+        },
+        {
           "name": "params",
           "type": {
             "defined": {
@@ -681,6 +661,19 @@
         207,
         142,
         91
+      ]
+    },
+    {
+      "name": "AddressBookRoot",
+      "discriminator": [
+        144,
+        206,
+        154,
+        225,
+        141,
+        251,
+        36,
+        143
       ]
     },
     {
@@ -712,19 +705,6 @@
   ],
   "events": [
     {
-      "name": "AdaptersUpdated",
-      "discriminator": [
-        242,
-        149,
-        20,
-        11,
-        73,
-        204,
-        81,
-        177
-      ]
-    },
-    {
       "name": "AddressBookEntrySet",
       "discriminator": [
         0,
@@ -738,6 +718,19 @@
       ]
     },
     {
+      "name": "AddressBookRootInitialized",
+      "discriminator": [
+        125,
+        93,
+        139,
+        130,
+        135,
+        78,
+        85,
+        144
+      ]
+    },
+    {
       "name": "DepositPrepared",
       "discriminator": [
         187,
@@ -748,19 +741,6 @@
         77,
         103,
         114
-      ]
-    },
-    {
-      "name": "SlippageUpdated",
-      "discriminator": [
-        217,
-        90,
-        79,
-        176,
-        237,
-        4,
-        174,
-        92
       ]
     },
     {
@@ -779,35 +759,17 @@
   ],
   "types": [
     {
-      "name": "AdaptersUpdated",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "sra_config",
-            "type": "pubkey"
-          },
-          {
-            "name": "adapters",
-            "type": {
-              "vec": "pubkey"
-            }
-          }
-        ]
-      }
-    },
-    {
       "name": "AddressBookEntry",
       "docs": [
-        "Per-SRA owner-managed (chain, target_token) -> decimals registry.",
+        "Per-address-book-root owner-managed (chain, target_token) -> decimals registry.",
         "`target_decimals = 0` is a tombstone/disabled entry, mirroring zeroed EVM TokenInfo.",
-        "PDA seeds: [\"address_book\", sra_config, chain_id.to_le_bytes(), target_token]"
+        "PDA seeds: [\"address_book\", address_book_root, chain_id.to_le_bytes(), target_token]"
       ],
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "sra_config",
+            "name": "address_book_root",
             "type": "pubkey"
           },
           {
@@ -847,7 +809,7 @@
         "kind": "struct",
         "fields": [
           {
-            "name": "sra_config",
+            "name": "address_book_root",
             "type": "pubkey"
           },
           {
@@ -866,6 +828,38 @@
           {
             "name": "target_decimals",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AddressBookRoot",
+      "docs": [
+        "Owner-managed source address-book namespace. The root account is initialized",
+        "explicitly and then committed inside immutable `SourceHandlerData`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AddressBookRootInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "address_book_root",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
           }
         ]
       }
@@ -898,8 +892,8 @@
           {
             "name": "adapter_program",
             "docs": [
-              "Adapter program that IX 2 will CPI into. Must be a member of",
-              "`sra_config.allowed_adapters` at the time of this emission."
+              "Adapter program that IX 2 will CPI into. Must be a member of the",
+              "immutable `handler_data.allowed_adapters` committed by the SRA."
             ],
             "type": "pubkey"
           },
@@ -929,8 +923,7 @@
           {
             "name": "target_chain_id",
             "docs": [
-              "Immutable target chain id from SraConfig, copied into the event so",
-              "relayers do not need an extra account read to route the deposit."
+              "Runtime target chain id from `PrepareParams`."
             ],
             "type": "u64"
           },
@@ -975,7 +968,7 @@
           {
             "name": "app_id",
             "docs": [
-              "App identifier copied from SraConfig."
+              "Runtime app identifier from `PrepareParams`."
             ],
             "type": {
               "array": [
@@ -1044,6 +1037,46 @@
             "type": "u64"
           },
           {
+            "name": "target_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "target_handler",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_adapter",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "recipient",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
             "name": "target_token",
             "type": {
               "array": [
@@ -1062,17 +1095,41 @@
       }
     },
     {
-      "name": "SlippageUpdated",
+      "name": "SourceHandlerData",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "sra_config",
+            "name": "address_book_root",
             "type": "pubkey"
+          },
+          {
+            "name": "fallback_recipient",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           },
           {
             "name": "allowed_slippage_bps",
             "type": "u16"
+          },
+          {
+            "name": "allowed_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "action_config_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }
@@ -1080,10 +1137,9 @@
     {
       "name": "SraConfig",
       "docs": [
-        "One SRA per user per app. Source deposits are owner-signed, so mutable",
-        "routing policy lives at account scope instead of in per-mint route PDAs.",
+        "One source-side SRA per `(owner, final_handler, handler_data_hash, salt)`.",
         "PDA seeds: [\"sra\", owner, config_hash, salt]",
-        "config_hash = keccak256(borsh(owner, target_chain_id, target_handler, target_adapter, recipient, app_id))"
+        "config_hash = keccak256(owner ‖ final_handler ‖ handler_data_hash)"
       ],
       "type": {
         "kind": "struct",
@@ -1093,38 +1149,11 @@
             "type": "pubkey"
           },
           {
-            "name": "target_chain_id",
-            "type": "u64"
+            "name": "final_handler",
+            "type": "pubkey"
           },
           {
-            "name": "target_handler",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "target_adapter",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "recipient",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "app_id",
+            "name": "handler_data_hash",
             "type": {
               "array": [
                 "u8",
@@ -1142,66 +1171,8 @@
             }
           },
           {
-            "name": "allowed_adapters",
-            "type": {
-              "vec": "pubkey"
-            }
-          },
-          {
-            "name": "allowed_slippage_bps",
-            "type": "u16"
-          },
-          {
             "name": "bump",
             "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "SraInitConfig",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "target_chain_id",
-            "type": "u64"
-          },
-          {
-            "name": "target_handler",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "target_adapter",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "recipient",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "app_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
           }
         ]
       }
@@ -1220,38 +1191,11 @@
             "type": "pubkey"
           },
           {
-            "name": "target_chain_id",
-            "type": "u64"
+            "name": "final_handler",
+            "type": "pubkey"
           },
           {
-            "name": "target_handler",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "target_adapter",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "recipient",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "app_id",
+            "name": "handler_data_hash",
             "type": {
               "array": [
                 "u8",

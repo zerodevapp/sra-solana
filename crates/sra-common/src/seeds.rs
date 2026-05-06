@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use solana_keccak_hasher::hash as keccak_hash;
 
-use crate::types::SolanaAction;
+use crate::types::{SolanaAction, SourceHandlerData};
 
 // ---------------------------------------------------------------------------
 // PDA seed prefixes
@@ -29,24 +29,26 @@ pub const SEED_VERIFIED_FILL: &[u8] = b"verified_fill";
 // Source config_hash
 // ---------------------------------------------------------------------------
 
-/// Compute the config_hash for an SRA source PDA.
+/// Pure hash. Callers must `validate()` separately — bundling validation here
+/// would panic during PDA seed derivation.
+pub fn handler_data_hash(handler_data: &SourceHandlerData) -> [u8; 32] {
+    let serialized = handler_data
+        .try_to_vec()
+        .expect("SourceHandlerData serialization should not fail");
+    keccak_hash(&serialized).to_bytes()
+}
+
 /// PDA seeds: ["sra", owner, config_hash, salt]
-/// config_hash = keccak256(borsh(owner, target_chain_id, target_handler, target_adapter, recipient, app_id))
+/// config_hash = keccak256(owner ‖ final_handler ‖ handler_data_hash)
 pub fn config_hash(
     owner: &Pubkey,
-    target_chain_id: u64,
-    target_handler: &[u8; 32],
-    target_adapter: &[u8; 32],
-    recipient: &[u8; 32],
-    app_id: &[u8; 32],
+    final_handler: &Pubkey,
+    handler_data_hash: &[u8; 32],
 ) -> [u8; 32] {
-    let mut data = Vec::with_capacity(32 + 8 + 32 + 32 + 32 + 32);
+    let mut data = Vec::with_capacity(32 + 32 + 32);
     data.extend_from_slice(owner.as_ref());
-    data.extend_from_slice(&target_chain_id.to_le_bytes());
-    data.extend_from_slice(target_handler);
-    data.extend_from_slice(target_adapter);
-    data.extend_from_slice(recipient);
-    data.extend_from_slice(app_id);
+    data.extend_from_slice(final_handler.as_ref());
+    data.extend_from_slice(handler_data_hash);
     keccak_hash(&data).to_bytes()
 }
 
@@ -84,21 +86,24 @@ pub fn route_config_hash(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::{MAX_ADAPTERS, MAX_SLIPPAGE_BPS};
 
     fn test_owner() -> Pubkey {
         Pubkey::new_from_array([1u8; 32])
     }
 
-    fn test_handler() -> [u8; 32] {
-        [2u8; 32]
+    fn test_final_handler() -> Pubkey {
+        Pubkey::new_from_array([2u8; 32])
     }
 
-    fn test_adapter() -> [u8; 32] {
-        [3u8; 32]
-    }
-
-    fn test_recipient() -> [u8; 32] {
-        [4u8; 32]
+    fn test_handler_data() -> SourceHandlerData {
+        SourceHandlerData {
+            address_book_root: Pubkey::new_from_array([3u8; 32]),
+            fallback_recipient: [4u8; 32],
+            allowed_slippage_bps: 50,
+            allowed_adapters: vec![Pubkey::new_from_array([5u8; 32])],
+            action_config_hash: [6u8; 32],
+        }
     }
 
     fn test_app_id() -> [u8; 32] {
@@ -106,44 +111,80 @@ mod tests {
     }
 
     #[test]
-    fn config_hash_deterministic() {
-        let h1 = config_hash(
-            &test_owner(),
-            42161,
-            &test_handler(),
-            &test_adapter(),
-            &test_recipient(),
-            &test_app_id(),
-        );
-        let h2 = config_hash(
-            &test_owner(),
-            42161,
-            &test_handler(),
-            &test_adapter(),
-            &test_recipient(),
-            &test_app_id(),
-        );
+    fn handler_data_hash_deterministic() {
+        let handler_data = test_handler_data();
+        let h1 = handler_data_hash(&handler_data);
+        let h2 = handler_data_hash(&handler_data);
         assert_eq!(h1, h2);
         assert_ne!(h1, [0u8; 32]);
     }
 
     #[test]
-    fn config_hash_different_chain_id() {
-        let h1 = config_hash(
-            &test_owner(),
-            42161,
-            &test_handler(),
-            &test_adapter(),
-            &test_recipient(),
-            &test_app_id(),
+    fn handler_data_hash_different_payload() {
+        let handler_data = test_handler_data();
+        let mut different = handler_data.clone();
+        different.fallback_recipient = [9u8; 32];
+        assert_ne!(
+            handler_data_hash(&handler_data),
+            handler_data_hash(&different)
         );
+    }
+
+    #[test]
+    fn handler_data_hash_does_not_validate() {
+        // Regression guard: re-bundling validate() would panic during seeds.
+        let mut handler_data = test_handler_data();
+        handler_data.allowed_slippage_bps = MAX_SLIPPAGE_BPS + 1;
+        let _ = handler_data_hash(&handler_data);
+    }
+
+    #[test]
+    fn validate_rejects_too_many_adapters() {
+        let mut handler_data = test_handler_data();
+        handler_data.allowed_adapters = (0..=MAX_ADAPTERS)
+            .map(|i| Pubkey::new_from_array([i as u8; 32]))
+            .collect();
+
+        let err = handler_data.validate().unwrap_err();
+        match err {
+            anchor_lang::error::Error::AnchorError(anchor_err) => {
+                assert_eq!(anchor_err.error_name, "TooManyAdapters");
+            }
+            other => panic!("expected AnchorError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_rejects_invalid_slippage() {
+        let mut handler_data = test_handler_data();
+        handler_data.allowed_slippage_bps = MAX_SLIPPAGE_BPS + 1;
+
+        let err = handler_data.validate().unwrap_err();
+        match err {
+            anchor_lang::error::Error::AnchorError(anchor_err) => {
+                assert_eq!(anchor_err.error_name, "InvalidSlippage");
+            }
+            other => panic!("expected AnchorError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn config_hash_deterministic() {
+        let data_hash = handler_data_hash(&test_handler_data());
+        let h1 = config_hash(&test_owner(), &test_final_handler(), &data_hash);
+        let h2 = config_hash(&test_owner(), &test_final_handler(), &data_hash);
+        assert_eq!(h1, h2);
+        assert_ne!(h1, [0u8; 32]);
+    }
+
+    #[test]
+    fn config_hash_different_final_handler() {
+        let data_hash = handler_data_hash(&test_handler_data());
+        let h1 = config_hash(&test_owner(), &test_final_handler(), &data_hash);
         let h2 = config_hash(
             &test_owner(),
-            10,
-            &test_handler(),
-            &test_adapter(),
-            &test_recipient(),
-            &test_app_id(),
+            &Pubkey::new_from_array([7u8; 32]),
+            &data_hash,
         );
         assert_ne!(h1, h2);
     }
@@ -151,42 +192,24 @@ mod tests {
     #[test]
     fn config_hash_different_owner() {
         let owner2 = Pubkey::new_from_array([99u8; 32]);
-        let h1 = config_hash(
-            &test_owner(),
-            42161,
-            &test_handler(),
-            &test_adapter(),
-            &test_recipient(),
-            &test_app_id(),
-        );
-        let h2 = config_hash(
-            &owner2,
-            42161,
-            &test_handler(),
-            &test_adapter(),
-            &test_recipient(),
-            &test_app_id(),
-        );
+        let data_hash = handler_data_hash(&test_handler_data());
+        let h1 = config_hash(&test_owner(), &test_final_handler(), &data_hash);
+        let h2 = config_hash(&owner2, &test_final_handler(), &data_hash);
         assert_ne!(h1, h2);
     }
 
     #[test]
-    fn config_hash_different_app_id() {
-        let h1 = config_hash(
-            &test_owner(),
-            42161,
-            &test_handler(),
-            &test_adapter(),
-            &test_recipient(),
-            &test_app_id(),
-        );
+    fn config_hash_different_handler_data() {
+        let data_hash = handler_data_hash(&test_handler_data());
+        let mut different_handler_data = test_handler_data();
+        different_handler_data.action_config_hash = [8u8; 32];
+        let different_handler_data_hash = handler_data_hash(&different_handler_data);
+
+        let h1 = config_hash(&test_owner(), &test_final_handler(), &data_hash);
         let h2 = config_hash(
             &test_owner(),
-            42161,
-            &test_handler(),
-            &test_adapter(),
-            &test_recipient(),
-            &[0u8; 32],
+            &test_final_handler(),
+            &different_handler_data_hash,
         );
         assert_ne!(h1, h2);
     }
@@ -239,26 +262,6 @@ mod tests {
     // -- Golden vector tests (pinned digests, independently computed) --
     // These catch regressions in field order, endianness, or serialization format.
     // Golden vectors computed externally via Python Keccak-256 (pycryptodome).
-
-    #[test]
-    fn config_hash_golden_vector() {
-        // owner=[1]*32, chain_id=42161 (LE), handler=[2]*32, adapter=[3]*32,
-        // recipient=[4]*32, app_id=[5]*32
-        let expected: [u8; 32] = [
-            0xed, 0x4f, 0x1d, 0x36, 0x26, 0x63, 0xa4, 0x4b, 0x4b, 0x8d, 0x74, 0x72, 0x83, 0x1a,
-            0x7d, 0x34, 0x3c, 0xa8, 0xc2, 0xc9, 0x43, 0x8a, 0x10, 0x2b, 0x0b, 0xc0, 0x22, 0xd2,
-            0x01, 0x38, 0x1b, 0xa5,
-        ];
-        let h = config_hash(
-            &test_owner(),
-            42161,
-            &test_handler(),
-            &test_adapter(),
-            &test_recipient(),
-            &test_app_id(),
-        );
-        assert_eq!(h, expected, "config_hash golden vector mismatch");
-    }
 
     #[test]
     fn route_config_hash_golden_vector_empty_actions() {

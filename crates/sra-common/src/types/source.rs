@@ -1,28 +1,61 @@
 use anchor_lang::prelude::*;
 
-use crate::constants::MAX_ADAPTERS;
+use crate::{
+    constants::{MAX_ADAPTERS, MAX_SLIPPAGE_BPS},
+    errors::SraError,
+};
 
-/// One SRA per user per app. Source deposits are owner-signed, so mutable
-/// routing policy lives at account scope instead of in per-mint route PDAs.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq, InitSpace)]
+pub struct SourceHandlerData {
+    pub address_book_root: Pubkey,
+    pub fallback_recipient: [u8; 32],
+    pub allowed_slippage_bps: u16,
+    #[max_len(MAX_ADAPTERS)]
+    pub allowed_adapters: Vec<Pubkey>,
+    pub action_config_hash: [u8; 32],
+}
+
+impl SourceHandlerData {
+    pub fn validate(&self) -> Result<()> {
+        require!(
+            self.allowed_adapters.len() <= MAX_ADAPTERS,
+            SraError::TooManyAdapters
+        );
+        require!(
+            self.allowed_slippage_bps <= MAX_SLIPPAGE_BPS,
+            SraError::InvalidSlippage
+        );
+        Ok(())
+    }
+
+    pub fn hash(&self) -> [u8; 32] {
+        crate::seeds::handler_data_hash(self)
+    }
+
+    pub fn config_hash(&self, owner: &Pubkey, final_handler: &Pubkey) -> [u8; 32] {
+        crate::seeds::config_hash(owner, final_handler, &self.hash())
+    }
+}
+
+/// One source-side SRA per `(owner, final_handler, handler_data_hash, salt)`.
 /// PDA seeds: ["sra", owner, config_hash, salt]
-/// config_hash = keccak256(borsh(owner, target_chain_id, target_handler, target_adapter, recipient, app_id))
+/// config_hash = keccak256(owner ‖ final_handler ‖ handler_data_hash)
 #[account]
 #[derive(InitSpace)]
 pub struct SraConfig {
-    // Immutable (in config_hash -> in PDA)
     pub owner: Pubkey,
-    pub target_chain_id: u64,
-    pub target_handler: [u8; 32],
-    pub target_adapter: [u8; 32],
-    pub recipient: [u8; 32],
-    pub app_id: [u8; 32],
-    // Immutable (NOT in config_hash, in PDA seeds directly)
+    pub final_handler: Pubkey,
+    pub handler_data_hash: [u8; 32],
     pub salt: [u8; 32],
-    // Mutable
-    #[max_len(MAX_ADAPTERS)]
-    pub allowed_adapters: Vec<Pubkey>,
-    pub allowed_slippage_bps: u16,
     pub bump: u8,
+}
+
+/// Owner-managed source address-book namespace. The root account is initialized
+/// explicitly and then committed inside immutable `SourceHandlerData`.
+#[account]
+#[derive(InitSpace)]
+pub struct AddressBookRoot {
+    pub owner: Pubkey,
 }
 
 /// Persistent nonce per `(sra_config, source_mint)`. The owner-signed deposit
@@ -35,13 +68,13 @@ pub struct MintNonce {
     pub bump: u8,
 }
 
-/// Per-SRA owner-managed (chain, target_token) -> decimals registry.
+/// Per-address-book-root owner-managed (chain, target_token) -> decimals registry.
 /// `target_decimals = 0` is a tombstone/disabled entry, mirroring zeroed EVM TokenInfo.
-/// PDA seeds: ["address_book", sra_config, chain_id.to_le_bytes(), target_token]
+/// PDA seeds: ["address_book", address_book_root, chain_id.to_le_bytes(), target_token]
 #[account]
 #[derive(InitSpace)]
 pub struct AddressBookEntry {
-    pub sra_config: Pubkey,
+    pub address_book_root: Pubkey,
     pub target_chain_id: u64,
     pub target_token: [u8; 32],
     /// Decimals of `target_token` on the target chain. Serves three roles:
@@ -67,12 +100,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn source_handler_data_init_space() {
+        // 32 address_book_root + 32 fallback_recipient + 2 allowed_slippage_bps
+        // + 4 + (32 * 8) allowed_adapters + 32 action_config_hash = 358
+        assert_eq!(SourceHandlerData::INIT_SPACE, 358);
+    }
+
+    #[test]
     fn sra_config_init_space() {
-        // 32 owner + 8 target_chain_id + 32 target_handler + 32 target_adapter
-        // + 32 recipient + 32 app_id + 32 salt + 4 + (32 * 8) allowed_adapters
-        // + 2 allowed_slippage_bps + 1 bump
-        // = 32 + 8 + 32 + 32 + 32 + 32 + 32 + 260 + 2 + 1 = 463
-        assert_eq!(SraConfig::INIT_SPACE, 463);
+        // 32 owner + 32 final_handler + 32 handler_data_hash + 32 salt + 1 bump = 129
+        assert_eq!(SraConfig::INIT_SPACE, 129);
+    }
+
+    #[test]
+    fn address_book_root_init_space() {
+        // 32 owner
+        assert_eq!(AddressBookRoot::INIT_SPACE, 32);
     }
 
     #[test]
@@ -83,7 +126,7 @@ mod tests {
 
     #[test]
     fn address_book_entry_init_space() {
-        // 32 sra_config + 8 target_chain_id + 32 target_token + 1 target_decimals + 1 bump = 74
+        // 32 address_book_root + 8 target_chain_id + 32 target_token + 1 target_decimals + 1 bump = 74
         assert_eq!(AddressBookEntry::INIT_SPACE, 74);
     }
 }

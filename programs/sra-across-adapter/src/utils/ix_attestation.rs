@@ -2,7 +2,9 @@ use anchor_lang::{error, prelude::*, solana_program::sysvar::instructions};
 use sra_common::{
     errors::SraError,
     instruction_data::decode_anchor_instruction_data,
-    source_deposit::{AcrossDepositParams, NormalizedDepositIntent, PrepareParams},
+    source_deposit::{
+        AcrossDepositParams, NormalizedDepositIntent, PrepareParams, ValidateAndPrepareArgs,
+    },
 };
 
 // Account-slot indices in the handler's `ValidateAndPrepare` ix that the
@@ -45,8 +47,11 @@ pub(crate) fn verify_previous_handler_ix(
         SraError::PairedInstructionMismatch
     );
 
-    let prepare =
-        decode_anchor_instruction_data::<PrepareParams>("validate_and_prepare", &prev_ix.data)?;
+    let prepare = decode_anchor_instruction_data::<ValidateAndPrepareArgs>(
+        "validate_and_prepare",
+        &prev_ix.data,
+    )?
+    .params;
     require!(
         NormalizedDepositIntent::from_prepare(&prepare)
             == NormalizedDepositIntent::from_across(deposit),
@@ -68,7 +73,18 @@ mod tests {
             empty_instruction, sample_across_deposit, sample_prepare_params,
             InstructionsSysvarFixture,
         },
+        types::SourceHandlerData,
     };
+
+    fn sample_handler_data() -> SourceHandlerData {
+        SourceHandlerData {
+            address_book_root: Pubkey::new_unique(),
+            fallback_recipient: [0xF0; 32],
+            allowed_slippage_bps: 50,
+            allowed_adapters: vec![Pubkey::new_unique()],
+            action_config_hash: [0x44; 32],
+        }
+    }
 
     fn previous_validate_ix(
         sra_config: Pubkey,
@@ -90,7 +106,13 @@ mod tests {
                 AccountMeta::new(Pubkey::new_unique(), false),
                 AccountMeta::new_readonly(adapter_program, false),
             ],
-            data: encode_anchor_instruction_data("validate_and_prepare", prepare),
+            data: encode_anchor_instruction_data(
+                "validate_and_prepare",
+                &ValidateAndPrepareArgs {
+                    handler_data: sample_handler_data(),
+                    params: prepare.clone(),
+                },
+            ),
         }
     }
 

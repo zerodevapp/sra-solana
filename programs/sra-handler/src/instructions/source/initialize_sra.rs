@@ -1,49 +1,30 @@
 use anchor_lang::prelude::*;
 use sra_common::{
-    seeds::{config_hash, SEED_SRA},
-    types::SraConfig,
+    errors::SraError,
+    seeds::{handler_data_hash, SEED_SRA},
+    types::{AddressBookRoot, SourceHandlerData, SraConfig},
 };
 
 use crate::events::SraInitialized;
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
-pub struct SraInitConfig {
-    pub target_chain_id: u64,
-    pub target_handler: [u8; 32],
-    pub target_adapter: [u8; 32],
-    pub recipient: [u8; 32],
-    pub app_id: [u8; 32],
-}
-
-impl SraInitConfig {
-    pub fn hash(&self, owner: &Pubkey) -> [u8; 32] {
-        config_hash(
-            owner,
-            self.target_chain_id,
-            &self.target_handler,
-            &self.target_adapter,
-            &self.recipient,
-            &self.app_id,
-        )
-    }
-}
-
 #[derive(Accounts)]
-#[instruction(config: SraInitConfig, salt: [u8; 32])]
+#[instruction(config_hash: [u8; 32], handler_data: SourceHandlerData, salt: [u8; 32])]
 pub struct InitializeSra<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     pub owner: Signer<'info>,
+    // SRA owner must also own the address-book root — collapses trust to one
+    // principal. Stricter than EVM (any IAddressBook); shared books deferred.
+    #[account(
+        constraint = address_book_root.owner == owner.key() @ SraError::InvalidAddressBook,
+        constraint = handler_data.address_book_root == address_book_root.key() @ SraError::InvalidAddressBook,
+    )]
+    pub address_book_root: Account<'info, AddressBookRoot>,
     #[account(
         init,
         payer = payer,
         space = 8 + SraConfig::INIT_SPACE,
-        seeds = [
-            SEED_SRA,
-            owner.key().as_ref(),
-            &config.hash(&owner.key()),
-            &salt,
-        ],
+        seeds = [SEED_SRA, owner.key().as_ref(), &config_hash, &salt],
         bump,
     )]
     pub sra_config: Account<'info, SraConfig>,
@@ -52,29 +33,31 @@ pub struct InitializeSra<'info> {
 
 pub(crate) fn handler(
     ctx: Context<InitializeSra>,
-    config: SraInitConfig,
+    config_hash: [u8; 32],
+    handler_data: SourceHandlerData,
     salt: [u8; 32],
 ) -> Result<()> {
+    handler_data.validate()?;
+    let final_handler = crate::ID;
+    let expected_config_hash = handler_data.config_hash(&ctx.accounts.owner.key(), &final_handler);
+    require!(
+        expected_config_hash == config_hash,
+        SraError::InvalidHandlerData
+    );
+    let handler_data_hash = handler_data_hash(&handler_data);
+
     let sra_config = &mut ctx.accounts.sra_config;
     sra_config.owner = ctx.accounts.owner.key();
-    sra_config.target_chain_id = config.target_chain_id;
-    sra_config.target_handler = config.target_handler;
-    sra_config.target_adapter = config.target_adapter;
-    sra_config.recipient = config.recipient;
-    sra_config.app_id = config.app_id;
+    sra_config.final_handler = final_handler;
+    sra_config.handler_data_hash = handler_data_hash;
     sra_config.salt = salt;
-    sra_config.allowed_adapters = Vec::new();
-    sra_config.allowed_slippage_bps = 0;
     sra_config.bump = ctx.bumps.sra_config;
 
     emit!(SraInitialized {
         sra_config: sra_config.key(),
         owner: sra_config.owner,
-        target_chain_id: sra_config.target_chain_id,
-        target_handler: sra_config.target_handler,
-        target_adapter: sra_config.target_adapter,
-        recipient: sra_config.recipient,
-        app_id: sra_config.app_id,
+        final_handler: sra_config.final_handler,
+        handler_data_hash: sra_config.handler_data_hash,
         salt: sra_config.salt,
     });
 

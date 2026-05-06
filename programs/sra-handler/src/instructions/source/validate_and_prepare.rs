@@ -7,8 +7,8 @@ use solana_sdk_ids::{bpf_loader, bpf_loader_deprecated, bpf_loader_upgradeable, 
 use sra_common::{
     constants::{BPS_DENOMINATOR, MAX_ACTION_IDXS},
     errors::SraError,
-    seeds::{config_hash, SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_SRA},
-    types::{AddressBookEntry, MintNonce, SraConfig},
+    seeds::{SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_SRA},
+    types::{AddressBookEntry, AddressBookRoot, MintNonce, SourceHandlerData, SraConfig},
 };
 
 use crate::events::DepositPrepared;
@@ -31,12 +31,11 @@ pub use sra_common::source_deposit::PrepareParams;
 /// **Not standalone.** This is the first instruction of a 2-IX versioned
 /// transaction.
 ///
-/// Every Anchor `Account<'info, T>` is boxed to keep Anchor-generated
-/// `try_accounts` within the 4 KB on-chain stack budget. With 8 accounts
-/// (including `SraConfig`'s variable-sized `allowed_adapters` Vec and three
-/// `TokenAccount`s) the unboxed struct overflows by ~100 bytes.
+/// Every Anchor `Account<'info, T>` is boxed: the `SourceHandlerData`
+/// IX arg + three `TokenAccount`s push the unboxed struct ~100 bytes
+/// over the 4 KB stack budget.
 #[derive(Accounts)]
-#[instruction(params: PrepareParams)]
+#[instruction(_handler_data: SourceHandlerData, params: PrepareParams)]
 pub struct ValidateAndPrepare<'info> {
     /// Pays tx fees. Separated from `owner` to enable gas sponsorship.
     #[account(mut)]
@@ -89,12 +88,16 @@ pub struct ValidateAndPrepare<'info> {
     /// CHECK: the handler enforces that this is an executable program id and a
     /// member of `sra_config.allowed_adapters`.
     pub adapter_program: UncheckedAccount<'info>,
+    // See `initialize_sra` for ownership-coupling rationale.
     #[account(
-        has_one = sra_config,
+        has_one = owner,
+    )]
+    pub address_book_root: Box<Account<'info, AddressBookRoot>>,
+    #[account(
         seeds = [
             SEED_ADDRESS_BOOK,
-            sra_config.key().as_ref(),
-            &sra_config.target_chain_id.to_le_bytes(),
+            address_book_root.key().as_ref(),
+            &params.target_chain_id.to_le_bytes(),
             &params.target_token,
         ],
         bump = address_book_entry.bump,
@@ -109,10 +112,27 @@ pub struct ValidateAndPrepare<'info> {
     pub instructions_sysvar: UncheckedAccount<'info>,
 }
 
-pub(crate) fn handler(ctx: Context<ValidateAndPrepare>, params: PrepareParams) -> Result<()> {
+pub(crate) fn handler(
+    ctx: Context<ValidateAndPrepare>,
+    handler_data: SourceHandlerData,
+    params: PrepareParams,
+) -> Result<()> {
     require!(
         params.action_idxs.len() <= MAX_ACTION_IDXS,
         SraError::TooManyActionIdxs
+    );
+    handler_data.validate()?;
+    require!(
+        ctx.accounts.sra_config.final_handler == crate::ID,
+        SraError::InvalidHandlerData
+    );
+    require!(
+        handler_data.hash() == ctx.accounts.sra_config.handler_data_hash,
+        SraError::InvalidHandlerData
+    );
+    require!(
+        handler_data.address_book_root == ctx.accounts.address_book_root.key(),
+        SraError::InvalidAddressBook
     );
 
     // Step 0a — adapter must be an executable program and be in the SRA's
@@ -125,17 +145,15 @@ pub(crate) fn handler(ctx: Context<ValidateAndPrepare>, params: PrepareParams) -
     );
     let adapter_key = ctx.accounts.adapter_program.key();
     require!(
-        ctx.accounts
-            .sra_config
+        handler_data
             .allowed_adapters
             .iter()
             .any(|a| a == &adapter_key),
         SraError::AdapterNotAllowed
     );
 
-    // Step 0b — address book entry enabled. Its PDA seeds already pin it to
-    // `(sra_config, target_chain_id, params.target_token)`, so only the
-    // tombstone bit is left to check.
+    // Step 0b — entry seeds already pin (address_book_root, target_chain_id,
+    // target_token); only the tombstone bit is left to check.
     require!(
         ctx.accounts.address_book_entry.is_enabled(),
         SraError::InvalidAddressBook
@@ -172,9 +190,7 @@ pub(crate) fn handler(ctx: Context<ValidateAndPrepare>, params: PrepareParams) -
     }
 
     // Step 3 — slippage. u128 lets u64-max inputs multiply cleanly.
-    // `allowed_slippage_bps <= BPS_DENOMINATOR` is enforced on SraConfig
-    // writes, so the subtraction cannot underflow.
-    let slippage_bps = ctx.accounts.sra_config.allowed_slippage_bps as u128;
+    let slippage_bps = handler_data.allowed_slippage_bps as u128;
     let denom = BPS_DENOMINATOR as u128;
     let min_acceptable = (params.input_amount as u128)
         .checked_mul(denom - slippage_bps)
@@ -192,13 +208,9 @@ pub(crate) fn handler(ctx: Context<ValidateAndPrepare>, params: PrepareParams) -
 
     // Step 5 — transfer SRA vault → adapter custody, signed by the SRA PDA.
     {
-        let ch = config_hash(
+        let ch = handler_data.config_hash(
             &ctx.accounts.sra_config.owner,
-            ctx.accounts.sra_config.target_chain_id,
-            &ctx.accounts.sra_config.target_handler,
-            &ctx.accounts.sra_config.target_adapter,
-            &ctx.accounts.sra_config.recipient,
-            &ctx.accounts.sra_config.app_id,
+            &ctx.accounts.sra_config.final_handler,
         );
         let owner_bytes = ctx.accounts.sra_config.owner.to_bytes();
         let salt = ctx.accounts.sra_config.salt;
@@ -250,11 +262,11 @@ pub(crate) fn handler(ctx: Context<ValidateAndPrepare>, params: PrepareParams) -
         nonce: nonce_now,
         input_amount: params.input_amount,
         output_amount: params.output_amount,
-        target_chain_id: ctx.accounts.sra_config.target_chain_id,
-        target_handler: ctx.accounts.sra_config.target_handler,
-        target_adapter: ctx.accounts.sra_config.target_adapter,
-        recipient: ctx.accounts.sra_config.recipient,
-        app_id: ctx.accounts.sra_config.app_id,
+        target_chain_id: params.target_chain_id,
+        target_handler: params.target_handler,
+        target_adapter: params.target_adapter,
+        recipient: params.recipient,
+        app_id: params.app_id,
         target_token: params.target_token,
         action_idxs: params.action_idxs,
     });

@@ -13,8 +13,29 @@ describe("sra-handler", () => {
 
   const program = anchor.workspace.sraHandler as Program<SraHandler>;
 
-  it("Exposes initializeSra in the generated client", async () => {
-    assert.isFunction(program.methods.initializeSra);
-    assert.equal(program.idl.instructions[0]?.name, "initializeSra");
+  it("Exposes the expected generated client instruction surface", async () => {
+    const expectedInstructionNames = [
+      "initializeAddressBookRoot",
+      "initializeSra",
+      "setAddressBookEntry",
+      "validateAndPrepare",
+    ];
+    const removedInstructionNames = ["updateAdapters", "updateSlippage"];
+    const instructionNames = program.idl.instructions.map(({ name }) => name);
+
+    assert.sameMembers(instructionNames, expectedInstructionNames);
+
+    for (const methodName of expectedInstructionNames) {
+      assert.isFunction(
+        (program.methods as Record<string, unknown>)[methodName]
+      );
+    }
+
+    for (const removedInstructionName of removedInstructionNames) {
+      assert.notInclude(instructionNames, removedInstructionName);
+      assert.isUndefined(
+        (program.methods as Record<string, unknown>)[removedInstructionName]
+      );
+    }
   });
 });

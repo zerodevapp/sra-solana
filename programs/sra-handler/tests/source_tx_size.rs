@@ -7,9 +7,11 @@
 mod common;
 
 use common::*;
+use solana_sdk::instruction::Instruction;
 use solana_sdk::{
-    message::{v0, VersionedMessage},
+    message::{v0, AddressLookupTableAccount, VersionedMessage},
     packet::PACKET_DATA_SIZE,
+    pubkey::Pubkey,
     signer::Signer,
     transaction::VersionedTransaction,
 };
@@ -18,18 +20,39 @@ use sra_common::{constants::MAX_ACTION_IDXS, source_deposit::PrepareParams};
 const INPUT: u64 = 1_000_000;
 const OUTPUT_WITHIN_SLIPPAGE: u64 = 999_500;
 
-fn build_source_versioned_tx(
+fn representative_lookup_table(ixs: &[Instruction]) -> AddressLookupTableAccount {
+    let mut addresses = Vec::new();
+
+    for ix in ixs {
+        for meta in &ix.accounts {
+            if meta.is_signer || addresses.contains(&meta.pubkey) {
+                continue;
+            }
+            addresses.push(meta.pubkey);
+        }
+    }
+
+    AddressLookupTableAccount {
+        key: Pubkey::new_unique(),
+        addresses,
+    }
+}
+
+fn build_source_versioned_tx_with_lookup_tables(
     svm: &mut litesvm::LiteSVM,
     fx: &ValidatePrepareFixture,
     params: PrepareParams,
+    lookup_tables: &[AddressLookupTableAccount],
 ) -> VersionedTransaction {
-    let address_book_entry = fx.address_book_entry(&params.target_token);
+    let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
     let validate_ix = validate_and_prepare_ix(
         &fx.payer.pubkey(),
         &fx.owner.pubkey(),
         &fx.accounts,
         &fx.owner_ata,
+        &fx.address_book_root,
         &address_book_entry,
+        fx.handler_data.clone(),
         params.clone(),
     );
     let execute_ix = execute_deposit_across_ix(
@@ -45,13 +68,52 @@ fn build_source_versioned_tx(
     let v0_msg = v0::Message::try_compile(
         &fx.payer.pubkey(),
         &[validate_ix, execute_ix],
-        &[],
+        lookup_tables,
         blockhash,
     )
     .expect("compile v0 message");
 
     VersionedTransaction::try_new(VersionedMessage::V0(v0_msg), &[&fx.payer, &fx.owner])
         .expect("sign versioned tx")
+}
+
+fn build_source_versioned_tx(
+    svm: &mut litesvm::LiteSVM,
+    fx: &ValidatePrepareFixture,
+    params: PrepareParams,
+) -> VersionedTransaction {
+    let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
+    let validate_ix = validate_and_prepare_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.accounts,
+        &fx.owner_ata,
+        &fx.address_book_root,
+        &address_book_entry,
+        fx.handler_data.clone(),
+        params.clone(),
+    );
+    let execute_ix = execute_deposit_across_ix(
+        &fx.payer.pubkey(),
+        fx,
+        &fetch_sra_config(svm, &fx.sra_config),
+        &params,
+        across_params_for(fx, &params),
+        current_nonce(svm, &fx.accounts.mint_nonce),
+    );
+
+    // The immutable-source payload no longer fits in a 2-IX v0 packet unless
+    // the client supplies a representative ALT for compressible non-signer keys.
+    let lookup_table = representative_lookup_table(&[validate_ix, execute_ix]);
+    build_source_versioned_tx_with_lookup_tables(svm, fx, params, &[lookup_table])
+}
+
+fn build_source_versioned_tx_without_alt(
+    svm: &mut litesvm::LiteSVM,
+    fx: &ValidatePrepareFixture,
+    params: PrepareParams,
+) -> VersionedTransaction {
+    build_source_versioned_tx_with_lookup_tables(svm, fx, params, &[])
 }
 
 #[test]
@@ -65,8 +127,8 @@ fn source_2ix_versioned_tx_max_action_idxs_fits_within_packet_limit() {
     let params = PrepareParams {
         input_amount: INPUT,
         output_amount: OUTPUT_WITHIN_SLIPPAGE,
-        target_token: fx.target_token,
         action_idxs: (0..MAX_ACTION_IDXS as u64).collect(),
+        ..sample_prepare_params(fx.target_token)
     };
 
     let tx = build_source_versioned_tx(&mut svm, &fx, params);
@@ -90,8 +152,8 @@ fn source_2ix_versioned_tx_empty_action_idxs_fits_within_packet_limit() {
     let params = PrepareParams {
         input_amount: INPUT,
         output_amount: OUTPUT_WITHIN_SLIPPAGE,
-        target_token: fx.target_token,
         action_idxs: vec![],
+        ..sample_prepare_params(fx.target_token)
     };
 
     let tx = build_source_versioned_tx(&mut svm, &fx, params);
@@ -101,5 +163,27 @@ fn source_2ix_versioned_tx_empty_action_idxs_fits_within_packet_limit() {
     assert!(
         size <= PACKET_DATA_SIZE,
         "source 2-IX versioned tx is {size} bytes, exceeds {PACKET_DATA_SIZE}-byte packet limit",
+    );
+}
+
+#[test]
+fn source_2ix_versioned_tx_empty_action_idxs_exceeds_packet_limit_without_alt() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+
+    let params = PrepareParams {
+        input_amount: INPUT,
+        output_amount: OUTPUT_WITHIN_SLIPPAGE,
+        action_idxs: vec![],
+        ..sample_prepare_params(fx.target_token)
+    };
+
+    let tx = build_source_versioned_tx_without_alt(&mut svm, &fx, params);
+    let size = bincode::serialize(&tx).expect("bincode serialize tx").len();
+
+    println!("source 2-IX versioned tx without ALT (empty action_idxs): {size} / {PACKET_DATA_SIZE} bytes");
+    assert!(
+        size > PACKET_DATA_SIZE,
+        "source 2-IX versioned tx without ALT is {size} bytes, expected to exceed {PACKET_DATA_SIZE}-byte packet limit",
     );
 }

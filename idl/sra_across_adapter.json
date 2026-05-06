@@ -548,6 +548,46 @@
             }
           },
           {
+            "name": "target_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "target_handler",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_adapter",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "recipient",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
             "name": "target_token",
             "type": {
               "array": [
@@ -601,10 +641,9 @@
     {
       "name": "SraConfig",
       "docs": [
-        "One SRA per user per app. Source deposits are owner-signed, so mutable",
-        "routing policy lives at account scope instead of in per-mint route PDAs.",
+        "One source-side SRA per `(owner, final_handler, handler_data_hash, salt)`.",
         "PDA seeds: [\"sra\", owner, config_hash, salt]",
-        "config_hash = keccak256(borsh(owner, target_chain_id, target_handler, target_adapter, recipient, app_id))"
+        "config_hash = keccak256(owner ‖ final_handler ‖ handler_data_hash)"
       ],
       "type": {
         "kind": "struct",
@@ -614,38 +653,11 @@
             "type": "pubkey"
           },
           {
-            "name": "target_chain_id",
-            "type": "u64"
+            "name": "final_handler",
+            "type": "pubkey"
           },
           {
-            "name": "target_handler",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "target_adapter",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "recipient",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "app_id",
+            "name": "handler_data_hash",
             "type": {
               "array": [
                 "u8",
@@ -661,16 +673,6 @@
                 32
               ]
             }
-          },
-          {
-            "name": "allowed_adapters",
-            "type": {
-              "vec": "pubkey"
-            }
-          },
-          {
-            "name": "allowed_slippage_bps",
-            "type": "u16"
           },
           {
             "name": "bump",

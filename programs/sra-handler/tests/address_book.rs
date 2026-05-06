@@ -2,14 +2,36 @@ mod common;
 
 use anchor_lang::error::ErrorCode;
 use common::*;
-use solana_sdk::{instruction::InstructionError, signer::Signer, transaction::TransactionError};
+use solana_sdk::{
+    instruction::InstructionError, signature::Keypair, signer::Signer,
+    transaction::TransactionError,
+};
 use sra_common::errors::SraError;
 
 const SAMPLE_DECIMALS: u8 = 6;
 const UPDATED_DECIMALS: u8 = 18;
 
 fn sample_address_book_args() -> (u64, [u8; 32]) {
-    (42161, [0xAB; 32])
+    (42_161, [0xAB; 32])
+}
+
+#[test]
+fn initialize_address_book_root_happy_path() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let address_book_root = Keypair::new();
+
+    let ix = initialize_address_book_root_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        &address_book_root.pubkey(),
+    );
+    send_ix(&mut svm, ix, &payer, &[&owner, &address_book_root])
+        .expect("initialize_address_book_root should succeed");
+
+    let stored = fetch_address_book_root(&svm, &address_book_root.pubkey());
+    assert_eq!(stored.owner, owner.pubkey());
 }
 
 #[test]
@@ -17,15 +39,15 @@ fn set_address_book_entry_happy_path() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);
-    let sra_config = init_sra(&mut svm, &payer, &owner);
+    let address_book_root = init_address_book_root(&mut svm, &payer, &owner);
     let (target_chain_id, target_token) = sample_address_book_args();
     let (address_book_entry, bump) =
-        derive_address_book_pda(&sra_config, target_chain_id, &target_token);
+        derive_address_book_pda(&address_book_root, target_chain_id, &target_token);
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner.pubkey(),
-        &sra_config,
+        &address_book_root,
         &address_book_entry,
         target_chain_id,
         target_token,
@@ -35,7 +57,7 @@ fn set_address_book_entry_happy_path() {
     send_ix(&mut svm, ix, &payer, &[&owner]).expect("set should succeed");
 
     let stored = fetch_address_book_entry(&svm, &address_book_entry);
-    assert_eq!(stored.sra_config, sra_config);
+    assert_eq!(stored.address_book_root, address_book_root);
     assert_eq!(stored.target_chain_id, target_chain_id);
     assert_eq!(stored.target_token, target_token);
     assert_eq!(stored.target_decimals, SAMPLE_DECIMALS);
@@ -47,15 +69,15 @@ fn set_address_book_entry_emits_address_book_entry_set() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);
-    let sra_config = init_sra(&mut svm, &payer, &owner);
+    let address_book_root = init_address_book_root(&mut svm, &payer, &owner);
     let (target_chain_id, target_token) = sample_address_book_args();
     let (address_book_entry, _) =
-        derive_address_book_pda(&sra_config, target_chain_id, &target_token);
+        derive_address_book_pda(&address_book_root, target_chain_id, &target_token);
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner.pubkey(),
-        &sra_config,
+        &address_book_root,
         &address_book_entry,
         target_chain_id,
         target_token,
@@ -66,7 +88,7 @@ fn set_address_book_entry_emits_address_book_entry_set() {
 
     let ev = extract_anchor_event::<sra_handler::events::AddressBookEntrySet>(&meta.logs)
         .expect("AddressBookEntrySet event must be emitted");
-    assert_eq!(ev.sra_config, sra_config);
+    assert_eq!(ev.address_book_root, address_book_root);
     assert_eq!(ev.target_chain_id, target_chain_id);
     assert_eq!(ev.target_token, target_token);
     assert_eq!(ev.target_decimals, SAMPLE_DECIMALS);
@@ -77,15 +99,15 @@ fn set_address_book_entry_updates_existing_decimals() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);
-    let sra_config = init_sra(&mut svm, &payer, &owner);
+    let address_book_root = init_address_book_root(&mut svm, &payer, &owner);
     let (target_chain_id, target_token) = sample_address_book_args();
     let (address_book_entry, _) =
-        derive_address_book_pda(&sra_config, target_chain_id, &target_token);
+        derive_address_book_pda(&address_book_root, target_chain_id, &target_token);
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner.pubkey(),
-        &sra_config,
+        &address_book_root,
         &address_book_entry,
         target_chain_id,
         target_token,
@@ -96,7 +118,7 @@ fn set_address_book_entry_updates_existing_decimals() {
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner.pubkey(),
-        &sra_config,
+        &address_book_root,
         &address_book_entry,
         target_chain_id,
         target_token,
@@ -109,40 +131,40 @@ fn set_address_book_entry_updates_existing_decimals() {
 }
 
 #[test]
-fn set_address_book_entry_same_token_allowed_for_different_sras() {
+fn set_address_book_entry_same_token_allowed_for_different_roots() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner_a = funded_keypair(&mut svm, SOL);
     let owner_b = funded_keypair(&mut svm, SOL);
-    let sra_config_a = init_sra(&mut svm, &payer, &owner_a);
-    let sra_config_b = init_sra(&mut svm, &payer, &owner_b);
+    let root_a = init_address_book_root(&mut svm, &payer, &owner_a);
+    let root_b = init_address_book_root(&mut svm, &payer, &owner_b);
     let (target_chain_id, target_token) = sample_address_book_args();
     let (address_book_entry_a, _) =
-        derive_address_book_pda(&sra_config_a, target_chain_id, &target_token);
+        derive_address_book_pda(&root_a, target_chain_id, &target_token);
     let (address_book_entry_b, _) =
-        derive_address_book_pda(&sra_config_b, target_chain_id, &target_token);
+        derive_address_book_pda(&root_b, target_chain_id, &target_token);
 
     let ix_a = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner_a.pubkey(),
-        &sra_config_a,
+        &root_a,
         &address_book_entry_a,
         target_chain_id,
         target_token,
         SAMPLE_DECIMALS,
     );
-    send_ix(&mut svm, ix_a, &payer, &[&owner_a]).expect("first sra set should succeed");
+    send_ix(&mut svm, ix_a, &payer, &[&owner_a]).expect("first root set should succeed");
 
     let ix_b = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner_b.pubkey(),
-        &sra_config_b,
+        &root_b,
         &address_book_entry_b,
         target_chain_id,
         target_token,
         UPDATED_DECIMALS,
     );
-    send_ix(&mut svm, ix_b, &payer, &[&owner_b]).expect("second sra set should succeed");
+    send_ix(&mut svm, ix_b, &payer, &[&owner_b]).expect("second root set should succeed");
 
     assert_eq!(
         fetch_address_book_entry(&svm, &address_book_entry_a).target_decimals,
@@ -159,16 +181,16 @@ fn set_address_book_entry_zero_target_token_rejected() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);
-    let sra_config = init_sra(&mut svm, &payer, &owner);
+    let address_book_root = init_address_book_root(&mut svm, &payer, &owner);
     let (target_chain_id, _) = sample_address_book_args();
     let zero_token = [0u8; 32];
     let (address_book_entry, _) =
-        derive_address_book_pda(&sra_config, target_chain_id, &zero_token);
+        derive_address_book_pda(&address_book_root, target_chain_id, &zero_token);
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner.pubkey(),
-        &sra_config,
+        &address_book_root,
         &address_book_entry,
         target_chain_id,
         zero_token,
@@ -196,15 +218,15 @@ fn set_address_book_entry_zero_decimals_tombstones_entry() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);
-    let sra_config = init_sra(&mut svm, &payer, &owner);
+    let address_book_root = init_address_book_root(&mut svm, &payer, &owner);
     let (target_chain_id, target_token) = sample_address_book_args();
     let (address_book_entry, _) =
-        derive_address_book_pda(&sra_config, target_chain_id, &target_token);
+        derive_address_book_pda(&address_book_root, target_chain_id, &target_token);
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner.pubkey(),
-        &sra_config,
+        &address_book_root,
         &address_book_entry,
         target_chain_id,
         target_token,
@@ -215,7 +237,7 @@ fn set_address_book_entry_zero_decimals_tombstones_entry() {
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner.pubkey(),
-        &sra_config,
+        &address_book_root,
         &address_book_entry,
         target_chain_id,
         target_token,
@@ -233,15 +255,15 @@ fn set_address_book_entry_non_owner_rejected() {
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let attacker = funded_keypair(&mut svm, SOL);
     let owner = funded_keypair(&mut svm, SOL);
-    let sra_config = init_sra(&mut svm, &payer, &owner);
+    let address_book_root = init_address_book_root(&mut svm, &payer, &owner);
     let (target_chain_id, target_token) = sample_address_book_args();
     let (address_book_entry, _) =
-        derive_address_book_pda(&sra_config, target_chain_id, &target_token);
+        derive_address_book_pda(&address_book_root, target_chain_id, &target_token);
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &attacker.pubkey(),
-        &sra_config,
+        &address_book_root,
         &address_book_entry,
         target_chain_id,
         target_token,
@@ -270,16 +292,16 @@ fn set_address_book_entry_wrong_pda_rejected() {
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner_a = funded_keypair(&mut svm, SOL);
     let owner_b = funded_keypair(&mut svm, SOL);
-    let sra_config_a = init_sra(&mut svm, &payer, &owner_a);
-    let sra_config_b = init_sra(&mut svm, &payer, &owner_b);
+    let root_a = init_address_book_root(&mut svm, &payer, &owner_a);
+    let root_b = init_address_book_root(&mut svm, &payer, &owner_b);
     let (target_chain_id, target_token) = sample_address_book_args();
     let (wrong_address_book_entry, _) =
-        derive_address_book_pda(&sra_config_b, target_chain_id, &target_token);
+        derive_address_book_pda(&root_b, target_chain_id, &target_token);
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner_a.pubkey(),
-        &sra_config_a,
+        &root_a,
         &wrong_address_book_entry,
         target_chain_id,
         target_token,
