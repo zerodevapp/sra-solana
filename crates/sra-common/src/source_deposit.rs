@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::abi::u256_from_u64;
+use crate::types::SourceHandlerData;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PrepareParams {
@@ -13,6 +14,16 @@ pub struct PrepareParams {
     pub app_id: [u8; 32],
     pub target_token: [u8; 32],
     pub action_idxs: Vec<u64>,
+}
+
+/// Wire-format mirror of the `validate_and_prepare` instruction args. Handler
+/// and adapter MUST agree on this layout byte-for-byte; sharing one definition
+/// here keeps them coupled. Field order matches the order of the handler's
+/// IX args in `programs/sra-handler/src/lib.rs::validate_and_prepare`.
+#[derive(AnchorSerialize, AnchorDeserialize)]
+pub struct ValidateAndPrepareArgs {
+    pub handler_data: SourceHandlerData,
+    pub params: PrepareParams,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]

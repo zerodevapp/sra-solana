@@ -31,10 +31,9 @@ pub use sra_common::source_deposit::PrepareParams;
 /// **Not standalone.** This is the first instruction of a 2-IX versioned
 /// transaction.
 ///
-/// Every Anchor `Account<'info, T>` is boxed to keep Anchor-generated
-/// `try_accounts` within the 4 KB on-chain stack budget. With 8 accounts
-/// (including `SraConfig`'s variable-sized `allowed_adapters` Vec and three
-/// `TokenAccount`s) the unboxed struct overflows by ~100 bytes.
+/// Every Anchor `Account<'info, T>` is boxed: the `SourceHandlerData`
+/// IX arg + three `TokenAccount`s push the unboxed struct ~100 bytes
+/// over the 4 KB stack budget.
 #[derive(Accounts)]
 #[instruction(_handler_data: SourceHandlerData, params: PrepareParams)]
 pub struct ValidateAndPrepare<'info> {

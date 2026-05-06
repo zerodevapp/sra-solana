@@ -8,7 +8,7 @@ use sra_common::{
 use crate::events::SraInitialized;
 
 #[derive(Accounts)]
-#[instruction(handler_data: SourceHandlerData, salt: [u8; 32])]
+#[instruction(config_hash: [u8; 32], handler_data: SourceHandlerData, salt: [u8; 32])]
 pub struct InitializeSra<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -24,12 +24,7 @@ pub struct InitializeSra<'info> {
         init,
         payer = payer,
         space = 8 + SraConfig::INIT_SPACE,
-        seeds = [
-            SEED_SRA,
-            owner.key().as_ref(),
-            &handler_data.config_hash(&owner.key(), &crate::ID),
-            &salt,
-        ],
+        seeds = [SEED_SRA, owner.key().as_ref(), &config_hash, &salt],
         bump,
     )]
     pub sra_config: Account<'info, SraConfig>,
@@ -38,11 +33,17 @@ pub struct InitializeSra<'info> {
 
 pub(crate) fn handler(
     ctx: Context<InitializeSra>,
+    config_hash: [u8; 32],
     handler_data: SourceHandlerData,
     salt: [u8; 32],
 ) -> Result<()> {
     handler_data.validate()?;
     let final_handler = crate::ID;
+    let expected_config_hash = handler_data.config_hash(&ctx.accounts.owner.key(), &final_handler);
+    require!(
+        expected_config_hash == config_hash,
+        SraError::InvalidHandlerData
+    );
     let handler_data_hash = handler_data_hash(&handler_data);
 
     let sra_config = &mut ctx.accounts.sra_config;

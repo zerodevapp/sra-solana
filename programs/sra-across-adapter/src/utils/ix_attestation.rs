@@ -2,8 +2,9 @@ use anchor_lang::{error, prelude::*, solana_program::sysvar::instructions};
 use sra_common::{
     errors::SraError,
     instruction_data::decode_anchor_instruction_data,
-    source_deposit::{AcrossDepositParams, NormalizedDepositIntent, PrepareParams},
-    types::SourceHandlerData,
+    source_deposit::{
+        AcrossDepositParams, NormalizedDepositIntent, PrepareParams, ValidateAndPrepareArgs,
+    },
 };
 
 // Account-slot indices in the handler's `ValidateAndPrepare` ix that the
@@ -14,13 +15,6 @@ const HANDLER_ACCT_SRA_CONFIG: usize = 2;
 const HANDLER_ACCT_SOURCE_MINT: usize = 4;
 const HANDLER_ACCT_ADAPTER_PROGRAM: usize = 9;
 const MIN_HANDLER_ACCOUNTS: usize = HANDLER_ACCT_ADAPTER_PROGRAM + 1;
-
-#[derive(AnchorSerialize, AnchorDeserialize)]
-struct ValidateAndPrepareArgs {
-    #[allow(dead_code)]
-    handler_data: SourceHandlerData,
-    params: PrepareParams,
-}
 
 pub(crate) fn verify_previous_handler_ix(
     instructions_sysvar: &AccountInfo,

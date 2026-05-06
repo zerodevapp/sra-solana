@@ -15,10 +15,11 @@ pub mod sra_handler {
 
     pub fn initialize_sra(
         ctx: Context<InitializeSra>,
+        config_hash: [u8; 32],
         handler_data: SourceHandlerData,
         salt: [u8; 32],
     ) -> Result<()> {
-        instructions::source::initialize_sra::handler(ctx, handler_data, salt)
+        instructions::source::initialize_sra::handler(ctx, config_hash, handler_data, salt)
     }
 
     pub fn initialize_address_book_root(ctx: Context<InitializeAddressBookRoot>) -> Result<()> {

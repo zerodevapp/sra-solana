@@ -204,6 +204,7 @@ pub fn initialize_sra_ix(
     handler_data: SourceHandlerData,
     salt: [u8; 32],
 ) -> Instruction {
+    let config_hash = handler_data.config_hash(owner, &PROGRAM_ID);
     Instruction {
         program_id: PROGRAM_ID,
         accounts: sra_handler::accounts::InitializeSra {
@@ -214,7 +215,12 @@ pub fn initialize_sra_ix(
             system_program: system_program::ID,
         }
         .to_account_metas(None),
-        data: sra_handler::instruction::InitializeSra { handler_data, salt }.data(),
+        data: sra_handler::instruction::InitializeSra {
+            config_hash,
+            handler_data,
+            salt,
+        }
+        .data(),
     }
 }
 
