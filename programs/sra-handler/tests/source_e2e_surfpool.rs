@@ -400,12 +400,13 @@ impl SurfpoolSourceFixture {
     }
 
     fn invoke_source_flow(&self, params: PrepareParams) -> TestResult<Vec<String>> {
+        let current_nonce = self.current_nonce()?;
         surfpool_log(format!(
             "invoke_source_flow: starting for target_chain_id={} input_amount={} output_amount={} current_nonce={}",
             params.target_chain_id,
             params.input_amount,
             params.output_amount,
-            self.current_nonce()?
+            current_nonce
         ));
         let address_book_entry = derive_address_book_pda(
             &self.address_book_root,
@@ -438,7 +439,7 @@ impl SurfpoolSourceFixture {
                 FILL_DEADLINE_OFFSET_SECS,
                 EXCLUSIVITY_PERIOD_SECS,
             ),
-            self.current_nonce()?,
+            current_nonce,
         );
         let validate_ix = validate_and_prepare_ix(
             &self.payer.pubkey(),
