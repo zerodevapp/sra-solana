@@ -1,10 +1,7 @@
 use anchor_lang::{error, prelude::*, solana_program::sysvar::instructions};
 use sra_common::{errors::SraError, instruction_data::instruction_data_hash};
 
-// Account-slot indices in the adapter's `ExecuteDepositAcross` ix that the
-// handler verifier needs to pin. Drift would silently break attestation, so
-// these mirror `programs/sra-across-adapter/src/instructions/execute_deposit.rs`
-// account order.
+// Pinned account slots in `ExecuteDepositAcross`.
 const ADAPTER_ACCT_SRA_CONFIG: usize = 2;
 const ADAPTER_ACCT_INPUT_MINT: usize = 6;
 const MIN_ADAPTER_ACCOUNTS: usize = ADAPTER_ACCT_INPUT_MINT + 1;

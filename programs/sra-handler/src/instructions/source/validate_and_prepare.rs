@@ -35,17 +35,8 @@ fn validate_adapter_program(adapter_program: &AccountInfo) -> Result<()> {
 
 pub use sra_common::source_deposit::PrepareParams;
 
-/// Source-side deposit IX. Validates the SRA + per-call routing inputs, pulls
-/// the owner's tokens through the SRA vault into adapter custody, and emits
-/// the raw routing inputs that IX 2 or an off-chain relayer needs to build a
-/// target-specific bridge message.
-///
-/// **Not standalone.** This is the first instruction of a 2-IX versioned
-/// transaction.
-///
-/// Every Anchor `Account<'info, T>` is boxed: the `SourceHandlerData`
-/// IX arg + three `TokenAccount`s push the unboxed struct ~100 bytes
-/// over the 4 KB stack budget.
+/// Validates a source deposit, moves funds into adapter custody, and emits the
+/// routing inputs consumed by the paired adapter instruction.
 #[derive(Accounts)]
 #[instruction(_handler_data: SourceHandlerData, params: PrepareParams)]
 pub struct ValidateAndPrepare<'info> {
@@ -82,8 +73,8 @@ pub struct ValidateAndPrepare<'info> {
         associated_token::authority = sra_config,
     )]
     pub sra_vault: Box<Account<'info, TokenAccount>>,
-    /// CHECK: PDA `["adapter_authority", sra_config]` under `adapter_program`.
-    /// Used as the adapter_custody ATA's authority; Anchor constrains both.
+    /// CHECK: adapter authority PDA under `adapter_program`; Anchor validates
+    /// the derivation.
     #[account(
         seeds = [SEED_ADAPTER_AUTHORITY, sra_config.key().as_ref()],
         bump,
@@ -97,10 +88,8 @@ pub struct ValidateAndPrepare<'info> {
         associated_token::authority = adapter_authority,
     )]
     pub adapter_custody: Box<Account<'info, TokenAccount>>,
-    /// CHECK: the handler enforces that this is an executable program id and a
-    /// member of `sra_config.allowed_adapters`.
+    /// CHECK: must be an executable allowlisted adapter program.
     pub adapter_program: UncheckedAccount<'info>,
-    // See `initialize_sra` for ownership-coupling rationale.
     #[account(
         has_one = owner,
     )]
@@ -118,8 +107,7 @@ pub struct ValidateAndPrepare<'info> {
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
-    /// CHECK: pinned to the Instructions sysvar; read by `verify_next_adapter_ix`
-    /// to bind this IX to its paired adapter `execute_deposit_across`.
+    /// CHECK: Instructions sysvar used to verify the next adapter instruction.
     #[account(address = instructions::ID)]
     pub instructions_sysvar: UncheckedAccount<'info>,
 }
@@ -148,8 +136,6 @@ pub(crate) fn handler(
         SraError::InvalidAddressBook
     );
 
-    // Step 0a — adapter must be an executable program and be in the SRA's
-    // allowlist.
     validate_adapter_program(&ctx.accounts.adapter_program.to_account_info())?;
     let adapter_key = ctx.accounts.adapter_program.key();
     require!(
@@ -160,16 +146,12 @@ pub(crate) fn handler(
         SraError::AdapterNotAllowed
     );
 
-    // Step 0b — entry seeds already pin (address_book_root, target_chain_id,
-    // target_token); only the tombstone bit is left to check.
     require!(
         ctx.accounts.address_book_entry.is_enabled(),
         SraError::InvalidAddressBook
     );
 
-    // Step 0c — IX 2 attestation: the immediately following instruction must
-    // be the paired adapter IX with the pinned accounts and exact data hash the
-    // client attested to. Adapter-specific semantics are verified by IX 2.
+    // Verify the next instruction is the paired adapter call.
     verify_next_adapter_ix(
         &ctx.accounts.instructions_sysvar.to_account_info(),
         &adapter_key,
@@ -178,11 +160,6 @@ pub(crate) fn handler(
         &paired_adapter_ix_data_hash,
     )?;
 
-    // Step 1 — adapter_authority PDA validation: enforced declaratively by
-    // the `seeds` constraint on the Accounts struct.
-
-    // Step 2 — transfer owner ATA → SRA vault. `transfer_checked` enforces
-    // mint + decimals so we can't be fooled by a spoofed token account.
     {
         let cpi_accounts = TransferChecked {
             from: ctx.accounts.owner_token_account.to_account_info(),
@@ -198,7 +175,7 @@ pub(crate) fn handler(
         )?;
     }
 
-    // Step 3 — slippage. u128 lets u64-max inputs multiply cleanly.
+    // Enforce the minimum output implied by the configured slippage.
     let slippage_bps = handler_data.allowed_slippage_bps as u128;
     let denom = BPS_DENOMINATOR as u128;
     let min_acceptable = (params.input_amount as u128)
@@ -210,12 +187,9 @@ pub(crate) fn handler(
         SraError::SlippageExceeded
     );
 
-    // Step 4 — capture the pre-bump nonce. Target-specific adapters can use
-    // this plus the raw bytes32 routing fields from the event to derive their
-    // own message shape later without forcing EVM address semantics here.
     let nonce_now = ctx.accounts.mint_nonce.nonce;
 
-    // Step 5 — transfer SRA vault → adapter custody, signed by the SRA PDA.
+    // Transfer from the SRA vault into adapter custody.
     {
         let ch = handler_data.config_hash(
             &ctx.accounts.sra_config.owner,
@@ -251,9 +225,7 @@ pub(crate) fn handler(
         )?;
     }
 
-    // Step 6 — bump the nonce so IX 2 can recover `nonce_now` as `nonce - 1`.
-    // Stamp the PDA bump only on first init; `init_if_needed` zero-fills the
-    // account, and a canonical PDA bump of zero is statistically impossible.
+    // Persist the PDA bump on first init, then advance the nonce.
     let mint_nonce = &mut ctx.accounts.mint_nonce;
     if mint_nonce.bump == 0 {
         mint_nonce.bump = ctx.bumps.mint_nonce;
@@ -263,7 +235,6 @@ pub(crate) fn handler(
         .checked_add(1)
         .ok_or(SraError::ArithmeticOverflow)?;
 
-    // Step 7 — emit the raw routing fields for off-chain observers.
     emit!(DepositPrepared {
         sra_config: ctx.accounts.sra_config.key(),
         source_mint: ctx.accounts.source_mint.key(),
