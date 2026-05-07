@@ -1,4 +1,4 @@
-//! Source 2-IX versioned-transaction size validation.
+//! Paired source-transaction size validation.
 //!
 //! Solana enforces a hard packet-size limit. The full source deposit
 //! flow is `validate_and_prepare` (handler) + `execute_deposit_across`
@@ -104,8 +104,8 @@ fn build_source_versioned_tx(
         &execute_ix,
     );
 
-    // The immutable-source payload no longer fits in a 2-IX v0 packet unless
-    // the client supplies a representative ALT for compressible non-signer keys.
+    // The immutable-source payload no longer fits in a v0 packet unless the
+    // client supplies a representative ALT for compressible non-signer keys.
     let lookup_table = representative_lookup_table(&[validate_ix, execute_ix]);
     build_source_versioned_tx_with_lookup_tables(svm, fx, params, &[lookup_table])
 }

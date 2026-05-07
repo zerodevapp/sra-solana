@@ -23,20 +23,17 @@ pub struct AddressBookEntrySet {
     pub target_decimals: u8,
 }
 
-/// Emitted by `validate_and_prepare` once the owner's tokens are in adapter
-/// custody. Off-chain relayers combine these raw routing fields with the
-/// immutable SraConfig to build whatever target-specific bridge message IX 2
-/// requires, whether the destination uses EVM addresses or full 32-byte IDs.
+/// Emitted by `validate_and_prepare` after funds reach adapter custody. Carries
+/// the routing inputs needed to build the target-specific bridge message.
 #[event]
 pub struct DepositPrepared {
     /// SraConfig PDA the deposit was prepared for.
     pub sra_config: Pubkey,
     /// Source mint that was locked.
     pub source_mint: Pubkey,
-    /// Adapter program that IX 2 will CPI into. Must be a member of the
-    /// immutable `handler_data.allowed_adapters` committed by the SRA.
+    /// Allowlisted adapter program for the prepared deposit.
     pub adapter_program: Pubkey,
-    /// Pre-increment nonce captured before IX 1 bumps `mint_nonce`.
+    /// Nonce captured before the prepare handler increments it.
     pub nonce: u64,
     /// Tokens pulled from the owner ATA into the SRA vault and forwarded
     /// to adapter custody in the same transaction.

@@ -470,7 +470,7 @@
         {
           "name": "adapter_authority",
           "docs": [
-            "Used as the adapter_custody ATA's authority; Anchor constrains both."
+            "the derivation."
           ],
           "pda": {
             "seeds": [
@@ -598,10 +598,7 @@
           }
         },
         {
-          "name": "adapter_program",
-          "docs": [
-            "member of `sra_config.allowed_adapters`."
-          ]
+          "name": "adapter_program"
         },
         {
           "name": "address_book_root"
@@ -623,9 +620,6 @@
         },
         {
           "name": "instructions_sysvar",
-          "docs": [
-            "to bind this IX to its paired adapter `execute_deposit_across`."
-          ],
           "address": "Sysvar1nstructions1111111111111111111111111"
         }
       ],
@@ -876,10 +870,8 @@
     {
       "name": "DepositPrepared",
       "docs": [
-        "Emitted by `validate_and_prepare` once the owner's tokens are in adapter",
-        "custody. Off-chain relayers combine these raw routing fields with the",
-        "immutable SraConfig to build whatever target-specific bridge message IX 2",
-        "requires, whether the destination uses EVM addresses or full 32-byte IDs."
+        "Emitted by `validate_and_prepare` after funds reach adapter custody. Carries",
+        "the routing inputs needed to build the target-specific bridge message."
       ],
       "type": {
         "kind": "struct",
@@ -901,15 +893,14 @@
           {
             "name": "adapter_program",
             "docs": [
-              "Adapter program that IX 2 will CPI into. Must be a member of the",
-              "immutable `handler_data.allowed_adapters` committed by the SRA."
+              "Allowlisted adapter program for the prepared deposit."
             ],
             "type": "pubkey"
           },
           {
             "name": "nonce",
             "docs": [
-              "Pre-increment nonce captured before IX 1 bumps `mint_nonce`."
+              "Nonce captured before the prepare handler increments it."
             ],
             "type": "u64"
           },
