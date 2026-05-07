@@ -102,26 +102,34 @@ jobs:
         run: NO_DNA=1 anchor build
 
       - name: Start Surfpool
-        run: NO_DNA=1 surfpool start --ci --network mainnet --legacy-anchor-compatibility --airdrop-keypair-path ~/.config/solana/id.json > /tmp/surfpool.log 2>&1 &
+        run: |
+          echo "[surfpool-ci] Starting Surfpool; logs -> /tmp/surfpool.log"
+          NO_DNA=1 surfpool start --ci --network mainnet --legacy-anchor-compatibility --airdrop-keypair-path ~/.config/solana/id.json > /tmp/surfpool.log 2>&1 &
 
       - name: Wait for Surfpool RPC
         run: |
           for i in $(seq 1 60); do
+            echo "[surfpool-ci] Waiting for Surfpool RPC (attempt ${i}/60)"
             curl -sf http://127.0.0.1:8899 \
               -H 'content-type: application/json' \
-              -d '{"jsonrpc":"2.0","id":1,"method":"getHealth","params":[]}' >/dev/null && exit 0
+              -d '{"jsonrpc":"2.0","id":1,"method":"getHealth","params":[]}' >/dev/null && \
+              echo "[surfpool-ci] Surfpool RPC is ready on attempt ${i}/60" && exit 0
             sleep 2
           done
+          echo "[surfpool-ci] Timed out waiting for Surfpool RPC; dumping /tmp/surfpool.log"
           cat /tmp/surfpool.log
           exit 1
 
       - name: Wait for local program auto-deploy
         run: |
           for i in $(seq 1 60); do
+            echo "[surfpool-ci] Waiting for local program auto-deploy (attempt ${i}/60) for Gte7LViTnE2UixBF59Xfu2sSqcmHhMNANj42yUkYpkdo and 8n167Xs4Xx7zEq5fuyCDVgYd3vUjFmHAkGTdK2SCpmXD"
             solana account --url http://127.0.0.1:8899 Gte7LViTnE2UixBF59Xfu2sSqcmHhMNANj42yUkYpkdo >/dev/null 2>&1 && \
-            solana account --url http://127.0.0.1:8899 8n167Xs4Xx7zEq5fuyCDVgYd3vUjFmHAkGTdK2SCpmXD >/dev/null 2>&1 && exit 0
+            solana account --url http://127.0.0.1:8899 8n167Xs4Xx7zEq5fuyCDVgYd3vUjFmHAkGTdK2SCpmXD >/dev/null 2>&1 && \
+            echo "[surfpool-ci] Local programs auto-deployed on attempt ${i}/60" && exit 0
             sleep 2
           done
+          echo "[surfpool-ci] Timed out waiting for local program auto-deploy; dumping /tmp/surfpool.log"
           cat /tmp/surfpool.log
           exit 1
 
