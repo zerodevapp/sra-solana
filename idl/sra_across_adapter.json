@@ -102,9 +102,7 @@
         {
           "name": "adapter_authority",
           "docs": [
-            "(`seeds::program` defaults to `ctx.program_id`). The handler's",
-            "`validate_and_prepare` derives the symmetric PDA explicitly via",
-            "`seeds::program = adapter_program.key()`; both resolve identically."
+            "same address via `seeds::program = adapter_program.key()`."
           ],
           "pda": {
             "seeds": [
@@ -236,16 +234,12 @@
         },
         {
           "name": "across_state",
-          "docs": [
-            "passed through to the `deposit_now` CPI."
-          ],
           "writable": true
         },
         {
           "name": "across_vault",
           "docs": [
-            "Pin the destination of the `deposit_now` token movement to the canonical",
-            "ATA(`across_state`, `input_mint`)."
+            "Canonical ATA for `across_state` and `input_mint`."
           ],
           "writable": true,
           "pda": {
