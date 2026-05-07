@@ -7,11 +7,9 @@
 mod common;
 
 use common::*;
-use solana_sdk::instruction::Instruction;
 use solana_sdk::{
     message::{v0, AddressLookupTableAccount, VersionedMessage},
     packet::PACKET_DATA_SIZE,
-    pubkey::Pubkey,
     signer::Signer,
     transaction::VersionedTransaction,
 };
@@ -19,24 +17,6 @@ use sra_common::{constants::MAX_ACTION_IDXS, source_deposit::PrepareParams};
 
 const INPUT: u64 = 1_000_000;
 const OUTPUT_WITHIN_SLIPPAGE: u64 = 999_500;
-
-fn representative_lookup_table(ixs: &[Instruction]) -> AddressLookupTableAccount {
-    let mut addresses = Vec::new();
-
-    for ix in ixs {
-        for meta in &ix.accounts {
-            if meta.is_signer || addresses.contains(&meta.pubkey) {
-                continue;
-            }
-            addresses.push(meta.pubkey);
-        }
-    }
-
-    AddressLookupTableAccount {
-        key: Pubkey::new_unique(),
-        addresses,
-    }
-}
 
 fn build_source_versioned_tx_with_lookup_tables(
     svm: &mut litesvm::LiteSVM,
