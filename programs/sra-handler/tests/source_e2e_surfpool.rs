@@ -44,6 +44,10 @@ type TestResult<T> = Result<T, Box<dyn Error>>;
 
 static SURFPOOL_TEST_MUTEX: Mutex<()> = Mutex::new(());
 
+fn surfpool_log(message: impl AsRef<str>) {
+    eprintln!("[surfpool-test] {}", message.as_ref());
+}
+
 fn default_prepare_params_rpc(fx: &SurfpoolSourceFixture) -> PrepareParams {
     let mut params = sample_prepare_params(fx.target_token);
     params.input_amount = INPUT_AMOUNT;
@@ -56,27 +60,57 @@ fn payer_keypair_path() -> PathBuf {
 }
 
 fn wait_for_surfpool(rpc: &RpcClient) -> TestResult<()> {
-    for _ in 0..SURFPOOL_RETRY_COUNT {
-        if rpc.get_latest_blockhash().is_ok() {
-            return Ok(());
+    for attempt in 1..=SURFPOOL_RETRY_COUNT {
+        surfpool_log(format!(
+            "wait_for_surfpool: attempt {attempt}/{SURFPOOL_RETRY_COUNT} against {SURFPOOL_RPC_URL}"
+        ));
+        match rpc.get_latest_blockhash() {
+            Ok(_) => {
+                surfpool_log(format!(
+                    "wait_for_surfpool: RPC ready on attempt {attempt}/{SURFPOOL_RETRY_COUNT}"
+                ));
+                return Ok(());
+            }
+            Err(err) => {
+                surfpool_log(format!(
+                    "wait_for_surfpool: RPC not ready on attempt {attempt}/{SURFPOOL_RETRY_COUNT}: {err}"
+                ));
+            }
         }
         sleep(Duration::from_millis(SURFPOOL_RETRY_DELAY_MS));
     }
 
+    surfpool_log(format!(
+        "wait_for_surfpool: timed out after {SURFPOOL_RETRY_COUNT} attempts"
+    ));
     Err("Surfpool RPC did not become ready".into())
 }
 
 fn wait_for_program_deploys(rpc: &RpcClient, program_ids: &[Pubkey]) -> TestResult<()> {
-    for _ in 0..SURFPOOL_RETRY_COUNT {
+    let expected_programs = program_ids
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    for attempt in 1..=SURFPOOL_RETRY_COUNT {
+        surfpool_log(format!(
+            "wait_for_program_deploys: attempt {attempt}/{SURFPOOL_RETRY_COUNT} for [{expected_programs}]"
+        ));
         if program_ids
             .iter()
             .all(|program_id| rpc.get_account(program_id).is_ok())
         {
+            surfpool_log(format!(
+                "wait_for_program_deploys: all programs detected on attempt {attempt}/{SURFPOOL_RETRY_COUNT}"
+            ));
             return Ok(());
         }
         sleep(Duration::from_millis(SURFPOOL_RETRY_DELAY_MS));
     }
 
+    surfpool_log(format!(
+        "wait_for_program_deploys: timed out after {SURFPOOL_RETRY_COUNT} attempts for [{expected_programs}]"
+    ));
     Err("Surfpool did not finish auto-deploying local programs".into())
 }
 
@@ -86,6 +120,7 @@ fn rpc_client() -> RpcClient {
 
 fn send_legacy_transaction(
     rpc: &RpcClient,
+    label: &str,
     payer: &Keypair,
     signers: &[&Keypair],
     ixs: &[solana_sdk::instruction::Instruction],
@@ -95,11 +130,20 @@ fn send_legacy_transaction(
     all_signers.extend_from_slice(signers);
     let tx =
         Transaction::new_signed_with_payer(ixs, Some(&payer.pubkey()), &all_signers, blockhash);
-    Ok(rpc.send_and_confirm_transaction(&tx)?)
+    surfpool_log(format!(
+        "send_legacy_transaction[{label}]: sending {} instruction(s)",
+        ixs.len()
+    ));
+    let signature = rpc.send_and_confirm_transaction(&tx)?;
+    surfpool_log(format!(
+        "send_legacy_transaction[{label}]: confirmed signature {signature}"
+    ));
+    Ok(signature)
 }
 
 fn send_versioned_transaction(
     rpc: &RpcClient,
+    label: &str,
     payer: &Keypair,
     signers: &[&Keypair],
     ixs: &[solana_sdk::instruction::Instruction],
@@ -110,7 +154,16 @@ fn send_versioned_transaction(
     let mut all_signers = vec![payer];
     all_signers.extend_from_slice(signers);
     let tx = VersionedTransaction::try_new(VersionedMessage::V0(message), &all_signers)?;
-    Ok(rpc.send_and_confirm_transaction(&tx)?)
+    surfpool_log(format!(
+        "send_versioned_transaction[{label}]: sending {} instruction(s) with {} lookup table(s)",
+        ixs.len(),
+        lookup_tables.len()
+    ));
+    let signature = rpc.send_and_confirm_transaction(&tx)?;
+    surfpool_log(format!(
+        "send_versioned_transaction[{label}]: confirmed signature {signature}"
+    ));
+    Ok(signature)
 }
 
 fn representative_lookup_table(ixs: &[solana_sdk::instruction::Instruction]) -> Vec<Pubkey> {
@@ -177,8 +230,10 @@ struct SurfpoolSourceFixture {
 
 impl SurfpoolSourceFixture {
     fn bootstrap() -> TestResult<Self> {
+        surfpool_log("bootstrap: starting Surfpool source fixture setup");
         let rpc = rpc_client();
         wait_for_surfpool(&rpc)?;
+        surfpool_log("bootstrap: Surfpool RPC is ready");
 
         let http = Client::builder()
             .timeout(Duration::from_secs(SURFPOOL_HTTP_TIMEOUT_SECS))
@@ -199,13 +254,23 @@ impl SurfpoolSourceFixture {
         let across_vault = derive_ata(&across_state, &USDC_MINT);
 
         wait_for_program_deploys(&rpc, &[PROGRAM_ID, ADAPTER_PROGRAM_ID])?;
+        surfpool_log("bootstrap: local programs are deployed");
         rpc.get_account(&ACROSS_SPOKE_POOL_ID)?;
+        surfpool_log(format!(
+            "bootstrap: Across spoke pool {ACROSS_SPOKE_POOL_ID} is reachable"
+        ));
 
         let payer_airdrop = rpc.request_airdrop(&payer.pubkey(), 10 * SOL)?;
         rpc.confirm_transaction(&payer_airdrop)?;
+        surfpool_log(format!(
+            "bootstrap: payer airdrop confirmed with signature {payer_airdrop}"
+        ));
 
         let owner_airdrop = rpc.request_airdrop(&owner.pubkey(), SOL)?;
         rpc.confirm_transaction(&owner_airdrop)?;
+        surfpool_log(format!(
+            "bootstrap: owner airdrop confirmed with signature {owner_airdrop}"
+        ));
 
         let initialize_address_book_root_ix = initialize_address_book_root_ix(
             &payer.pubkey(),
@@ -214,10 +279,15 @@ impl SurfpoolSourceFixture {
         );
         send_legacy_transaction(
             &rpc,
+            "initialize_address_book_root",
             &payer,
             &[&owner, &address_book_root],
             &[initialize_address_book_root_ix],
         )?;
+        surfpool_log(format!(
+            "bootstrap: initialized address book root {}",
+            address_book_root_pubkey
+        ));
 
         let create_owner_ata_ix =
             spl_associated_token_account::instruction::create_associated_token_account_idempotent(
@@ -226,7 +296,14 @@ impl SurfpoolSourceFixture {
                 &USDC_MINT,
                 &anchor_spl::token::ID,
             );
-        send_legacy_transaction(&rpc, &payer, &[], &[create_owner_ata_ix])?;
+        send_legacy_transaction(
+            &rpc,
+            "create_owner_ata",
+            &payer,
+            &[],
+            &[create_owner_ata_ix],
+        )?;
+        surfpool_log(format!("bootstrap: ensured owner ATA {}", owner_ata));
 
         let initialize_ix = initialize_sra_ix(
             &payer.pubkey(),
@@ -236,7 +313,8 @@ impl SurfpoolSourceFixture {
             handler_data.clone(),
             salt,
         );
-        send_legacy_transaction(&rpc, &payer, &[&owner], &[initialize_ix])?;
+        send_legacy_transaction(&rpc, "initialize_sra", &payer, &[&owner], &[initialize_ix])?;
+        surfpool_log(format!("bootstrap: initialized SRA config {}", sra_config));
 
         let address_book_entry =
             derive_address_book_pda(&address_book_root_pubkey, target_chain_id, &target_token).0;
@@ -249,7 +327,17 @@ impl SurfpoolSourceFixture {
             target_token,
             TARGET_TOKEN_DECIMALS,
         );
-        send_legacy_transaction(&rpc, &payer, &[&owner], &[address_book_ix])?;
+        send_legacy_transaction(
+            &rpc,
+            "set_address_book_entry",
+            &payer,
+            &[&owner],
+            &[address_book_ix],
+        )?;
+        surfpool_log(format!(
+            "bootstrap: created address book entry {} for chain {}",
+            address_book_entry, target_chain_id
+        ));
 
         let fixture = Self {
             rpc,
@@ -266,6 +354,11 @@ impl SurfpoolSourceFixture {
             accounts,
         };
         fixture.seed_owner_usdc(OWNER_STARTING_BALANCE)?;
+        surfpool_log(format!(
+            "bootstrap: seeded owner ATA {} with {} base units of USDC",
+            fixture.owner_ata, OWNER_STARTING_BALANCE
+        ));
+        surfpool_log("bootstrap: fixture setup complete");
         Ok(fixture)
     }
 
@@ -283,6 +376,7 @@ impl SurfpoolSourceFixture {
     }
 
     fn surfpool_rpc(&self, method: &str, params: Value) -> TestResult<Value> {
+        surfpool_log(format!("surfpool_rpc[{method}]: sending request"));
         let response: Value = self
             .http
             .post(SURFPOOL_RPC_URL)
@@ -297,13 +391,22 @@ impl SurfpoolSourceFixture {
             .json()?;
 
         if let Some(err) = response.get("error") {
+            surfpool_log(format!("surfpool_rpc[{method}]: error {err}"));
             return Err(format!("{method} failed: {err}").into());
         }
 
+        surfpool_log(format!("surfpool_rpc[{method}]: request succeeded"));
         Ok(response["result"].clone())
     }
 
     fn invoke_source_flow(&self, params: PrepareParams) -> TestResult<Vec<String>> {
+        surfpool_log(format!(
+            "invoke_source_flow: starting for target_chain_id={} input_amount={} output_amount={} current_nonce={}",
+            params.target_chain_id,
+            params.input_amount,
+            params.output_amount,
+            self.current_nonce()?
+        ));
         let address_book_entry = derive_address_book_pda(
             &self.address_book_root,
             params.target_chain_id,
@@ -353,6 +456,12 @@ impl SurfpoolSourceFixture {
         let recent_slot: Slot = self.rpc.get_slot()?;
         let (create_lookup_table_ix, lookup_table_address) =
             create_lookup_table(self.payer.pubkey(), self.payer.pubkey(), recent_slot);
+        surfpool_log(format!(
+            "invoke_source_flow: creating lookup table {} at recent slot {} with {} address(es)",
+            lookup_table_address,
+            recent_slot,
+            lookup_addresses.len()
+        ));
         let extend_lookup_table_ix = extend_lookup_table(
             lookup_table_address,
             self.payer.pubkey(),
@@ -361,6 +470,7 @@ impl SurfpoolSourceFixture {
         );
         send_legacy_transaction(
             &self.rpc,
+            "create_and_extend_lookup_table",
             &self.payer,
             &[],
             &[create_lookup_table_ix, extend_lookup_table_ix],
@@ -368,11 +478,17 @@ impl SurfpoolSourceFixture {
 
         // Solana only activates newly extended ALT addresses in a later slot.
         let mut lookup_table = None;
-        for _ in 0..SURFPOOL_RETRY_COUNT {
+        for attempt in 1..=SURFPOOL_RETRY_COUNT {
             let current_slot = self.rpc.get_slot()?;
             let (candidate_lookup_table, last_extended_slot) =
                 lookup_table_account_from_rpc(&self.rpc, &lookup_table_address)?;
+            surfpool_log(format!(
+                "invoke_source_flow: ALT activation attempt {attempt}/{SURFPOOL_RETRY_COUNT} current_slot={current_slot} last_extended_slot={last_extended_slot}"
+            ));
             if lookup_table_is_active(current_slot, last_extended_slot) {
+                surfpool_log(format!(
+                    "invoke_source_flow: ALT {lookup_table_address} active on attempt {attempt}/{SURFPOOL_RETRY_COUNT}"
+                ));
                 lookup_table = Some(candidate_lookup_table);
                 break;
             }
@@ -382,13 +498,19 @@ impl SurfpoolSourceFixture {
 
         let signature = send_versioned_transaction(
             &self.rpc,
+            "source_flow",
             &self.payer,
             &[&self.owner],
             &[compute_budget_ix(), validate_ix, execute_ix],
             &[lookup_table],
         )?;
 
-        self.logs_for_signature(&signature)
+        let logs = self.logs_for_signature(&signature)?;
+        surfpool_log(format!(
+            "invoke_source_flow: fetched {} local log line(s) for signature {signature}",
+            logs.len()
+        ));
+        Ok(logs)
     }
 
     fn current_nonce(&self) -> TestResult<u64> {
@@ -468,6 +590,10 @@ fn source_e2e_real_across_happy_path() {
     let pre_vault = fx
         .across_vault_amount()
         .expect("read Across vault before deposit");
+    surfpool_log(format!(
+        "source_e2e_real_across_happy_path: pre balances owner={} across_vault={}",
+        pre_owner, pre_vault
+    ));
 
     let logs = fx
         .invoke_source_flow(default_prepare_params_rpc(&fx))
@@ -482,6 +608,16 @@ fn source_e2e_real_across_happy_path() {
     let post_across_vault = fx
         .across_vault_amount()
         .expect("read Across vault after deposit");
+    surfpool_log(format!(
+        "source_e2e_real_across_happy_path: post balances owner={} sra_vault={} adapter_custody={} across_vault={} nonce={}",
+        post_owner,
+        post_sra_vault,
+        post_adapter_custody,
+        post_across_vault,
+        fx.mint_nonce()
+            .expect("read mint nonce after deposit")
+            .nonce,
+    ));
 
     let invoke_prefix = format!("Program {} invoke", ACROSS_SPOKE_POOL_ID);
     let success_prefix = format!("Program {} success", ACROSS_SPOKE_POOL_ID);
@@ -518,11 +654,20 @@ fn source_e2e_real_across_happy_path() {
 fn source_e2e_real_across_nonce_increments() {
     let _guard = SURFPOOL_TEST_MUTEX.lock().expect("lock surfpool mutex");
     let fx = SurfpoolSourceFixture::bootstrap().expect("bootstrap fixture");
+    surfpool_log("source_e2e_real_across_nonce_increments: running first deposit");
 
     fx.invoke_source_flow(default_prepare_params_rpc(&fx))
         .expect("first deposit succeeds");
+    surfpool_log("source_e2e_real_across_nonce_increments: running second deposit");
     fx.invoke_source_flow(default_prepare_params_rpc(&fx))
         .expect("second deposit succeeds");
+
+    surfpool_log(format!(
+        "source_e2e_real_across_nonce_increments: final nonce={}",
+        fx.mint_nonce()
+            .expect("read mint nonce after second deposit")
+            .nonce,
+    ));
 
     assert_eq!(
         fx.mint_nonce()
