@@ -1,6 +1,6 @@
 use sra_common::{
     instruction_data::{decode_anchor_instruction_data, encode_anchor_instruction_data},
-    source_deposit::{AcrossDepositParams, NormalizedDepositIntent, PrepareParams},
+    source_deposit::{AcrossDepositParams, PrepareParams},
 };
 
 fn evm_bytes32(byte: u8) -> [u8; 32] {
@@ -68,74 +68,4 @@ fn decode_across_deposit_params_rejects_truncated_data() {
     )
     .expect_err("truncated params must reject");
     assert!(format!("{err:?}").contains("InvalidPairedInstruction"));
-}
-
-#[test]
-fn normalized_intent_matches_when_handler_output_is_promoted_to_u256() {
-    let prepare = PrepareParams::new(
-        11,
-        22,
-        42_161,
-        evm_bytes32(0x11),
-        evm_bytes32(0x22),
-        evm_bytes32(0x33),
-        [0x44u8; 32],
-        evm_bytes32(0x77),
-        vec![3, 5],
-    );
-    let across = AcrossDepositParams::from_prepare(
-        &prepare,
-        anchor_lang::prelude::Pubkey::new_from_array([1u8; 32]),
-        60,
-        30,
-    );
-
-    assert_eq!(
-        NormalizedDepositIntent::from_prepare(&prepare),
-        NormalizedDepositIntent::from_across(&across),
-    );
-}
-
-#[test]
-fn normalized_intent_differs_when_action_idxs_change() {
-    let prepare = PrepareParams::new(
-        11,
-        22,
-        42_161,
-        evm_bytes32(0x11),
-        evm_bytes32(0x22),
-        evm_bytes32(0x33),
-        [0x44u8; 32],
-        evm_bytes32(0x77),
-        vec![3, 5],
-    );
-    let mut across = AcrossDepositParams::from_prepare(
-        &prepare,
-        anchor_lang::prelude::Pubkey::new_from_array([1u8; 32]),
-        60,
-        30,
-    );
-    across.action_idxs[1] += 1;
-
-    assert_ne!(
-        NormalizedDepositIntent::from_prepare(&prepare),
-        NormalizedDepositIntent::from_across(&across),
-    );
-}
-
-#[test]
-fn normalized_intent_differs_when_route_fields_change() {
-    let prepare = sample_prepare_params();
-    let mut across = AcrossDepositParams::from_prepare(
-        &prepare,
-        anchor_lang::prelude::Pubkey::new_from_array([1u8; 32]),
-        60,
-        30,
-    );
-    across.target_chain_id += 1;
-
-    assert_ne!(
-        NormalizedDepositIntent::from_prepare(&prepare),
-        NormalizedDepositIntent::from_across(&across),
-    );
 }

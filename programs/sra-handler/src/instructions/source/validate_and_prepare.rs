@@ -21,6 +21,18 @@ fn is_program_owner(owner: &Pubkey) -> bool {
         || loader_v4::check_id(owner)
 }
 
+fn validate_adapter_program(adapter_program: &AccountInfo) -> Result<()> {
+    require!(
+        !adapter_program.data_is_empty() && adapter_program.executable,
+        SraError::InvalidAdapterProgram
+    );
+    require!(
+        is_program_owner(adapter_program.owner),
+        SraError::InvalidAdapterProgram
+    );
+    Ok(())
+}
+
 pub use sra_common::source_deposit::PrepareParams;
 
 /// Source-side deposit IX. Validates the SRA + per-call routing inputs, pulls
@@ -116,6 +128,7 @@ pub(crate) fn handler(
     ctx: Context<ValidateAndPrepare>,
     handler_data: SourceHandlerData,
     params: PrepareParams,
+    paired_adapter_ix_data_hash: [u8; 32],
 ) -> Result<()> {
     require!(
         params.action_idxs.len() <= MAX_ACTION_IDXS,
@@ -137,12 +150,7 @@ pub(crate) fn handler(
 
     // Step 0a — adapter must be an executable program and be in the SRA's
     // allowlist.
-    require!(
-        !ctx.accounts.adapter_program.data_is_empty()
-            && ctx.accounts.adapter_program.executable
-            && is_program_owner(ctx.accounts.adapter_program.owner),
-        SraError::InvalidAdapterProgram
-    );
+    validate_adapter_program(&ctx.accounts.adapter_program.to_account_info())?;
     let adapter_key = ctx.accounts.adapter_program.key();
     require!(
         handler_data
@@ -160,13 +168,14 @@ pub(crate) fn handler(
     );
 
     // Step 0c — IX 2 attestation: the immediately following instruction must
-    // be the paired adapter deposit for the same source intent.
+    // be the paired adapter IX with the pinned accounts and exact data hash the
+    // client attested to. Adapter-specific semantics are verified by IX 2.
     verify_next_adapter_ix(
         &ctx.accounts.instructions_sysvar.to_account_info(),
         &adapter_key,
         &ctx.accounts.sra_config.key(),
         &ctx.accounts.source_mint.key(),
-        &params,
+        &paired_adapter_ix_data_hash,
     )?;
 
     // Step 1 — adapter_authority PDA validation: enforced declaratively by
@@ -272,4 +281,54 @@ pub(crate) fn handler(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestAccount {
+        key: Pubkey,
+        owner: Pubkey,
+        lamports: u64,
+        data: Vec<u8>,
+        executable: bool,
+    }
+
+    impl TestAccount {
+        fn account_info(&mut self) -> AccountInfo<'_> {
+            AccountInfo::new(
+                &self.key,
+                false,
+                self.executable,
+                &mut self.lamports,
+                &mut self.data,
+                &self.owner,
+                self.executable,
+                0,
+            )
+        }
+    }
+
+    #[test]
+    fn validate_adapter_program_accepts_supported_loader_owners() {
+        let cases = [
+            ("legacy", bpf_loader::ID),
+            ("upgradeable", bpf_loader_upgradeable::ID),
+            ("loader_v4", loader_v4::ID),
+        ];
+
+        for (name, owner) in cases {
+            let mut program = TestAccount {
+                key: Pubkey::new_unique(),
+                owner,
+                lamports: 0,
+                data: vec![1],
+                executable: true,
+            };
+
+            validate_adapter_program(&program.account_info())
+                .unwrap_or_else(|_| panic!("{name} loader-owned program should be accepted"));
+        }
+    }
 }

@@ -1,4 +1,3 @@
-#[cfg(not(target_os = "solana"))]
 use anchor_lang::AnchorSerialize;
 use anchor_lang::{error, prelude::*, AnchorDeserialize};
 use solana_sha256_hasher::hash;
@@ -14,11 +13,14 @@ pub fn instruction_discriminator(name: &str) -> [u8; 8] {
     discriminator
 }
 
-#[cfg(not(target_os = "solana"))]
 pub fn encode_anchor_instruction_data<T: AnchorSerialize>(name: &str, value: &T) -> Vec<u8> {
     let mut data = instruction_discriminator(name).to_vec();
     value.serialize(&mut data).unwrap();
     data
+}
+
+pub fn instruction_data_hash(data: &[u8]) -> [u8; 32] {
+    hash(data).to_bytes()
 }
 
 pub fn decode_anchor_instruction_data<T: AnchorDeserialize>(name: &str, data: &[u8]) -> Result<T> {

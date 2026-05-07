@@ -487,7 +487,11 @@ pub fn validate_and_prepare_ix(
     address_book_entry: &Pubkey,
     handler_data: SourceHandlerData,
     params: PrepareParams,
+    paired_execute_ix: &Instruction,
 ) -> Instruction {
+    let paired_adapter_ix_data_hash =
+        sra_common::instruction_data::instruction_data_hash(&paired_execute_ix.data);
+
     Instruction {
         program_id: PROGRAM_ID,
         accounts: sra_handler::accounts::ValidateAndPrepare {
@@ -512,6 +516,7 @@ pub fn validate_and_prepare_ix(
         data: sra_handler::instruction::ValidateAndPrepare {
             handler_data,
             params,
+            paired_adapter_ix_data_hash,
         }
         .data(),
     }
@@ -650,6 +655,14 @@ impl ValidatePrepareFixture {
         between_ixs: Vec<Instruction>,
     ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
     {
+        let execute_ix = execute_deposit_across_ix(
+            &self.payer.pubkey(),
+            self,
+            &fetch_sra_config(svm, &self.sra_config),
+            &params,
+            across_params_for(self, &params),
+            current_nonce(svm, &self.accounts.mint_nonce),
+        );
         let address_book_entry =
             self.address_book_entry(params.target_chain_id, &params.target_token);
         let validate_ix = validate_and_prepare_ix(
@@ -661,14 +674,7 @@ impl ValidatePrepareFixture {
             &address_book_entry,
             handler_data,
             params.clone(),
-        );
-        let execute_ix = execute_deposit_across_ix(
-            &self.payer.pubkey(),
-            self,
-            &fetch_sra_config(svm, &self.sra_config),
-            &params,
-            across_params_for(self, &params),
-            current_nonce(svm, &self.accounts.mint_nonce),
+            &execute_ix,
         );
 
         let mut ixs = vec![validate_ix];

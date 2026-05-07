@@ -24,6 +24,7 @@ pub struct PrepareParams {
 pub struct ValidateAndPrepareArgs {
     pub handler_data: SourceHandlerData,
     pub params: PrepareParams,
+    pub paired_adapter_ix_data_hash: [u8; 32],
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
@@ -93,87 +94,16 @@ impl AcrossDepositParams {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NormalizedDepositIntent {
-    pub input_amount: u64,
-    pub output_amount: [u8; 32],
-    pub target_chain_id: u64,
-    pub target_handler: [u8; 32],
-    pub target_adapter: [u8; 32],
-    pub recipient: [u8; 32],
-    pub app_id: [u8; 32],
-    pub target_token: [u8; 32],
-    pub action_idxs: Vec<u64>,
-}
-
 pub fn handler_output_amount_u256(output_amount: u64) -> [u8; 32] {
     u256_from_u64(output_amount)
-}
-
-impl NormalizedDepositIntent {
-    pub fn from_prepare(params: &PrepareParams) -> Self {
-        Self {
-            input_amount: params.input_amount,
-            output_amount: handler_output_amount_u256(params.output_amount),
-            target_chain_id: params.target_chain_id,
-            target_handler: params.target_handler,
-            target_adapter: params.target_adapter,
-            recipient: params.recipient,
-            app_id: params.app_id,
-            target_token: params.target_token,
-            action_idxs: params.action_idxs.clone(),
-        }
-    }
-
-    pub fn from_across(params: &AcrossDepositParams) -> Self {
-        Self {
-            input_amount: params.input_amount,
-            output_amount: params.output_amount,
-            target_chain_id: params.target_chain_id,
-            target_handler: params.target_handler,
-            target_adapter: params.target_adapter,
-            recipient: params.recipient,
-            app_id: params.app_id,
-            target_token: params.target_token,
-            action_idxs: params.action_idxs.clone(),
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn evm_bytes32(byte: u8) -> [u8; 32] {
-        let mut out = [0u8; 32];
-        out[12..].fill(byte);
-        out
-    }
-
     #[test]
     fn handler_output_is_promoted_to_u256() {
         assert_eq!(handler_output_amount_u256(0x1234)[30..], [0x12, 0x34]);
-    }
-
-    #[test]
-    fn normalized_intent_compares_semantic_fields() {
-        let prepare = PrepareParams::new(
-            11,
-            22,
-            42_161,
-            evm_bytes32(0x11),
-            evm_bytes32(0x22),
-            evm_bytes32(0x33),
-            [0x44u8; 32],
-            evm_bytes32(0x77),
-            vec![3, 5],
-        );
-        let across =
-            AcrossDepositParams::from_prepare(&prepare, Pubkey::new_from_array([1u8; 32]), 60, 30);
-
-        assert_eq!(
-            NormalizedDepositIntent::from_prepare(&prepare),
-            NormalizedDepositIntent::from_across(&across)
-        );
     }
 }
