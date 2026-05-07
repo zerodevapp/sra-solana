@@ -127,6 +127,27 @@ fn validate_and_prepare_happy_path() {
 }
 
 #[test]
+fn validate_and_prepare_succeeds_with_decimal_only_surface() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+
+    fx.invoke(&mut svm, default_prepare_params(&fx))
+        .expect("deposits should still succeed with the decimal-only surface");
+
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.owner_ata),
+        OWNER_STARTING_BALANCE - INPUT,
+        "owner ATA debited",
+    );
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.across_vault),
+        INPUT,
+        "Across vault receives bridged funds",
+    );
+    assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 1);
+}
+
+#[test]
 fn execute_deposit_emits_across_deposit_executed() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
@@ -820,6 +841,129 @@ fn validate_and_prepare_slippage_exceeded_rejected() {
     assert_eq!(
         fetch_token_balance(&svm, &fx.owner_ata),
         OWNER_STARTING_BALANCE
+    );
+}
+
+#[test]
+fn validate_and_prepare_slippage_uses_decimal_normalized_amounts() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    setup_address_book_entry(
+        &mut svm,
+        &fx.payer,
+        &fx.owner,
+        &fx.address_book_root,
+        fx.target_chain_id,
+        fx.target_token,
+        18,
+    );
+
+    let meta = fx
+        .invoke(
+            &mut svm,
+            PrepareParams {
+                input_amount: 1_000_000,
+                output_amount: 995_000_000_000_000_000,
+                ..default_prepare_params(&fx)
+            },
+        )
+        .expect("decimal-normalized slippage should succeed");
+
+    let ev = extract_deposit_prepared(&meta.logs).expect("DepositPrepared event must be emitted");
+    assert_eq!(ev.input_amount, 1_000_000);
+    assert_eq!(ev.output_amount, 995_000_000_000_000_000);
+}
+
+#[test]
+fn validate_and_prepare_rejects_decimal_normalized_slippage_below_boundary() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    setup_address_book_entry(
+        &mut svm,
+        &fx.payer,
+        &fx.owner,
+        &fx.address_book_root,
+        fx.target_chain_id,
+        fx.target_token,
+        18,
+    );
+
+    let err = fx
+        .invoke(
+            &mut svm,
+            PrepareParams {
+                input_amount: 1_000_000,
+                output_amount: 994_999_999_999_999_999,
+                ..default_prepare_params(&fx)
+            },
+        )
+        .expect_err("decimal-normalized slippage below boundary must reject")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::SlippageExceeded.into()),
+        )
+    );
+}
+
+#[test]
+fn validate_and_prepare_handles_large_source_decimal_gap_without_overflow() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new_with_decimals_and_adapter_policy(
+        &mut svm,
+        45,
+        6,
+        ADAPTER_PROGRAM_ID,
+        50,
+        vec![ADAPTER_PROGRAM_ID],
+    );
+
+    fx.invoke(
+        &mut svm,
+        PrepareParams {
+            input_amount: 1_000_000,
+            output_amount: 1,
+            ..default_prepare_params(&fx)
+        },
+    )
+    .expect("large source decimal gaps should not overflow the slippage check");
+}
+
+#[test]
+fn validate_and_prepare_large_target_decimal_gap_rejects_as_slippage() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new_with_decimals_and_adapter_policy(
+        &mut svm,
+        6,
+        45,
+        ADAPTER_PROGRAM_ID,
+        50,
+        vec![ADAPTER_PROGRAM_ID],
+    );
+
+    let err = fx
+        .invoke(
+            &mut svm,
+            PrepareParams {
+                input_amount: 1,
+                output_amount: u64::MAX,
+                ..default_prepare_params(&fx)
+            },
+        )
+        .expect_err("unrepresentable target decimal gaps must reject as slippage")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::SlippageExceeded.into()),
+        )
     );
 }
 

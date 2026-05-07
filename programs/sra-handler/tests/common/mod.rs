@@ -16,7 +16,7 @@ use litesvm_token::{
 use solana_sdk::{
     compute_budget::ComputeBudgetInstruction,
     instruction::{AccountMeta, Instruction},
-    message::Message,
+    message::{AddressLookupTableAccount, Message},
     pubkey::Pubkey,
     signature::Keypair,
     signer::Signer,
@@ -130,6 +130,24 @@ pub fn sample_prepare_params(target_token: [u8; 32]) -> PrepareParams {
         target_token,
         DEFAULT_ACTION_IDXS.to_vec(),
     )
+}
+
+pub fn representative_lookup_table(ixs: &[Instruction]) -> AddressLookupTableAccount {
+    let mut addresses = Vec::new();
+
+    for ix in ixs {
+        for meta in &ix.accounts {
+            if meta.is_signer || addresses.contains(&meta.pubkey) {
+                continue;
+            }
+            addresses.push(meta.pubkey);
+        }
+    }
+
+    AddressLookupTableAccount {
+        key: Pubkey::new_unique(),
+        addresses,
+    }
 }
 
 pub fn derive_sra_pda(
@@ -542,12 +560,21 @@ pub struct ValidatePrepareFixture {
 
 impl ValidatePrepareFixture {
     pub fn new(svm: &mut LiteSVM) -> Self {
-        Self::new_with_adapter_policy(svm, ADAPTER_PROGRAM_ID, 50, vec![ADAPTER_PROGRAM_ID])
+        Self::new_with_decimals_and_adapter_policy(
+            svm,
+            6,
+            6,
+            ADAPTER_PROGRAM_ID,
+            50,
+            vec![ADAPTER_PROGRAM_ID],
+        )
     }
 
     pub fn new_with(svm: &mut LiteSVM, allowed_slippage_bps: u16) -> Self {
-        Self::new_with_adapter_policy(
+        Self::new_with_decimals_and_adapter_policy(
             svm,
+            6,
+            6,
             ADAPTER_PROGRAM_ID,
             allowed_slippage_bps,
             vec![ADAPTER_PROGRAM_ID],
@@ -556,6 +583,24 @@ impl ValidatePrepareFixture {
 
     pub fn new_with_adapter_policy(
         svm: &mut LiteSVM,
+        adapter_program: Pubkey,
+        allowed_slippage_bps: u16,
+        allowed_adapters: Vec<Pubkey>,
+    ) -> Self {
+        Self::new_with_decimals_and_adapter_policy(
+            svm,
+            6,
+            6,
+            adapter_program,
+            allowed_slippage_bps,
+            allowed_adapters,
+        )
+    }
+
+    pub fn new_with_decimals_and_adapter_policy(
+        svm: &mut LiteSVM,
+        source_decimals: u8,
+        target_decimals: u8,
         adapter_program: Pubkey,
         allowed_slippage_bps: u16,
         allowed_adapters: Vec<Pubkey>,
@@ -581,7 +626,7 @@ impl ValidatePrepareFixture {
             salt,
         );
 
-        let source_mint = create_mint(svm, &payer, &payer.pubkey(), 6);
+        let source_mint = create_mint(svm, &payer, &payer.pubkey(), source_decimals);
         let target_chain_id = 42_161;
         let target_token = sample_target_token();
         setup_address_book_entry(
@@ -591,7 +636,7 @@ impl ValidatePrepareFixture {
             &address_book_root,
             target_chain_id,
             target_token,
-            6,
+            target_decimals,
         );
 
         let accounts = ValidatePrepareAccounts::derive(&sra_config, &source_mint, &adapter_program);

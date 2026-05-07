@@ -33,6 +33,55 @@ fn validate_adapter_program(adapter_program: &AccountInfo) -> Result<()> {
     Ok(())
 }
 
+fn output_satisfies_slippage_floor(
+    input_amount: u64,
+    input_decimals: u8,
+    output_amount: u64,
+    output_decimals: u8,
+    slippage_bps: u16,
+) -> Result<bool> {
+    let denom = BPS_DENOMINATOR as u128;
+    let slippage_numerator = (BPS_DENOMINATOR - slippage_bps) as u128;
+    let scaled_input = (input_amount as u128)
+        .checked_mul(slippage_numerator)
+        .ok_or(SraError::ArithmeticOverflow)?;
+
+    if input_decimals >= output_decimals {
+        let min_acceptable = scaled_input / denom;
+        let mut scaled_output = output_amount as u128;
+
+        for _ in 0..(input_decimals - output_decimals) {
+            if scaled_output >= min_acceptable {
+                return Ok(true);
+            }
+            scaled_output *= 10;
+        }
+
+        return Ok(scaled_output >= min_acceptable);
+    }
+
+    let output = output_amount as u128;
+    let mut min_acceptable = scaled_input / denom;
+    let mut remainder = scaled_input % denom;
+
+    for _ in 0..(output_decimals - input_decimals) {
+        if min_acceptable > output / 10 {
+            return Ok(false);
+        }
+
+        min_acceptable *= 10;
+        let next_remainder = remainder * 10;
+        min_acceptable += next_remainder / denom;
+        remainder = next_remainder % denom;
+
+        if min_acceptable > output {
+            return Ok(false);
+        }
+    }
+
+    Ok(output >= min_acceptable)
+}
+
 pub use sra_common::source_deposit::PrepareParams;
 
 /// Validates a source deposit, moves funds into adapter custody, and emits the
@@ -145,7 +194,6 @@ pub(crate) fn handler(
             .any(|a| a == &adapter_key),
         SraError::AdapterNotAllowed
     );
-
     require!(
         ctx.accounts.address_book_entry.is_enabled(),
         SraError::InvalidAddressBook
@@ -175,15 +223,15 @@ pub(crate) fn handler(
         )?;
     }
 
-    // Enforce the minimum output implied by the configured slippage.
-    let slippage_bps = handler_data.allowed_slippage_bps as u128;
-    let denom = BPS_DENOMINATOR as u128;
-    let min_acceptable = (params.input_amount as u128)
-        .checked_mul(denom - slippage_bps)
-        .ok_or(SraError::ArithmeticOverflow)?
-        / denom;
+    // Compare the decimal-normalized slippage floor without scaling into overflowing intermediates.
     require!(
-        (params.output_amount as u128) >= min_acceptable,
+        output_satisfies_slippage_floor(
+            params.input_amount,
+            ctx.accounts.source_mint.decimals,
+            params.output_amount,
+            ctx.accounts.address_book_entry.target_decimals,
+            handler_data.allowed_slippage_bps,
+        )?,
         SraError::SlippageExceeded
     );
 

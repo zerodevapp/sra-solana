@@ -17,15 +17,16 @@ An SRA is a deterministic per-(owner, app, target) PDA that:
 
 ## Architecture
 
-Two on-chain programs plus a shared crate:
+Two core on-chain programs plus a shared crate, plus a test-only mock:
 
 | Crate / Program          | Role                                                                                                   |
 | ------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `sra-handler`            | Bridge- and target-agnostic. Source: validation, vault custody, raw routing-event emission. Destination: fill finalization, fee deduction, action execution. |
-| `sra-across-adapter`     | Across-specific. Source: builds the canonical EVM ABI message + CPIs into Across `deposit_now`. Destination: reads `FillStatusAccount` and produces a `VerifiedFill`. |
+| `sra-handler`            | Bridge- and target-agnostic. Source: validation, vault custody handoff, raw routing-event emission. Planned destination: fill finalization, fee deduction, action execution. |
+| `sra-across-adapter`     | Across-specific. Source: builds the canonical EVM ABI message + CPIs into Across `deposit_now`. Planned destination: reads `FillStatusAccount` and produces a `VerifiedFill`. |
 | `sra-common`             | Shared types, PDA seeds, constants, errors, and the manual ABI encoder. `declare_id!` matches `sra-handler`'s ID so handler-owned `#[account]` types deserialize correctly across both programs. |
+| `mock-spoke-pool`        | Test-only minimal Across SVM SpokePool mock used by the LiteSVM source-flow tests. |
 
-A source-side deposit ships as a 2-IX versioned transaction (`validate_and_prepare` + `execute_deposit_across`); a destination-side fill is similarly two instructions (`verify_across_fill` + `finalize_fill`). Both instruction pairs are bound together via the Instructions sysvar so neither can execute in isolation.
+A source-side deposit currently ships as a 2-IX versioned transaction (`validate_and_prepare` + `execute_deposit_across`) and now requires an ALT-backed transaction path to stay within Solana's packet limit. The paired source instructions are bound together via the Instructions sysvar so neither can execute in isolation. The planned destination-side fill follows the same two-instruction pattern (`verify_across_fill` + `finalize_fill`).
 
 Local program IDs (see `Anchor.toml`):
 
@@ -46,7 +47,8 @@ sra-solana/
 │   └── sra-common/          # Shared types, seeds, ABI encoder, constants
 ├── programs/
 │   ├── sra-handler/         # Handler program + LiteSVM tests under tests/
-│   └── sra-across-adapter/  # Across adapter (currently a stub)
+│   ├── sra-across-adapter/  # Across source adapter + deposit execution
+│   └── mock-spoke-pool/     # Minimal Across mock used by LiteSVM tests
 ├── tests/                   # Anchor TS smoke tests (mocha + ts-mocha)
 ├── idl/                     # Generated IDL artifacts
 ├── migrations/              # Anchor deploy script
@@ -88,7 +90,7 @@ anchor build
 cargo build
 ```
 
-`anchor build` writes program binaries to `target/deploy/` and IDL JSON to `target/idl/` (mirrored into `idl/`).
+`anchor build` writes program binaries to `target/deploy/` and IDL JSON to `target/idl/`. When the checked-in IDL changes, copy the generated files from `target/idl/` into `idl/`.
 
 ## Test
 
@@ -107,7 +109,7 @@ cargo test -p sra-handler
 cargo test -p sra-handler --test validate_and_prepare
 ```
 
-These exercise instruction handlers against an in-process LiteSVM runtime. No validator required.
+These exercise instruction handlers against an in-process LiteSVM runtime. No validator required, but `anchor build` must run first because the suite loads `target/deploy/*.so` artifacts directly.
 
 **2. Anchor + mocha smoke tests** (runs against a local validator)
 
@@ -144,12 +146,11 @@ If you want a long-lived validator outside `anchor test`, run `solana-test-valid
 
 Source-side handler:
 
+- [x] `initialize_address_book_root`
 - [x] `initialize_sra`
-- [x] `update_adapters`
-- [x] `update_slippage`
 - [x] `set_address_book_entry`
 - [x] `validate_and_prepare`
-- [ ] Across adapter `execute_deposit_across`
+- [x] Across adapter `execute_deposit_across`
 
 Destination-side handler:
 
@@ -163,7 +164,7 @@ Shared:
 - [x] `sra-common`: PDA seeds, types, ABI encoder, constants, errors
 - [ ] `initialize_fee_config` / `register_app_fee`
 - [x] Foundry golden-vector cross-validation suite
-- [ ] SDK + ALT setup
+- [x] ALT-backed source transaction reference path in tests
 - [ ] Devnet staging
 
 ## Linting & formatting

@@ -119,6 +119,9 @@ jobs:
       - name: anchor build
         run: anchor build
 
+      - name: cargo test -p sra-handler
+        run: cargo test -p sra-handler
+
       - name: Verify IDL drift
         run: |
           set -e
