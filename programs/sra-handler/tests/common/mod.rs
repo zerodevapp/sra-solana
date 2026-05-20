@@ -161,6 +161,7 @@ pub fn derive_sra_pda(
 
 pub fn derive_address_book_pda(
     address_book_root: &Pubkey,
+    source_mint: &Pubkey,
     target_chain_id: u64,
     target_token: &[u8; 32],
 ) -> (Pubkey, u8) {
@@ -168,6 +169,7 @@ pub fn derive_address_book_pda(
         &[
             SEED_ADDRESS_BOOK,
             address_book_root.as_ref(),
+            source_mint.as_ref(),
             &target_chain_id.to_le_bytes(),
             target_token,
         ],
@@ -247,6 +249,7 @@ pub fn set_address_book_entry_ix(
     owner: &Pubkey,
     address_book_root: &Pubkey,
     address_book_entry: &Pubkey,
+    source_mint: Pubkey,
     target_chain_id: u64,
     target_token: [u8; 32],
     target_decimals: u8,
@@ -262,6 +265,7 @@ pub fn set_address_book_entry_ix(
         }
         .to_account_metas(None),
         data: sra_handler::instruction::SetAddressBookEntry {
+            source_mint,
             target_chain_id,
             target_token,
             target_decimals,
@@ -451,16 +455,19 @@ pub fn setup_address_book_entry(
     payer: &Keypair,
     owner: &Keypair,
     address_book_root: &Pubkey,
+    source_mint: &Pubkey,
     target_chain_id: u64,
     target_token: [u8; 32],
     target_decimals: u8,
 ) -> Pubkey {
-    let (pda, _) = derive_address_book_pda(address_book_root, target_chain_id, &target_token);
+    let (pda, _) =
+        derive_address_book_pda(address_book_root, source_mint, target_chain_id, &target_token);
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner.pubkey(),
         address_book_root,
         &pda,
+        *source_mint,
         target_chain_id,
         target_token,
         target_decimals,
@@ -634,6 +641,7 @@ impl ValidatePrepareFixture {
             &payer,
             &owner,
             &address_book_root,
+            &source_mint,
             target_chain_id,
             target_token,
             target_decimals,
@@ -670,7 +678,22 @@ impl ValidatePrepareFixture {
     }
 
     pub fn address_book_entry(&self, target_chain_id: u64, target_token: &[u8; 32]) -> Pubkey {
-        derive_address_book_pda(&self.address_book_root, target_chain_id, target_token).0
+        self.address_book_entry_for(&self.source_mint, target_chain_id, target_token)
+    }
+
+    pub fn address_book_entry_for(
+        &self,
+        source_mint: &Pubkey,
+        target_chain_id: u64,
+        target_token: &[u8; 32],
+    ) -> Pubkey {
+        derive_address_book_pda(
+            &self.address_book_root,
+            source_mint,
+            target_chain_id,
+            target_token,
+        )
+        .0
     }
 
     pub fn invoke(

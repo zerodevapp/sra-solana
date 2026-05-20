@@ -316,13 +316,19 @@ impl SurfpoolSourceFixture {
         send_legacy_transaction(&rpc, "initialize_sra", &payer, &[&owner], &[initialize_ix])?;
         surfpool_log(format!("bootstrap: initialized SRA config {}", sra_config));
 
-        let address_book_entry =
-            derive_address_book_pda(&address_book_root_pubkey, target_chain_id, &target_token).0;
+        let address_book_entry = derive_address_book_pda(
+            &address_book_root_pubkey,
+            &USDC_MINT,
+            target_chain_id,
+            &target_token,
+        )
+        .0;
         let address_book_ix = set_address_book_entry_ix(
             &payer.pubkey(),
             &owner.pubkey(),
             &address_book_root_pubkey,
             &address_book_entry,
+            USDC_MINT,
             target_chain_id,
             target_token,
             TARGET_TOKEN_DECIMALS,
@@ -410,6 +416,7 @@ impl SurfpoolSourceFixture {
         ));
         let address_book_entry = derive_address_book_pda(
             &self.address_book_root,
+            &USDC_MINT,
             params.target_chain_id,
             &params.target_token,
         )

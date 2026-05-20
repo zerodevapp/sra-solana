@@ -18,6 +18,7 @@ pub struct AddressBookRootInitialized {
 #[event]
 pub struct AddressBookEntrySet {
     pub address_book_root: Pubkey,
+    pub source_mint: Pubkey,
     pub target_chain_id: u64,
     pub target_token: [u8; 32],
     pub target_decimals: u8,

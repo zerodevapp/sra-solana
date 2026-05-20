@@ -147,6 +147,7 @@ pub struct ValidateAndPrepare<'info> {
         seeds = [
             SEED_ADDRESS_BOOK,
             address_book_root.key().as_ref(),
+            source_mint.key().as_ref(),
             &params.target_chain_id.to_le_bytes(),
             &params.target_token,
         ],
