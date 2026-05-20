@@ -271,8 +271,12 @@ fn set_address_book_entry_zero_target_token_rejected() {
     let source_mint = sample_source_mint();
     let (target_chain_id, _) = sample_address_book_args();
     let zero_token = [0u8; 32];
-    let (address_book_entry, _) =
-        derive_address_book_pda(&address_book_root, &source_mint, target_chain_id, &zero_token);
+    let (address_book_entry, _) = derive_address_book_pda(
+        &address_book_root,
+        &source_mint,
+        target_chain_id,
+        &zero_token,
+    );
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),

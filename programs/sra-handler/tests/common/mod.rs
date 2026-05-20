@@ -460,8 +460,12 @@ pub fn setup_address_book_entry(
     target_token: [u8; 32],
     target_decimals: u8,
 ) -> Pubkey {
-    let (pda, _) =
-        derive_address_book_pda(address_book_root, source_mint, target_chain_id, &target_token);
+    let (pda, _) = derive_address_book_pda(
+        address_book_root,
+        source_mint,
+        target_chain_id,
+        &target_token,
+    );
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner.pubkey(),
