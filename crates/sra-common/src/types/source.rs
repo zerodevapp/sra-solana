@@ -68,13 +68,14 @@ pub struct MintNonce {
     pub bump: u8,
 }
 
-/// Per-address-book-root owner-managed (chain, target_token) -> decimals registry.
+/// Per-address-book-root owner-managed (source_mint, chain, target_token) -> decimals registry.
 /// `target_decimals = 0` is a tombstone/disabled entry, mirroring zeroed EVM TokenInfo.
-/// PDA seeds: ["address_book", address_book_root, chain_id.to_le_bytes(), target_token]
+/// PDA seeds: ["address_book", address_book_root, source_mint, chain_id.to_le_bytes(), target_token]
 #[account]
 #[derive(InitSpace)]
 pub struct AddressBookEntry {
     pub address_book_root: Pubkey,
+    pub source_mint: Pubkey,
     pub target_chain_id: u64,
     pub target_token: [u8; 32],
     /// Decimals of `target_token` on the target chain. Serves three roles:
@@ -126,7 +127,7 @@ mod tests {
 
     #[test]
     fn address_book_entry_init_space() {
-        // 32 address_book_root + 8 target_chain_id + 32 target_token + 1 target_decimals + 1 bump = 74
-        assert_eq!(AddressBookEntry::INIT_SPACE, 74);
+        // 32 address_book_root + 32 source_mint + 8 target_chain_id + 32 target_token + 1 target_decimals + 1 bump = 106
+        assert_eq!(AddressBookEntry::INIT_SPACE, 106);
     }
 }

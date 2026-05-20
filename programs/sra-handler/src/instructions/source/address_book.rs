@@ -32,10 +32,10 @@ pub(crate) fn initialize_root_handler(ctx: Context<InitializeAddressBookRoot>) -
     Ok(())
 }
 
-/// Owner-authorized upsert for an address-book-root-scoped target-token mapping; any payer
-/// may cover the rent.
+/// Owner-authorized upsert for an address-book-root-scoped (source_mint, chain, target_token)
+/// mapping; any payer may cover the rent.
 #[derive(Accounts)]
-#[instruction(target_chain_id: u64, target_token: [u8; 32])]
+#[instruction(source_mint: Pubkey, target_chain_id: u64, target_token: [u8; 32])]
 pub struct SetAddressBookEntry<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -49,6 +49,7 @@ pub struct SetAddressBookEntry<'info> {
         seeds = [
             SEED_ADDRESS_BOOK,
             address_book_root.key().as_ref(),
+            source_mint.as_ref(),
             &target_chain_id.to_le_bytes(),
             target_token.as_ref(),
         ],
@@ -60,6 +61,7 @@ pub struct SetAddressBookEntry<'info> {
 
 pub(crate) fn set_entry_handler(
     ctx: Context<SetAddressBookEntry>,
+    source_mint: Pubkey,
     target_chain_id: u64,
     target_token: [u8; 32],
     target_decimals: u8,
@@ -68,6 +70,7 @@ pub(crate) fn set_entry_handler(
 
     let address_book_entry = &mut ctx.accounts.address_book_entry;
     address_book_entry.address_book_root = ctx.accounts.address_book_root.key();
+    address_book_entry.source_mint = source_mint;
     address_book_entry.target_chain_id = target_chain_id;
     address_book_entry.target_token = target_token;
     address_book_entry.target_decimals = target_decimals;
@@ -75,6 +78,7 @@ pub(crate) fn set_entry_handler(
 
     emit!(AddressBookEntrySet {
         address_book_root: address_book_entry.address_book_root,
+        source_mint: address_book_entry.source_mint,
         target_chain_id: address_book_entry.target_chain_id,
         target_token: address_book_entry.target_token,
         target_decimals: address_book_entry.target_decimals,

@@ -3,13 +3,17 @@ mod common;
 use anchor_lang::error::ErrorCode;
 use common::*;
 use solana_sdk::{
-    instruction::InstructionError, signature::Keypair, signer::Signer,
+    instruction::InstructionError, pubkey::Pubkey, signature::Keypair, signer::Signer,
     transaction::TransactionError,
 };
 use sra_common::errors::SraError;
 
 const SAMPLE_DECIMALS: u8 = 6;
 const UPDATED_DECIMALS: u8 = 18;
+
+fn sample_source_mint() -> Pubkey {
+    Pubkey::new_from_array([0xCD; 32])
+}
 
 fn sample_address_book_args() -> (u64, [u8; 32]) {
     (42_161, [0xAB; 32])
@@ -40,15 +44,21 @@ fn set_address_book_entry_happy_path() {
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);
     let address_book_root = init_address_book_root(&mut svm, &payer, &owner);
+    let source_mint = sample_source_mint();
     let (target_chain_id, target_token) = sample_address_book_args();
-    let (address_book_entry, bump) =
-        derive_address_book_pda(&address_book_root, target_chain_id, &target_token);
+    let (address_book_entry, bump) = derive_address_book_pda(
+        &address_book_root,
+        &source_mint,
+        target_chain_id,
+        &target_token,
+    );
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner.pubkey(),
         &address_book_root,
         &address_book_entry,
+        source_mint,
         target_chain_id,
         target_token,
         SAMPLE_DECIMALS,
@@ -58,6 +68,7 @@ fn set_address_book_entry_happy_path() {
 
     let stored = fetch_address_book_entry(&svm, &address_book_entry);
     assert_eq!(stored.address_book_root, address_book_root);
+    assert_eq!(stored.source_mint, source_mint);
     assert_eq!(stored.target_chain_id, target_chain_id);
     assert_eq!(stored.target_token, target_token);
     assert_eq!(stored.target_decimals, SAMPLE_DECIMALS);
@@ -70,15 +81,21 @@ fn set_address_book_entry_emits_address_book_entry_set() {
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);
     let address_book_root = init_address_book_root(&mut svm, &payer, &owner);
+    let source_mint = sample_source_mint();
     let (target_chain_id, target_token) = sample_address_book_args();
-    let (address_book_entry, _) =
-        derive_address_book_pda(&address_book_root, target_chain_id, &target_token);
+    let (address_book_entry, _) = derive_address_book_pda(
+        &address_book_root,
+        &source_mint,
+        target_chain_id,
+        &target_token,
+    );
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner.pubkey(),
         &address_book_root,
         &address_book_entry,
+        source_mint,
         target_chain_id,
         target_token,
         SAMPLE_DECIMALS,
@@ -89,6 +106,7 @@ fn set_address_book_entry_emits_address_book_entry_set() {
     let ev = extract_anchor_event::<sra_handler::events::AddressBookEntrySet>(&meta.logs)
         .expect("AddressBookEntrySet event must be emitted");
     assert_eq!(ev.address_book_root, address_book_root);
+    assert_eq!(ev.source_mint, source_mint);
     assert_eq!(ev.target_chain_id, target_chain_id);
     assert_eq!(ev.target_token, target_token);
     assert_eq!(ev.target_decimals, SAMPLE_DECIMALS);
@@ -100,15 +118,21 @@ fn set_address_book_entry_updates_existing_decimals() {
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);
     let address_book_root = init_address_book_root(&mut svm, &payer, &owner);
+    let source_mint = sample_source_mint();
     let (target_chain_id, target_token) = sample_address_book_args();
-    let (address_book_entry, _) =
-        derive_address_book_pda(&address_book_root, target_chain_id, &target_token);
+    let (address_book_entry, _) = derive_address_book_pda(
+        &address_book_root,
+        &source_mint,
+        target_chain_id,
+        &target_token,
+    );
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner.pubkey(),
         &address_book_root,
         &address_book_entry,
+        source_mint,
         target_chain_id,
         target_token,
         SAMPLE_DECIMALS,
@@ -120,6 +144,7 @@ fn set_address_book_entry_updates_existing_decimals() {
         &owner.pubkey(),
         &address_book_root,
         &address_book_entry,
+        source_mint,
         target_chain_id,
         target_token,
         UPDATED_DECIMALS,
@@ -138,17 +163,19 @@ fn set_address_book_entry_same_token_allowed_for_different_roots() {
     let owner_b = funded_keypair(&mut svm, SOL);
     let root_a = init_address_book_root(&mut svm, &payer, &owner_a);
     let root_b = init_address_book_root(&mut svm, &payer, &owner_b);
+    let source_mint = sample_source_mint();
     let (target_chain_id, target_token) = sample_address_book_args();
     let (address_book_entry_a, _) =
-        derive_address_book_pda(&root_a, target_chain_id, &target_token);
+        derive_address_book_pda(&root_a, &source_mint, target_chain_id, &target_token);
     let (address_book_entry_b, _) =
-        derive_address_book_pda(&root_b, target_chain_id, &target_token);
+        derive_address_book_pda(&root_b, &source_mint, target_chain_id, &target_token);
 
     let ix_a = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner_a.pubkey(),
         &root_a,
         &address_book_entry_a,
+        source_mint,
         target_chain_id,
         target_token,
         SAMPLE_DECIMALS,
@@ -160,6 +187,7 @@ fn set_address_book_entry_same_token_allowed_for_different_roots() {
         &owner_b.pubkey(),
         &root_b,
         &address_book_entry_b,
+        source_mint,
         target_chain_id,
         target_token,
         UPDATED_DECIMALS,
@@ -177,21 +205,85 @@ fn set_address_book_entry_same_token_allowed_for_different_roots() {
 }
 
 #[test]
+fn set_address_book_entry_same_target_allowed_for_different_source_mints() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let address_book_root = init_address_book_root(&mut svm, &payer, &owner);
+    let source_mint_a = Pubkey::new_from_array([0xAA; 32]);
+    let source_mint_b = Pubkey::new_from_array([0xBB; 32]);
+    let (target_chain_id, target_token) = sample_address_book_args();
+    let (entry_a, _) = derive_address_book_pda(
+        &address_book_root,
+        &source_mint_a,
+        target_chain_id,
+        &target_token,
+    );
+    let (entry_b, _) = derive_address_book_pda(
+        &address_book_root,
+        &source_mint_b,
+        target_chain_id,
+        &target_token,
+    );
+    assert_ne!(
+        entry_a, entry_b,
+        "same (root, chain, target_token) with different source_mint must derive distinct PDAs",
+    );
+
+    let ix_a = set_address_book_entry_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        &address_book_root,
+        &entry_a,
+        source_mint_a,
+        target_chain_id,
+        target_token,
+        SAMPLE_DECIMALS,
+    );
+    send_ix(&mut svm, ix_a, &payer, &[&owner]).expect("entry A should succeed");
+
+    let ix_b = set_address_book_entry_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        &address_book_root,
+        &entry_b,
+        source_mint_b,
+        target_chain_id,
+        target_token,
+        UPDATED_DECIMALS,
+    );
+    send_ix(&mut svm, ix_b, &payer, &[&owner]).expect("entry B should succeed");
+
+    let stored_a = fetch_address_book_entry(&svm, &entry_a);
+    let stored_b = fetch_address_book_entry(&svm, &entry_b);
+    assert_eq!(stored_a.source_mint, source_mint_a);
+    assert_eq!(stored_b.source_mint, source_mint_b);
+    assert_eq!(stored_a.target_decimals, SAMPLE_DECIMALS);
+    assert_eq!(stored_b.target_decimals, UPDATED_DECIMALS);
+}
+
+#[test]
 fn set_address_book_entry_zero_target_token_rejected() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);
     let address_book_root = init_address_book_root(&mut svm, &payer, &owner);
+    let source_mint = sample_source_mint();
     let (target_chain_id, _) = sample_address_book_args();
     let zero_token = [0u8; 32];
-    let (address_book_entry, _) =
-        derive_address_book_pda(&address_book_root, target_chain_id, &zero_token);
+    let (address_book_entry, _) = derive_address_book_pda(
+        &address_book_root,
+        &source_mint,
+        target_chain_id,
+        &zero_token,
+    );
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner.pubkey(),
         &address_book_root,
         &address_book_entry,
+        source_mint,
         target_chain_id,
         zero_token,
         SAMPLE_DECIMALS,
@@ -219,15 +311,21 @@ fn set_address_book_entry_zero_decimals_tombstones_entry() {
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);
     let address_book_root = init_address_book_root(&mut svm, &payer, &owner);
+    let source_mint = sample_source_mint();
     let (target_chain_id, target_token) = sample_address_book_args();
-    let (address_book_entry, _) =
-        derive_address_book_pda(&address_book_root, target_chain_id, &target_token);
+    let (address_book_entry, _) = derive_address_book_pda(
+        &address_book_root,
+        &source_mint,
+        target_chain_id,
+        &target_token,
+    );
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner.pubkey(),
         &address_book_root,
         &address_book_entry,
+        source_mint,
         target_chain_id,
         target_token,
         SAMPLE_DECIMALS,
@@ -239,6 +337,7 @@ fn set_address_book_entry_zero_decimals_tombstones_entry() {
         &owner.pubkey(),
         &address_book_root,
         &address_book_entry,
+        source_mint,
         target_chain_id,
         target_token,
         0,
@@ -256,15 +355,21 @@ fn set_address_book_entry_non_owner_rejected() {
     let attacker = funded_keypair(&mut svm, SOL);
     let owner = funded_keypair(&mut svm, SOL);
     let address_book_root = init_address_book_root(&mut svm, &payer, &owner);
+    let source_mint = sample_source_mint();
     let (target_chain_id, target_token) = sample_address_book_args();
-    let (address_book_entry, _) =
-        derive_address_book_pda(&address_book_root, target_chain_id, &target_token);
+    let (address_book_entry, _) = derive_address_book_pda(
+        &address_book_root,
+        &source_mint,
+        target_chain_id,
+        &target_token,
+    );
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &attacker.pubkey(),
         &address_book_root,
         &address_book_entry,
+        source_mint,
         target_chain_id,
         target_token,
         SAMPLE_DECIMALS,
@@ -294,15 +399,17 @@ fn set_address_book_entry_wrong_pda_rejected() {
     let owner_b = funded_keypair(&mut svm, SOL);
     let root_a = init_address_book_root(&mut svm, &payer, &owner_a);
     let root_b = init_address_book_root(&mut svm, &payer, &owner_b);
+    let source_mint = sample_source_mint();
     let (target_chain_id, target_token) = sample_address_book_args();
     let (wrong_address_book_entry, _) =
-        derive_address_book_pda(&root_b, target_chain_id, &target_token);
+        derive_address_book_pda(&root_b, &source_mint, target_chain_id, &target_token);
 
     let ix = set_address_book_entry_ix(
         &payer.pubkey(),
         &owner_a.pubkey(),
         &root_a,
         &wrong_address_book_entry,
+        source_mint,
         target_chain_id,
         target_token,
         SAMPLE_DECIMALS,

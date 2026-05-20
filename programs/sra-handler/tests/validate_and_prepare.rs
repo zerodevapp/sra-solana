@@ -45,6 +45,7 @@ fn invoke_source_flow(
 ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>> {
     let address_book_entry = derive_address_book_pda(
         &fx.address_book_root,
+        &fx.source_mint,
         params.target_chain_id,
         &params.target_token,
     )
@@ -631,6 +632,7 @@ fn execute_deposit_wrong_prev_handler_call_rejected() {
         &fx.owner.pubkey(),
         &fx.address_book_root,
         &fx.address_book_entry(fx.target_chain_id, &fx.target_token),
+        fx.source_mint,
         fx.target_chain_id,
         fx.target_token,
         6,
@@ -673,6 +675,7 @@ fn validate_and_prepare_disabled_address_book_rejected() {
         &fx.payer,
         &fx.owner,
         &fx.address_book_root,
+        &fx.source_mint,
         fx.target_chain_id,
         fx.target_token,
         0,
@@ -853,6 +856,7 @@ fn validate_and_prepare_slippage_uses_decimal_normalized_amounts() {
         &fx.payer,
         &fx.owner,
         &fx.address_book_root,
+        &fx.source_mint,
         fx.target_chain_id,
         fx.target_token,
         18,
@@ -883,6 +887,7 @@ fn validate_and_prepare_rejects_decimal_normalized_slippage_below_boundary() {
         &fx.payer,
         &fx.owner,
         &fx.address_book_root,
+        &fx.source_mint,
         fx.target_chain_id,
         fx.target_token,
         18,
@@ -1152,6 +1157,16 @@ fn validate_and_prepare_multi_mint_single_sra_independent_nonces() {
     let ev_a0 = extract_deposit_prepared(&meta_a0.logs).expect("first mint event #0");
 
     let second_mint = create_mint(&mut svm, &fx.payer, &fx.payer.pubkey(), 6);
+    setup_address_book_entry(
+        &mut svm,
+        &fx.payer,
+        &fx.owner,
+        &fx.address_book_root,
+        &second_mint,
+        fx.target_chain_id,
+        fx.target_token,
+        6,
+    );
     let second_accounts =
         ValidatePrepareAccounts::derive(&fx.sra_config, &second_mint, &fx.adapter_program);
     let second_owner_ata = create_ata(&mut svm, &fx.payer, &fx.owner.pubkey(), &second_mint);
@@ -1228,6 +1243,7 @@ fn validate_and_prepare_same_sra_multiple_destinations() {
         &fx.payer,
         &fx.owner,
         &fx.address_book_root,
+        &fx.source_mint,
         target_chain_id_b,
         target_token_b,
         6,
@@ -1290,6 +1306,7 @@ fn validate_and_prepare_rejection_preserves_nonce() {
         &fx.payer,
         &fx.owner,
         &fx.address_book_root,
+        &fx.source_mint,
         fx.target_chain_id,
         fx.target_token,
         0,
@@ -1313,6 +1330,7 @@ fn validate_and_prepare_rejection_preserves_nonce() {
         &fx.payer,
         &fx.owner,
         &fx.address_book_root,
+        &fx.source_mint,
         fx.target_chain_id,
         fx.target_token,
         6,
