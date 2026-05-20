@@ -1136,7 +1136,47 @@
             "type": "pubkey"
           },
           {
-            "name": "fallback_recipient",
+            "name": "target_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "target_handler",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_adapter",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "recipient",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_token",
             "type": {
               "array": [
                 "u8",
@@ -1152,15 +1192,6 @@
             "name": "allowed_adapters",
             "type": {
               "vec": "pubkey"
-            }
-          },
-          {
-            "name": "action_config_hash",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
             }
           }
         ]

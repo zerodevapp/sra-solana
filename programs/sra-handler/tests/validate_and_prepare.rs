@@ -756,6 +756,61 @@ fn validate_and_prepare_non_executable_adapter_rejected() {
 }
 
 #[test]
+fn validate_and_prepare_route_mismatch_rejected() {
+    let cases: [(&str, fn(&mut PrepareParams)); 6] = [
+        ("target_chain_id", |params| params.target_chain_id = 10),
+        ("target_handler", |params| {
+            params.target_handler = evm_bytes32(0x12)
+        }),
+        ("target_adapter", |params| {
+            params.target_adapter = evm_bytes32(0x23)
+        }),
+        ("recipient", |params| params.recipient = evm_bytes32(0x34)),
+        ("app_id", |params| params.app_id = [0x45u8; 32]),
+        ("target_token", |params| {
+            params.target_token = evm_bytes32(0xBC)
+        }),
+    ];
+
+    for (name, mutate) in cases {
+        let mut svm = setup_svm();
+        let fx = ValidatePrepareFixture::new(&mut svm);
+        let mut params = default_prepare_params(&fx);
+        mutate(&mut params);
+        setup_address_book_entry(
+            &mut svm,
+            &fx.payer,
+            &fx.owner,
+            &fx.address_book_root,
+            &fx.source_mint,
+            params.target_chain_id,
+            params.target_token,
+            6,
+        );
+
+        let err = fx
+            .invoke(&mut svm, params)
+            .expect_err(&format!("{name} mismatch must reject"))
+            .err
+            .clone();
+
+        assert_eq!(
+            err,
+            TransactionError::InstructionError(
+                0,
+                InstructionError::Custom(SraError::InvalidHandlerData.into()),
+            ),
+            "{name} mismatch rejected with route error",
+        );
+        assert_eq!(
+            fetch_token_balance(&svm, &fx.owner_ata),
+            OWNER_STARTING_BALANCE,
+            "{name} mismatch leaves owner funds untouched",
+        );
+    }
+}
+
+#[test]
 fn validate_and_prepare_wrong_handler_data_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
@@ -1294,69 +1349,6 @@ fn validate_and_prepare_multi_mint_single_sra_independent_nonces() {
         fetch_mint_nonce(&svm, &second_fx.accounts.mint_nonce).nonce,
         1
     );
-}
-
-#[test]
-fn validate_and_prepare_same_sra_multiple_destinations() {
-    // EVM-parity guard: re-binding routing into seeds would fail this test.
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-
-    let params_a = default_prepare_params(&fx);
-
-    // A second destination on a different chain with a different target_token,
-    // requiring its own address-book entry under the same address_book_root.
-    let target_chain_id_b: u64 = 10; // Optimism, vs. Arbitrum (42_161) in default
-    let target_token_b = evm_bytes32(0xCD);
-    setup_address_book_entry(
-        &mut svm,
-        &fx.payer,
-        &fx.owner,
-        &fx.address_book_root,
-        &fx.source_mint,
-        target_chain_id_b,
-        target_token_b,
-        6,
-    );
-
-    let mut params_b = params_a.clone();
-    params_b.target_chain_id = target_chain_id_b;
-    params_b.target_handler = evm_bytes32(0xAA);
-    params_b.target_adapter = evm_bytes32(0xBB);
-    params_b.recipient = evm_bytes32(0xCC);
-    params_b.target_token = target_token_b;
-
-    let meta_a = fx
-        .invoke(&mut svm, params_a.clone())
-        .expect("deposit to destination A must succeed");
-    let ev_a = extract_deposit_prepared(&meta_a.logs).expect("DepositPrepared #A");
-
-    let meta_b = fx.invoke(&mut svm, params_b.clone()).expect(
-        "deposit to destination B (different chain/handler/adapter/recipient) must succeed",
-    );
-    let ev_b = extract_deposit_prepared(&meta_b.logs).expect("DepositPrepared #B");
-
-    // Same SRA serviced both deposits — the address did not depend on routing.
-    assert_eq!(ev_a.sra_config, fx.sra_config);
-    assert_eq!(ev_b.sra_config, fx.sra_config);
-
-    // Nonce stream is shared across destinations for the same (sra, source_mint).
-    assert_eq!(ev_a.nonce, 0);
-    assert_eq!(ev_b.nonce, 1);
-    assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 2);
-
-    // Routing fields propagated from per-deposit params, not from any cached
-    // SraConfig state.
-    assert_eq!(ev_a.target_chain_id, params_a.target_chain_id);
-    assert_eq!(ev_b.target_chain_id, target_chain_id_b);
-    assert_eq!(ev_a.target_handler, params_a.target_handler);
-    assert_eq!(ev_b.target_handler, params_b.target_handler);
-    assert_eq!(ev_a.target_adapter, params_a.target_adapter);
-    assert_eq!(ev_b.target_adapter, params_b.target_adapter);
-    assert_eq!(ev_a.recipient, params_a.recipient);
-    assert_eq!(ev_b.recipient, params_b.recipient);
-    assert_eq!(ev_a.target_token, params_a.target_token);
-    assert_eq!(ev_b.target_token, target_token_b);
 }
 
 #[test]

@@ -8,11 +8,15 @@ use crate::{
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq, InitSpace)]
 pub struct SourceHandlerData {
     pub address_book_root: Pubkey,
-    pub fallback_recipient: [u8; 32],
+    pub target_chain_id: u64,
+    pub target_handler: [u8; 32],
+    pub target_adapter: [u8; 32],
+    pub recipient: [u8; 32],
+    pub app_id: [u8; 32],
+    pub target_token: [u8; 32],
     pub allowed_slippage_bps: u16,
     #[max_len(MAX_ADAPTERS)]
     pub allowed_adapters: Vec<Pubkey>,
-    pub action_config_hash: [u8; 32],
 }
 
 impl SourceHandlerData {
@@ -102,9 +106,10 @@ mod tests {
 
     #[test]
     fn source_handler_data_init_space() {
-        // 32 address_book_root + 32 fallback_recipient + 2 allowed_slippage_bps
-        // + 4 + (32 * 8) allowed_adapters + 32 action_config_hash = 358
-        assert_eq!(SourceHandlerData::INIT_SPACE, 358);
+        // 32 address_book_root + 8 target_chain_id + 32 target_handler
+        // + 32 target_adapter + 32 recipient + 32 app_id + 32 target_token
+        // + 2 allowed_slippage_bps + 4 + (32 * 8) allowed_adapters = 462
+        assert_eq!(SourceHandlerData::INIT_SPACE, 462);
     }
 
     #[test]

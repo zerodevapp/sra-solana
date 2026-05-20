@@ -200,6 +200,15 @@ pub(crate) fn handler(
         handler_data.address_book_root == ctx.accounts.address_book_root.key(),
         SraError::InvalidAddressBook
     );
+    require!(
+        handler_data.target_chain_id == params.target_chain_id
+            && handler_data.target_handler == params.target_handler
+            && handler_data.target_adapter == params.target_adapter
+            && handler_data.recipient == params.recipient
+            && handler_data.app_id == params.app_id
+            && handler_data.target_token == params.target_token,
+        SraError::InvalidHandlerData
+    );
 
     validate_adapter_program(&ctx.accounts.adapter_program.to_account_info())?;
     let adapter_key = ctx.accounts.adapter_program.key();
