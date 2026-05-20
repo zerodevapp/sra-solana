@@ -95,6 +95,13 @@ pub fn u256_from_u64(v: u64) -> [u8; WORD] {
     r
 }
 
+/// Big-endian `uint256` word from a `u128`.
+pub fn u256_from_u128(v: u128) -> [u8; WORD] {
+    let mut r = [0u8; WORD];
+    r[WORD - 16..].copy_from_slice(&v.to_be_bytes());
+    r
+}
+
 fn address_word(addr: &[u8; 20]) -> [u8; WORD] {
     let mut r = [0u8; WORD];
     r[WORD - 20..].copy_from_slice(addr);

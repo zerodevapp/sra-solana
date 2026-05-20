@@ -1,12 +1,14 @@
 use anchor_lang::prelude::*;
 
-use crate::abi::u256_from_u64;
 use crate::types::SourceHandlerData;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PrepareParams {
     pub input_amount: u64,
-    pub output_amount: u64,
+    /// Big-endian `uint256` matching the EVM `quotedAmountOut` wire field.
+    /// The handler decodes the lower 16 bytes into a `u128` for slippage math;
+    /// any non-zero upper bytes fail the deposit with `OutputAmountOverflow`.
+    pub output_amount: [u8; 32],
     pub target_chain_id: u64,
     pub target_handler: [u8; 32],
     pub target_adapter: [u8; 32],
@@ -47,7 +49,7 @@ impl PrepareParams {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_amount: u64,
-        output_amount: u64,
+        output_amount: [u8; 32],
         target_chain_id: u64,
         target_handler: [u8; 32],
         target_adapter: [u8; 32],
@@ -79,7 +81,7 @@ impl AcrossDepositParams {
     ) -> Self {
         Self {
             input_amount: prepare.input_amount,
-            output_amount: handler_output_amount_u256(prepare.output_amount),
+            output_amount: prepare.output_amount,
             target_chain_id: prepare.target_chain_id,
             target_handler: prepare.target_handler,
             target_adapter: prepare.target_adapter,
@@ -91,19 +93,5 @@ impl AcrossDepositParams {
             fill_deadline_offset,
             exclusivity_period,
         }
-    }
-}
-
-pub fn handler_output_amount_u256(output_amount: u64) -> [u8; 32] {
-    u256_from_u64(output_amount)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn handler_output_is_promoted_to_u256() {
-        assert_eq!(handler_output_amount_u256(0x1234)[30..], [0x12, 0x34]);
     }
 }

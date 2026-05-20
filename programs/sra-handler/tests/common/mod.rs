@@ -24,6 +24,7 @@ use solana_sdk::{
 };
 use solana_system_interface::program as system_program;
 use sra_common::{
+    abi::u256_from_u64,
     constants::ACROSS_SPOKE_POOL_ID,
     instruction_data::encode_anchor_instruction_data,
     seeds::{SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_SRA},
@@ -121,7 +122,7 @@ pub fn sample_handler_data(address_book_root: Pubkey) -> SourceHandlerData {
 pub fn sample_prepare_params(target_token: [u8; 32]) -> PrepareParams {
     PrepareParams::new(
         1_000_000,
-        999_500,
+        u256_from_u64(999_500),
         42_161,
         evm_bytes32(0x11),
         evm_bytes32(0x22),

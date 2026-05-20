@@ -1,4 +1,5 @@
 use sra_common::{
+    abi::u256_from_u64,
     instruction_data::{decode_anchor_instruction_data, encode_anchor_instruction_data},
     source_deposit::{AcrossDepositParams, PrepareParams},
 };
@@ -12,7 +13,7 @@ fn evm_bytes32(byte: u8) -> [u8; 32] {
 fn sample_prepare_params() -> PrepareParams {
     PrepareParams::new(
         7,
-        9,
+        u256_from_u64(9),
         42_161,
         evm_bytes32(0x11),
         evm_bytes32(0x22),

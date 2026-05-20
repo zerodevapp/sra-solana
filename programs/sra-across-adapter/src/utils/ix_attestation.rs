@@ -149,9 +149,10 @@ mod tests {
     }
 
     fn mutate_wrong_output_amount(_ix: &mut Instruction, deposit: &mut AcrossDepositParams) {
-        deposit.output_amount = sra_common::source_deposit::handler_output_amount_u256(
-            sample_prepare_params().output_amount + 1,
-        );
+        let mut bumped = sample_prepare_params().output_amount;
+        // Increment the big-endian u256 by one in the last byte (sample fits well under u8::MAX).
+        bumped[31] = bumped[31].wrapping_add(1);
+        deposit.output_amount = bumped;
     }
 
     fn mutate_malformed_data(ix: &mut Instruction, _deposit: &mut AcrossDepositParams) {

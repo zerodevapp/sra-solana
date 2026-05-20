@@ -81,4 +81,7 @@ pub enum SraError {
 
     #[msg("Source handler data does not match immutable SRA identity")]
     InvalidHandlerData,
+
+    #[msg("output_amount exceeds u128 (upper bytes of the [u8; 32] wire value must be zero)")]
+    OutputAmountOverflow,
 }

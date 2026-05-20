@@ -13,7 +13,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::VersionedTransaction,
 };
-use sra_common::{constants::MAX_ACTION_IDXS, source_deposit::PrepareParams};
+use sra_common::{abi::u256_from_u64, constants::MAX_ACTION_IDXS, source_deposit::PrepareParams};
 
 const INPUT: u64 = 1_000_000;
 const OUTPUT_WITHIN_SLIPPAGE: u64 = 999_500;
@@ -108,7 +108,7 @@ fn source_2ix_versioned_tx_max_action_idxs_fits_within_packet_limit() {
     // 2-entry case).
     let params = PrepareParams {
         input_amount: INPUT,
-        output_amount: OUTPUT_WITHIN_SLIPPAGE,
+        output_amount: u256_from_u64(OUTPUT_WITHIN_SLIPPAGE),
         action_idxs: (0..MAX_ACTION_IDXS as u64).collect(),
         ..sample_prepare_params(fx.target_token)
     };
@@ -133,7 +133,7 @@ fn source_2ix_versioned_tx_empty_action_idxs_fits_within_packet_limit() {
     // routing-payload bloat.
     let params = PrepareParams {
         input_amount: INPUT,
-        output_amount: OUTPUT_WITHIN_SLIPPAGE,
+        output_amount: u256_from_u64(OUTPUT_WITHIN_SLIPPAGE),
         action_idxs: vec![],
         ..sample_prepare_params(fx.target_token)
     };
@@ -155,7 +155,7 @@ fn source_2ix_versioned_tx_empty_action_idxs_exceeds_packet_limit_without_alt() 
 
     let params = PrepareParams {
         input_amount: INPUT,
-        output_amount: OUTPUT_WITHIN_SLIPPAGE,
+        output_amount: u256_from_u64(OUTPUT_WITHIN_SLIPPAGE),
         action_idxs: vec![],
         ..sample_prepare_params(fx.target_token)
     };

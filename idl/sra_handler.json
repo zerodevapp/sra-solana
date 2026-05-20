@@ -184,6 +184,10 @@
               },
               {
                 "kind": "arg",
+                "path": "source_mint"
+              },
+              {
+                "kind": "arg",
                 "path": "target_chain_id"
               },
               {
@@ -199,6 +203,10 @@
         }
       ],
       "args": [
+        {
+          "name": "source_mint",
+          "type": "pubkey"
+        },
         {
           "name": "target_chain_id",
           "type": "u64"
@@ -764,15 +772,19 @@
     {
       "name": "AddressBookEntry",
       "docs": [
-        "Per-address-book-root owner-managed (chain, target_token) -> decimals registry.",
+        "Per-address-book-root owner-managed (source_mint, chain, target_token) -> decimals registry.",
         "`target_decimals = 0` is a tombstone/disabled entry, mirroring zeroed EVM TokenInfo.",
-        "PDA seeds: [\"address_book\", address_book_root, chain_id.to_le_bytes(), target_token]"
+        "PDA seeds: [\"address_book\", address_book_root, source_mint, chain_id.to_le_bytes(), target_token]"
       ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "address_book_root",
+            "type": "pubkey"
+          },
+          {
+            "name": "source_mint",
             "type": "pubkey"
           },
           {
@@ -813,6 +825,10 @@
         "fields": [
           {
             "name": "address_book_root",
+            "type": "pubkey"
+          },
+          {
+            "name": "source_mint",
             "type": "pubkey"
           },
           {
@@ -916,9 +932,15 @@
             "name": "output_amount",
             "docs": [
               "Minimum output amount the destination must honor; enforced here via",
-              "the slippage check and re-honored by the target-specific adapter flow."
+              "the slippage check and re-honored by the target-specific adapter flow.",
+              "Big-endian `uint256` matching the cross-chain wire format."
             ],
-            "type": "u64"
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           },
           {
             "name": "target_chain_id",
@@ -1034,7 +1056,17 @@
           },
           {
             "name": "output_amount",
-            "type": "u64"
+            "docs": [
+              "Big-endian `uint256` matching the EVM `quotedAmountOut` wire field.",
+              "The handler decodes the lower 16 bytes into a `u128` for slippage math;",
+              "any non-zero upper bytes fail the deposit with `OutputAmountOverflow`."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           },
           {
             "name": "target_chain_id",

@@ -12,6 +12,7 @@ use anchor_lang::{
     },
 };
 
+use crate::abi::u256_from_u64;
 use crate::source_deposit::{AcrossDepositParams, PrepareParams};
 
 pub const DEFAULT_ACTION_IDXS: [u64; 2] = [3, 7];
@@ -67,7 +68,7 @@ pub fn empty_instruction() -> Instruction {
 pub fn sample_prepare_params() -> PrepareParams {
     PrepareParams::new(
         123,
-        456,
+        u256_from_u64(456),
         42_161,
         evm_bytes32(0x11),
         evm_bytes32(0x22),

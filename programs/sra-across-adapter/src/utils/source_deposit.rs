@@ -50,7 +50,7 @@ pub fn build_deposit_now_bundle(
             target_chain_id: u256_from_u64(prepare.target_chain_id),
             target_param: TokenParam {
                 token: target_token,
-                amount: u256_from_u64(prepare.output_amount),
+                amount: prepare.output_amount,
             },
             extra: build_extra_envelope(&target_adapter, prepared_nonce),
         },
@@ -77,7 +77,7 @@ pub fn build_deposit_now_bundle(
         input_token: *input_mint,
         output_token: Pubkey::new_from_array(prepare.target_token),
         input_amount: prepare.input_amount,
-        output_amount: u256_from_u64(prepare.output_amount),
+        output_amount: prepare.output_amount,
         destination_chain_id: prepare.target_chain_id,
         exclusive_relayer: deposit.exclusive_relayer,
         fill_deadline_offset: deposit.fill_deadline_offset,
@@ -123,7 +123,7 @@ mod tests {
         let input_mint = Pubkey::new_unique();
         let prepare = PrepareParams::new(
             11,
-            22,
+            u256_from_u64(22),
             42_161,
             evm_bytes32(0x11),
             evm_bytes32(0x22),
@@ -173,10 +173,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(build.params.input_amount, prepare.input_amount);
-        assert_eq!(
-            build.params.output_amount,
-            u256_from_u64(prepare.output_amount)
-        );
+        assert_eq!(build.params.output_amount, prepare.output_amount);
         assert_eq!(
             build.params.output_token,
             Pubkey::new_from_array(prepare.target_token)
@@ -197,7 +194,7 @@ mod tests {
         let input_mint = Pubkey::new_unique();
         let prepare = PrepareParams::new(
             11,
-            22,
+            u256_from_u64(22),
             42_161,
             evm_bytes32(0x11),
             evm_bytes32(0x22),

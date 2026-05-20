@@ -7,7 +7,10 @@ use solana_sdk::{
     transaction::TransactionError,
 };
 use sra_common::{
-    abi::u256_from_u64, constants::MAX_ACTION_IDXS, errors::SraError, source_deposit::PrepareParams,
+    abi::{u256_from_u128, u256_from_u64},
+    constants::MAX_ACTION_IDXS,
+    errors::SraError,
+    source_deposit::PrepareParams,
 };
 
 const INPUT: u64 = 1_000_000;
@@ -117,7 +120,7 @@ fn validate_and_prepare_happy_path() {
     assert_eq!(ev.adapter_program, fx.adapter_program);
     assert_eq!(ev.nonce, 0, "event carries the pre-increment nonce");
     assert_eq!(ev.input_amount, INPUT);
-    assert_eq!(ev.output_amount, OUTPUT_WITHIN_SLIPPAGE);
+    assert_eq!(ev.output_amount, u256_from_u64(OUTPUT_WITHIN_SLIPPAGE));
     assert_eq!(ev.target_chain_id, params.target_chain_id);
     assert_eq!(ev.target_handler, params.target_handler);
     assert_eq!(ev.target_adapter, params.target_adapter);
@@ -166,10 +169,7 @@ fn execute_deposit_emits_across_deposit_executed() {
     assert_eq!(ev.across_state, fx.across_state);
     assert_eq!(ev.across_vault, fx.across_vault);
     assert_eq!(ev.input_amount, params.input_amount);
-    assert_eq!(
-        ev.output_amount,
-        sra_common::source_deposit::handler_output_amount_u256(params.output_amount)
-    );
+    assert_eq!(ev.output_amount, params.output_amount);
     assert_eq!(ev.target_token, params.target_token);
     assert_eq!(ev.action_idxs, params.action_idxs);
     assert_eq!(ev.exclusive_relayer, fx.payer.pubkey());
@@ -826,7 +826,7 @@ fn validate_and_prepare_slippage_exceeded_rejected() {
         .invoke(
             &mut svm,
             PrepareParams {
-                output_amount: 900_000,
+                output_amount: u256_from_u64(900_000),
                 ..default_prepare_params(&fx)
             },
         )
@@ -867,7 +867,7 @@ fn validate_and_prepare_slippage_uses_decimal_normalized_amounts() {
             &mut svm,
             PrepareParams {
                 input_amount: 1_000_000,
-                output_amount: 995_000_000_000_000_000,
+                output_amount: u256_from_u64(995_000_000_000_000_000),
                 ..default_prepare_params(&fx)
             },
         )
@@ -875,7 +875,7 @@ fn validate_and_prepare_slippage_uses_decimal_normalized_amounts() {
 
     let ev = extract_deposit_prepared(&meta.logs).expect("DepositPrepared event must be emitted");
     assert_eq!(ev.input_amount, 1_000_000);
-    assert_eq!(ev.output_amount, 995_000_000_000_000_000);
+    assert_eq!(ev.output_amount, u256_from_u64(995_000_000_000_000_000));
 }
 
 #[test]
@@ -898,7 +898,7 @@ fn validate_and_prepare_rejects_decimal_normalized_slippage_below_boundary() {
             &mut svm,
             PrepareParams {
                 input_amount: 1_000_000,
-                output_amount: 994_999_999_999_999_999,
+                output_amount: u256_from_u64(994_999_999_999_999_999),
                 ..default_prepare_params(&fx)
             },
         )
@@ -931,7 +931,7 @@ fn validate_and_prepare_handles_large_source_decimal_gap_without_overflow() {
         &mut svm,
         PrepareParams {
             input_amount: 1_000_000,
-            output_amount: 1,
+            output_amount: u256_from_u64(1),
             ..default_prepare_params(&fx)
         },
     )
@@ -955,7 +955,7 @@ fn validate_and_prepare_large_target_decimal_gap_rejects_as_slippage() {
             &mut svm,
             PrepareParams {
                 input_amount: 1,
-                output_amount: u64::MAX,
+                output_amount: u256_from_u64(u64::MAX),
                 ..default_prepare_params(&fx)
             },
         )
@@ -969,6 +969,76 @@ fn validate_and_prepare_large_target_decimal_gap_rejects_as_slippage() {
             0,
             InstructionError::Custom(SraError::SlippageExceeded.into()),
         )
+    );
+}
+
+#[test]
+fn validate_and_prepare_supports_output_amount_above_u64_max() {
+    // 18-decimal target: 1 USDC bridged for ~20 DAI worth of an 18-decimal token —
+    // i.e. output = 2e19 base units, which is above u64::MAX (≈1.84e19). The ratio
+    // is unrealistic but the goal is to exercise the path the widening unlocks:
+    // pre-widening this output value was unrepresentable in PrepareParams.
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new_with_decimals_and_adapter_policy(
+        &mut svm,
+        6,
+        18,
+        ADAPTER_PROGRAM_ID,
+        50,
+        vec![ADAPTER_PROGRAM_ID],
+    );
+
+    let input_amount: u64 = 1_000_000; // 1 USDC at 6 decimals; fits in OWNER_STARTING_BALANCE
+    let output_amount_u128: u128 = 20_000_000_000_000_000_000; // 2e19 > u64::MAX (1.84e19)
+    assert!(output_amount_u128 > u64::MAX as u128);
+
+    let meta = fx
+        .invoke(
+            &mut svm,
+            PrepareParams {
+                input_amount,
+                output_amount: u256_from_u128(output_amount_u128),
+                ..default_prepare_params(&fx)
+            },
+        )
+        .expect("above-u64::MAX output on a properly-scaled cross-decimal route should succeed");
+
+    let ev = extract_deposit_prepared(&meta.logs).expect("DepositPrepared event must be emitted");
+    assert_eq!(ev.input_amount, input_amount);
+    assert_eq!(ev.output_amount, u256_from_u128(output_amount_u128));
+}
+
+#[test]
+fn validate_and_prepare_rejects_output_amount_above_u128_max() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+
+    // u128::MAX + 1 in the [u8; 32] big-endian wire form: a single 1 in the upper-most byte.
+    let mut over_u128 = [0u8; 32];
+    over_u128[0] = 1;
+
+    let err = fx
+        .invoke(
+            &mut svm,
+            PrepareParams {
+                output_amount: over_u128,
+                ..default_prepare_params(&fx)
+            },
+        )
+        .expect_err("output_amount above u128 must reject")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::OutputAmountOverflow.into()),
+        )
+    );
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.owner_ata),
+        OWNER_STARTING_BALANCE
     );
 }
 
@@ -1014,7 +1084,7 @@ fn validate_and_prepare_insufficient_balance_rejected() {
             &mut svm,
             PrepareParams {
                 input_amount: over_balance,
-                output_amount: over_balance,
+                output_amount: u256_from_u64(over_balance),
                 ..default_prepare_params(&fx)
             },
         )
@@ -1040,7 +1110,7 @@ fn validate_and_prepare_sequential_nonce_increments() {
 
     let mut params = default_prepare_params(&fx);
     params.input_amount = 100_000;
-    params.output_amount = 99_500;
+    params.output_amount = u256_from_u64(99_500);
 
     for expected_pre_nonce in 0u64..3 {
         let meta = fx
@@ -1075,9 +1145,9 @@ fn validate_and_prepare_sequential_nonce_increments() {
 fn validate_and_prepare_slippage_boundary_succeeds() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    let min_acceptable = 995_000;
+    let min_acceptable: u64 = 995_000;
     let params = PrepareParams {
-        output_amount: min_acceptable,
+        output_amount: u256_from_u64(min_acceptable),
         ..default_prepare_params(&fx)
     };
 
@@ -1086,7 +1156,7 @@ fn validate_and_prepare_slippage_boundary_succeeds() {
         .expect("boundary slippage output must succeed");
 
     let ev = extract_deposit_prepared(&meta.logs).expect("DepositPrepared event");
-    assert_eq!(ev.output_amount, min_acceptable);
+    assert_eq!(ev.output_amount, u256_from_u64(min_acceptable));
     assert_eq!(ev.nonce, 0);
     assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 1);
 }

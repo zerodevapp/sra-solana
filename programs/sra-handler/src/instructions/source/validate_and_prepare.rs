@@ -33,10 +33,23 @@ fn validate_adapter_program(adapter_program: &AccountInfo) -> Result<()> {
     Ok(())
 }
 
+/// Decode the [u8; 32] big-endian wire value into the internal u128 used by
+/// the slippage helper. Rejects values whose upper 16 bytes are non-zero.
+/// u128 holds every realistic token amount (~3.4e20 of an 18-decimal mint).
+fn decode_output_amount(output_amount: &[u8; 32]) -> Result<u128> {
+    require!(
+        output_amount[..16].iter().all(|&b| b == 0),
+        SraError::OutputAmountOverflow
+    );
+    let mut lower = [0u8; 16];
+    lower.copy_from_slice(&output_amount[16..]);
+    Ok(u128::from_be_bytes(lower))
+}
+
 fn output_satisfies_slippage_floor(
     input_amount: u64,
     input_decimals: u8,
-    output_amount: u64,
+    output_amount: u128,
     output_decimals: u8,
     slippage_bps: u16,
 ) -> Result<bool> {
@@ -48,19 +61,21 @@ fn output_satisfies_slippage_floor(
 
     if input_decimals >= output_decimals {
         let min_acceptable = scaled_input / denom;
-        let mut scaled_output = output_amount as u128;
+        let mut scaled_output = output_amount;
 
         for _ in 0..(input_decimals - output_decimals) {
             if scaled_output >= min_acceptable {
                 return Ok(true);
             }
-            scaled_output *= 10;
+            scaled_output = scaled_output
+                .checked_mul(10)
+                .ok_or(SraError::ArithmeticOverflow)?;
         }
 
         return Ok(scaled_output >= min_acceptable);
     }
 
-    let output = output_amount as u128;
+    let output = output_amount;
     let mut min_acceptable = scaled_input / denom;
     let mut remainder = scaled_input % denom;
 
@@ -225,11 +240,12 @@ pub(crate) fn handler(
     }
 
     // Compare the decimal-normalized slippage floor without scaling into overflowing intermediates.
+    let output_amount_u128 = decode_output_amount(&params.output_amount)?;
     require!(
         output_satisfies_slippage_floor(
             params.input_amount,
             ctx.accounts.source_mint.decimals,
-            params.output_amount,
+            output_amount_u128,
             ctx.accounts.address_book_entry.target_decimals,
             handler_data.allowed_slippage_bps,
         )?,
