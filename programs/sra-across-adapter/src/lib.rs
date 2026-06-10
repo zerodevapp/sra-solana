@@ -20,4 +20,8 @@ pub mod sra_across_adapter {
     ) -> Result<()> {
         instructions::execute_deposit::handler(ctx, params)
     }
+
+    pub fn recover_stuck_custody(ctx: Context<RecoverStuckCustody>) -> Result<()> {
+        instructions::recover_custody::handler(ctx)
+    }
 }

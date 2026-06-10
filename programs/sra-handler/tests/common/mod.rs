@@ -804,6 +804,32 @@ pub fn execute_deposit_across_ix(
     }
 }
 
+pub fn recover_stuck_custody_ix(
+    fee_payer: &Pubkey,
+    owner: &Pubkey,
+    sra_config: &Pubkey,
+    adapter_authority: &Pubkey,
+    mint: &Pubkey,
+    adapter_custody: &Pubkey,
+    owner_token_account: &Pubkey,
+) -> Instruction {
+    Instruction {
+        program_id: ADAPTER_PROGRAM_ID,
+        accounts: sra_across_adapter::accounts::RecoverStuckCustody {
+            fee_payer: *fee_payer,
+            owner: *owner,
+            sra_config: *sra_config,
+            adapter_authority: *adapter_authority,
+            mint: *mint,
+            adapter_custody: *adapter_custody,
+            owner_token_account: *owner_token_account,
+            token_program: TOKEN_PROGRAM_ID,
+        }
+        .to_account_metas(None),
+        data: sra_across_adapter::instruction::RecoverStuckCustody {}.data(),
+    }
+}
+
 pub fn compute_budget_ix() -> Instruction {
     ComputeBudgetInstruction::set_compute_unit_limit(400_000)
 }

@@ -98,12 +98,83 @@ pub fn handler_output_amount_u256(output_amount: u64) -> [u8; 32] {
     u256_from_u64(output_amount)
 }
 
+/// M-05: Bound the user-supplied Across timing params before they are forwarded
+/// to `deposit_now`. A tiny `fill_deadline_offset` forces instant expiry, which
+/// makes Across refund the depositor (`adapter_custody`), stranding funds.
+pub fn validate_across_timing(
+    fill_deadline_offset: u32,
+    exclusivity_period: u32,
+) -> anchor_lang::Result<()> {
+    use crate::constants::{MAX_FILL_DEADLINE_OFFSET, MIN_FILL_DEADLINE_OFFSET};
+    use crate::errors::SraError;
+    anchor_lang::require!(
+        fill_deadline_offset >= MIN_FILL_DEADLINE_OFFSET,
+        SraError::FillDeadlineTooShort
+    );
+    anchor_lang::require!(
+        fill_deadline_offset <= MAX_FILL_DEADLINE_OFFSET,
+        SraError::FillDeadlineTooLong
+    );
+    anchor_lang::require!(
+        exclusivity_period <= fill_deadline_offset,
+        SraError::ExclusivityExceedsDeadline
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::errors::SraError;
 
     #[test]
     fn handler_output_is_promoted_to_u256() {
         assert_eq!(handler_output_amount_u256(0x1234)[30..], [0x12, 0x34]);
     }
+
+    fn assert_timing_err(result: anchor_lang::Result<()>, expected: &str) {
+        match result.unwrap_err() {
+            anchor_lang::error::Error::AnchorError(anchor_err) => {
+                assert_eq!(anchor_err.error_name, expected);
+            }
+            other => panic!("expected AnchorError {expected}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_across_timing_rejects_too_short_deadline() {
+        assert_timing_err(validate_across_timing(299, 0), "FillDeadlineTooShort");
+    }
+
+    #[test]
+    fn validate_across_timing_accepts_min_deadline() {
+        validate_across_timing(300, 0).expect("min deadline must be accepted");
+    }
+
+    #[test]
+    fn validate_across_timing_accepts_max_deadline() {
+        validate_across_timing(21_600, 0).expect("max deadline must be accepted");
+    }
+
+    #[test]
+    fn validate_across_timing_rejects_too_long_deadline() {
+        assert_timing_err(validate_across_timing(21_601, 0), "FillDeadlineTooLong");
+    }
+
+    #[test]
+    fn validate_across_timing_accepts_exclusivity_equal_to_deadline() {
+        validate_across_timing(300, 300).expect("exclusivity == deadline must be accepted");
+    }
+
+    #[test]
+    fn validate_across_timing_rejects_exclusivity_above_deadline() {
+        assert_timing_err(
+            validate_across_timing(300, 301),
+            "ExclusivityExceedsDeadline",
+        );
+    }
+
+    // Keep the linter aware these are referenced from production code paths.
+    const _: fn(u32, u32) -> anchor_lang::Result<()> = validate_across_timing;
+    const _: SraError = SraError::FillDeadlineTooShort;
 }

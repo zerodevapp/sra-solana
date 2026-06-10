@@ -31,3 +31,12 @@ pub const USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTD
 
 /// Across SVM SpokePool program ID on mainnet.
 pub const ACROSS_SPOKE_POOL_ID: Pubkey = pubkey!("DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru");
+
+/// M-05: Minimum Across `fill_deadline_offset` (seconds). A shorter offset is a
+/// forced-expiry red flag — a tiny deadline makes the deposit expire instantly,
+/// triggering an Across refund to `adapter_custody` where funds get stranded.
+pub const MIN_FILL_DEADLINE_OFFSET: u32 = 300;
+
+/// M-05: Maximum Across `fill_deadline_offset` (seconds, 6h). Generous upper
+/// bound; anything larger is rejected as unreasonable.
+pub const MAX_FILL_DEADLINE_OFFSET: u32 = 21_600;

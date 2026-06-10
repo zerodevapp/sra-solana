@@ -10,4 +10,7 @@ pub enum AcrossAdapterError {
 
     #[msg("Delegate account does not match the derived Across PDA")]
     InvalidDelegateAccount,
+
+    #[msg("No tokens in adapter custody to recover")]
+    NothingToRecover,
 }

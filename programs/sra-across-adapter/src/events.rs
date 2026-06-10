@@ -16,3 +16,11 @@ pub struct AcrossDepositExecuted {
     pub fill_deadline_offset: u32,
     pub exclusivity_period: u32,
 }
+
+#[event]
+pub struct CustodyRecovered {
+    pub sra_config: Pubkey,
+    pub mint: Pubkey,
+    pub owner: Pubkey,
+    pub amount: u64,
+}
