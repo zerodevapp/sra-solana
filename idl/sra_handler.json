@@ -1112,6 +1112,18 @@
     },
     {
       "name": "SourceHandlerData",
+      "docs": [
+        "Owner-installed source policy. Committed at SRA install via",
+        "`handler_data_hash` (folded into the SRA's PDA identity) and re-supplied,",
+        "then re-authenticated, on every deposit. The routing tuple",
+        "(`target_chain_id` / `target_handler` / `target_adapter` / `recipient` /",
+        "`app_id` / `target_token`) is part of the immutable identity, mirroring the",
+        "EVM `RouteConfig` that `trigger()` reads from storage and a caller cannot",
+        "redirect (see `sra-stx/src/handler/SRAHandler.sol`). Every deposit must echo",
+        "this exact routing in `PrepareParams`; `validate_and_prepare` rejects any",
+        "divergence. Changing the route means a new SRA at a new address — the Solana",
+        "analogue of the EVM clone-proxy + `_onInstall` model."
+      ],
       "type": {
         "kind": "struct",
         "fields": [
@@ -1120,7 +1132,47 @@
             "type": "pubkey"
           },
           {
-            "name": "fallback_recipient",
+            "name": "target_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "target_handler",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_adapter",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "recipient",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_token",
             "type": {
               "array": [
                 "u8",
@@ -1136,15 +1188,6 @@
             "name": "allowed_adapters",
             "type": {
               "vec": "pubkey"
-            }
-          },
-          {
-            "name": "action_config_hash",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
             }
           }
         ]
