@@ -78,9 +78,7 @@ pub struct ExecuteDepositAcross<'info> {
 /// bundle is built from the verified prepare data plus the Across-specific
 /// execution fields in `params`.
 pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) -> Result<()> {
-    // M-05: bound user-supplied Across timing before anything else so a tiny
-    // fill_deadline_offset can never force an instant-expiry refund into
-    // adapter_custody.
+    // Reject unreasonable Across timing before any token movement.
     sra_common::source_deposit::validate_across_timing(
         params.fill_deadline_offset,
         params.exclusivity_period,

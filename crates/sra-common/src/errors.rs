@@ -82,7 +82,7 @@ pub enum SraError {
     #[msg("Source handler data does not match immutable SRA identity")]
     InvalidHandlerData,
 
-    // -- M-05: Across timing bounds (appended to keep prior codes stable) --
+    // -- Across timing bounds (appended to keep prior codes stable) --
     #[msg("Across fill deadline offset below minimum")]
     FillDeadlineTooShort,
 

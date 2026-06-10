@@ -5,10 +5,8 @@ use sra_common::{seeds::SEED_ADAPTER_AUTHORITY, types::SraConfig};
 use crate::events::CustodyRecovered;
 use crate::AcrossAdapterError;
 
-/// M-05 (Part 2): Lets the SRA owner pull stranded tokens out of
-/// `adapter_custody` back to their own ATA. This MUST live in the adapter
-/// program because `adapter_custody` is owned by the `adapter_authority` PDA,
-/// which only the adapter program can sign for.
+/// Owner-gated recovery: drains a stranded `adapter_custody` refund back to the
+/// owner's ATA, signed by the `adapter_authority` PDA (adapter-only).
 #[derive(Accounts)]
 pub struct RecoverStuckCustody<'info> {
     /// Pays the tx fee (gas-sponsorship parity with the deposit flow).

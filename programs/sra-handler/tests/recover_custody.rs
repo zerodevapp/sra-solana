@@ -6,8 +6,7 @@ use solana_sdk::{instruction::InstructionError, signer::Signer, transaction::Tra
 
 const STRANDED_AMOUNT: u64 = 500_000;
 
-/// M-05 (Part 2): the SRA owner can pull a stranded Across refund out of
-/// `adapter_custody` back to their own ATA.
+/// Owner can recover a stranded Across refund from `adapter_custody`.
 #[test]
 fn recover_stuck_custody_returns_funds_to_owner() {
     let mut svm = setup_svm();
@@ -88,8 +87,7 @@ fn recover_stuck_custody_nothing_to_recover_rejected() {
     );
 }
 
-/// Only the SRA owner may recover; a non-owner signer is rejected by the
-/// `has_one = owner` constraint (Anchor `ConstraintHasOne` = 2001).
+/// Only the SRA owner may recover; a non-owner is rejected by has_one = owner.
 #[test]
 fn recover_stuck_custody_non_owner_rejected() {
     let mut svm = setup_svm();

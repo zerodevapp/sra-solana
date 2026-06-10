@@ -98,9 +98,8 @@ pub fn handler_output_amount_u256(output_amount: u64) -> [u8; 32] {
     u256_from_u64(output_amount)
 }
 
-/// M-05: Bound the user-supplied Across timing params before they are forwarded
-/// to `deposit_now`. A tiny `fill_deadline_offset` forces instant expiry, which
-/// makes Across refund the depositor (`adapter_custody`), stranding funds.
+/// Bound user-supplied Across timing: a too-short `fill_deadline_offset` forces
+/// instant expiry and strands the refund in `adapter_custody`.
 pub fn validate_across_timing(
     fill_deadline_offset: u32,
     exclusivity_period: u32,
