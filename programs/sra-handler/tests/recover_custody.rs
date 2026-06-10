@@ -1,5 +1,6 @@
 mod common;
 
+use anchor_lang::error::ErrorCode;
 use common::*;
 use solana_sdk::{instruction::InstructionError, signer::Signer, transaction::TransactionError};
 
@@ -131,7 +132,10 @@ fn recover_stuck_custody_non_owner_rejected() {
 
     assert_eq!(
         err,
-        TransactionError::InstructionError(0, InstructionError::Custom(2001)),
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(ErrorCode::ConstraintHasOne as u32),
+        ),
         "Anchor has_one = owner constraint violation (ConstraintHasOne)",
     );
 
