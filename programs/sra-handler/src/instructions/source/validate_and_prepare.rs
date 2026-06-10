@@ -186,7 +186,7 @@ pub(crate) fn handler(
         SraError::InvalidAddressBook
     );
 
-    // M-02 / EVM RouteConfig parity: the routing tuple is committed at install
+    // EVM RouteConfig parity: the routing tuple is committed at install
     // (folded into the SRA identity via `handler_data.hash()`, verified above).
     // A deposit must echo the committed route exactly — it cannot redirect to a
     // different chain, handler, adapter, recipient, app, or target token. This

@@ -1228,7 +1228,7 @@ fn validate_and_prepare_multi_mint_single_sra_independent_nonces() {
 
 #[test]
 fn validate_and_prepare_route_mismatch_rejected() {
-    // M-02 / EVM RouteConfig parity: routing is committed at install (folded into
+    // EVM RouteConfig parity: routing is committed at install (folded into
     // the SRA identity via handler_data_hash). A deposit whose params diverge from
     // the committed route on ANY field must be rejected before funds move — a
     // compromised tx-builder must not be able to redirect a deposit the way it
