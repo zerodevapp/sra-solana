@@ -111,10 +111,14 @@ pub fn sample_target_token() -> [u8; 32] {
 pub fn sample_handler_data(address_book_root: Pubkey) -> SourceHandlerData {
     SourceHandlerData {
         address_book_root,
-        fallback_recipient: evm_bytes32(0xF0),
+        target_chain_id: 42_161,
+        target_handler: evm_bytes32(0x11),
+        target_adapter: evm_bytes32(0x22),
+        recipient: evm_bytes32(0x33),
+        app_id: [0x44u8; 32],
+        target_token: sample_target_token(),
         allowed_slippage_bps: 50,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
-        action_config_hash: [0x44u8; 32],
     }
 }
 
@@ -620,12 +624,18 @@ impl ValidatePrepareFixture {
         let owner = funded_keypair(svm, SOL);
 
         let address_book_root = init_address_book_root(svm, &payer, &owner);
+        let target_chain_id = 42_161;
+        let target_token = sample_target_token();
         let handler_data = SourceHandlerData {
             address_book_root,
-            fallback_recipient: evm_bytes32(0xF0),
+            target_chain_id,
+            target_handler: evm_bytes32(0x11),
+            target_adapter: evm_bytes32(0x22),
+            recipient: evm_bytes32(0x33),
+            app_id: [0x44u8; 32],
+            target_token,
             allowed_slippage_bps,
             allowed_adapters,
-            action_config_hash: [0x55u8; 32],
         };
         let salt = [0xABu8; 32];
         let sra_config = init_sra_with(
@@ -638,8 +648,6 @@ impl ValidatePrepareFixture {
         );
 
         let source_mint = create_mint(svm, &payer, &payer.pubkey(), source_decimals);
-        let target_chain_id = 42_161;
-        let target_token = sample_target_token();
         setup_address_book_entry(
             svm,
             &payer,

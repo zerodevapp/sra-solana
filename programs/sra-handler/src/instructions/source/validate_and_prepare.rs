@@ -186,6 +186,22 @@ pub(crate) fn handler(
         SraError::InvalidAddressBook
     );
 
+    // M-02 / EVM RouteConfig parity: the routing tuple is committed at install
+    // (folded into the SRA identity via `handler_data.hash()`, verified above).
+    // A deposit must echo the committed route exactly — it cannot redirect to a
+    // different chain, handler, adapter, recipient, app, or target token. This
+    // mirrors EVM `trigger()` reading routing from stored `RouteConfig` rather
+    // than from caller-supplied params (sra-stx/src/handler/SRAHandler.sol).
+    require!(
+        handler_data.target_chain_id == params.target_chain_id
+            && handler_data.target_handler == params.target_handler
+            && handler_data.target_adapter == params.target_adapter
+            && handler_data.recipient == params.recipient
+            && handler_data.app_id == params.app_id
+            && handler_data.target_token == params.target_token,
+        SraError::RouteMismatch
+    );
+
     validate_adapter_program(&ctx.accounts.adapter_program.to_account_info())?;
     let adapter_key = ctx.accounts.adapter_program.key();
     require!(

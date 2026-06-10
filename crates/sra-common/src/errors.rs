@@ -81,4 +81,7 @@ pub enum SraError {
 
     #[msg("Source handler data does not match immutable SRA identity")]
     InvalidHandlerData,
+
+    #[msg("Deposit routing does not match the committed SRA route")]
+    RouteMismatch,
 }
