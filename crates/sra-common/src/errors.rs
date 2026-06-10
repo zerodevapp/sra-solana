@@ -84,4 +84,7 @@ pub enum SraError {
 
     #[msg("Deposit routing does not match the committed SRA route")]
     RouteMismatch,
+
+    #[msg("Committed recipient must be non-zero")]
+    InvalidRecipient,
 }

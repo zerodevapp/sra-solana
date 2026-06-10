@@ -39,6 +39,8 @@ impl SourceHandlerData {
             self.allowed_slippage_bps <= MAX_SLIPPAGE_BPS,
             SraError::InvalidSlippage
         );
+        // A zero recipient bridges funds to the dead address on the target chain.
+        require!(self.recipient != [0u8; 32], SraError::InvalidRecipient);
         Ok(())
     }
 

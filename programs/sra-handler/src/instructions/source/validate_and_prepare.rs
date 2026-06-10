@@ -256,9 +256,11 @@ pub(crate) fn handler(
 
     // Transfer from the SRA vault into adapter custody.
     {
-        let ch = handler_data.config_hash(
+        // Reuse the already-verified stored hash; re-hashing handler_data here is redundant.
+        let ch = sra_common::seeds::config_hash(
             &ctx.accounts.sra_config.owner,
             &ctx.accounts.sra_config.final_handler,
+            &ctx.accounts.sra_config.handler_data_hash,
         );
         let owner_bytes = ctx.accounts.sra_config.owner.to_bytes();
         let salt = ctx.accounts.sra_config.salt;
