@@ -104,15 +104,11 @@ pub fn validate_across_timing(
     fill_deadline_offset: u32,
     exclusivity_period: u32,
 ) -> anchor_lang::Result<()> {
-    use crate::constants::{MAX_FILL_DEADLINE_OFFSET, MIN_FILL_DEADLINE_OFFSET};
+    use crate::constants::MIN_FILL_DEADLINE_OFFSET;
     use crate::errors::SraError;
     anchor_lang::require!(
         fill_deadline_offset >= MIN_FILL_DEADLINE_OFFSET,
         SraError::FillDeadlineTooShort
-    );
-    anchor_lang::require!(
-        fill_deadline_offset <= MAX_FILL_DEADLINE_OFFSET,
-        SraError::FillDeadlineTooLong
     );
     anchor_lang::require!(
         exclusivity_period <= fill_deadline_offset,
@@ -124,7 +120,6 @@ pub fn validate_across_timing(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::errors::SraError;
 
     #[test]
     fn handler_output_is_promoted_to_u256() {
@@ -151,16 +146,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_across_timing_accepts_max_deadline() {
-        validate_across_timing(21_600, 0).expect("max deadline must be accepted");
-    }
-
-    #[test]
-    fn validate_across_timing_rejects_too_long_deadline() {
-        assert_timing_err(validate_across_timing(21_601, 0), "FillDeadlineTooLong");
-    }
-
-    #[test]
     fn validate_across_timing_accepts_exclusivity_equal_to_deadline() {
         validate_across_timing(300, 300).expect("exclusivity == deadline must be accepted");
     }
@@ -172,8 +157,4 @@ mod tests {
             "ExclusivityExceedsDeadline",
         );
     }
-
-    // Keep the linter aware these are referenced from production code paths.
-    const _: fn(u32, u32) -> anchor_lang::Result<()> = validate_across_timing;
-    const _: SraError = SraError::FillDeadlineTooShort;
 }

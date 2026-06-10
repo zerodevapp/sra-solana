@@ -86,9 +86,6 @@ pub enum SraError {
     #[msg("Across fill deadline offset below minimum")]
     FillDeadlineTooShort,
 
-    #[msg("Across fill deadline offset above maximum")]
-    FillDeadlineTooLong,
-
     #[msg("Across exclusivity period exceeds fill deadline offset")]
     ExclusivityExceedsDeadline,
 }

@@ -1,9 +1,7 @@
 pub mod execute_deposit;
 pub mod recover_custody;
 
-// Both modules export a `handler`; lib.rs calls them by fully-qualified path,
-// so the ambiguous glob symbol is never used.
-#[allow(ambiguous_glob_reexports)]
-pub use execute_deposit::*;
-#[allow(ambiguous_glob_reexports)]
-pub use recover_custody::*;
+pub use execute_deposit::ExecuteDepositAcross;
+pub(crate) use execute_deposit::__client_accounts_execute_deposit_across;
+pub use recover_custody::RecoverStuckCustody;
+pub(crate) use recover_custody::__client_accounts_recover_stuck_custody;
