@@ -3,16 +3,13 @@ use anchor_lang::prelude::*;
 use crate::abi::u256_from_u64;
 use crate::types::SourceHandlerData;
 
+/// Per-deposit inputs. Routing is NOT here: it lives in the authenticated
+/// `SourceHandlerData` (committed into the SRA identity), so a deposit cannot
+/// redirect funds. Only the amounts and action selection vary per deposit.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PrepareParams {
     pub input_amount: u64,
     pub output_amount: u64,
-    pub target_chain_id: u64,
-    pub target_handler: [u8; 32],
-    pub target_adapter: [u8; 32],
-    pub recipient: [u8; 32],
-    pub app_id: [u8; 32],
-    pub target_token: [u8; 32],
     pub action_idxs: Vec<u64>,
 }
 
@@ -44,35 +41,21 @@ pub struct AcrossDepositParams {
 }
 
 impl PrepareParams {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        input_amount: u64,
-        output_amount: u64,
-        target_chain_id: u64,
-        target_handler: [u8; 32],
-        target_adapter: [u8; 32],
-        recipient: [u8; 32],
-        app_id: [u8; 32],
-        target_token: [u8; 32],
-        action_idxs: Vec<u64>,
-    ) -> Self {
+    pub fn new(input_amount: u64, output_amount: u64, action_idxs: Vec<u64>) -> Self {
         Self {
             input_amount,
             output_amount,
-            target_chain_id,
-            target_handler,
-            target_adapter,
-            recipient,
-            app_id,
-            target_token,
             action_idxs,
         }
     }
 }
 
 impl AcrossDepositParams {
+    /// Routing is taken from the authenticated `handler_data` (the committed
+    /// route), never from per-deposit input.
     pub fn from_prepare(
         prepare: &PrepareParams,
+        handler_data: &SourceHandlerData,
         exclusive_relayer: Pubkey,
         fill_deadline_offset: u32,
         exclusivity_period: u32,
@@ -80,12 +63,12 @@ impl AcrossDepositParams {
         Self {
             input_amount: prepare.input_amount,
             output_amount: handler_output_amount_u256(prepare.output_amount),
-            target_chain_id: prepare.target_chain_id,
-            target_handler: prepare.target_handler,
-            target_adapter: prepare.target_adapter,
-            recipient: prepare.recipient,
-            app_id: prepare.app_id,
-            target_token: prepare.target_token,
+            target_chain_id: handler_data.target_chain_id,
+            target_handler: handler_data.target_handler,
+            target_adapter: handler_data.target_adapter,
+            recipient: handler_data.recipient,
+            app_id: handler_data.app_id,
+            target_token: handler_data.target_token,
             action_idxs: prepare.action_idxs.clone(),
             exclusive_relayer,
             fill_deadline_offset,

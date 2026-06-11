@@ -87,7 +87,7 @@ pub use sra_common::source_deposit::PrepareParams;
 /// Validates a source deposit, moves funds into adapter custody, and emits the
 /// routing inputs consumed by the paired adapter instruction.
 #[derive(Accounts)]
-#[instruction(_handler_data: SourceHandlerData, params: PrepareParams)]
+#[instruction(handler_data: SourceHandlerData)]
 pub struct ValidateAndPrepare<'info> {
     /// Pays tx fees. Separated from `owner` to enable gas sponsorship.
     #[account(mut)]
@@ -148,8 +148,8 @@ pub struct ValidateAndPrepare<'info> {
             SEED_ADDRESS_BOOK,
             address_book_root.key().as_ref(),
             source_mint.key().as_ref(),
-            &params.target_chain_id.to_le_bytes(),
-            &params.target_token,
+            &handler_data.target_chain_id.to_le_bytes(),
+            &handler_data.target_token,
         ],
         bump = address_book_entry.bump,
     )]
@@ -184,22 +184,6 @@ pub(crate) fn handler(
     require!(
         handler_data.address_book_root == ctx.accounts.address_book_root.key(),
         SraError::InvalidAddressBook
-    );
-
-    // EVM RouteConfig parity: the routing tuple is committed at install
-    // (folded into the SRA identity via `handler_data.hash()`, verified above).
-    // A deposit must echo the committed route exactly — it cannot redirect to a
-    // different chain, handler, adapter, recipient, app, or target token. This
-    // mirrors EVM `trigger()` reading routing from stored `RouteConfig` rather
-    // than from caller-supplied params (sra-stx/src/handler/SRAHandler.sol).
-    require!(
-        handler_data.target_chain_id == params.target_chain_id
-            && handler_data.target_handler == params.target_handler
-            && handler_data.target_adapter == params.target_adapter
-            && handler_data.recipient == params.recipient
-            && handler_data.app_id == params.app_id
-            && handler_data.target_token == params.target_token,
-        SraError::RouteMismatch
     );
 
     validate_adapter_program(&ctx.accounts.adapter_program.to_account_info())?;
@@ -309,12 +293,12 @@ pub(crate) fn handler(
         nonce: nonce_now,
         input_amount: params.input_amount,
         output_amount: params.output_amount,
-        target_chain_id: params.target_chain_id,
-        target_handler: params.target_handler,
-        target_adapter: params.target_adapter,
-        recipient: params.recipient,
-        app_id: params.app_id,
-        target_token: params.target_token,
+        target_chain_id: handler_data.target_chain_id,
+        target_handler: handler_data.target_handler,
+        target_adapter: handler_data.target_adapter,
+        recipient: handler_data.recipient,
+        app_id: handler_data.app_id,
+        target_token: handler_data.target_token,
         action_idxs: params.action_idxs,
     });
 

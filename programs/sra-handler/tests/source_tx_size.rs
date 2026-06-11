@@ -24,7 +24,7 @@ fn build_source_versioned_tx_with_lookup_tables(
     params: PrepareParams,
     lookup_tables: &[AddressLookupTableAccount],
 ) -> VersionedTransaction {
-    let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
+    let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let execute_ix = execute_deposit_across_ix(
         &fx.payer.pubkey(),
         fx,
@@ -63,7 +63,7 @@ fn build_source_versioned_tx(
     fx: &ValidatePrepareFixture,
     params: PrepareParams,
 ) -> VersionedTransaction {
-    let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
+    let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let execute_ix = execute_deposit_across_ix(
         &fx.payer.pubkey(),
         fx,
@@ -110,7 +110,6 @@ fn source_2ix_versioned_tx_max_action_idxs_fits_within_packet_limit() {
         input_amount: INPUT,
         output_amount: OUTPUT_WITHIN_SLIPPAGE,
         action_idxs: (0..MAX_ACTION_IDXS as u64).collect(),
-        ..sample_prepare_params(fx.target_token)
     };
 
     let tx = build_source_versioned_tx(&mut svm, &fx, params);
@@ -135,7 +134,6 @@ fn source_2ix_versioned_tx_empty_action_idxs_fits_within_packet_limit() {
         input_amount: INPUT,
         output_amount: OUTPUT_WITHIN_SLIPPAGE,
         action_idxs: vec![],
-        ..sample_prepare_params(fx.target_token)
     };
 
     let tx = build_source_versioned_tx(&mut svm, &fx, params);
@@ -157,7 +155,6 @@ fn source_2ix_versioned_tx_empty_action_idxs_exceeds_packet_limit_without_alt() 
         input_amount: INPUT,
         output_amount: OUTPUT_WITHIN_SLIPPAGE,
         action_idxs: vec![],
-        ..sample_prepare_params(fx.target_token)
     };
 
     let tx = build_source_versioned_tx_without_alt(&mut svm, &fx, params);

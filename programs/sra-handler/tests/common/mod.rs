@@ -122,18 +122,8 @@ pub fn sample_handler_data(address_book_root: Pubkey) -> SourceHandlerData {
     }
 }
 
-pub fn sample_prepare_params(target_token: [u8; 32]) -> PrepareParams {
-    PrepareParams::new(
-        1_000_000,
-        999_500,
-        42_161,
-        evm_bytes32(0x11),
-        evm_bytes32(0x22),
-        evm_bytes32(0x33),
-        [0x44u8; 32],
-        target_token,
-        DEFAULT_ACTION_IDXS.to_vec(),
-    )
+pub fn sample_prepare_params() -> PrepareParams {
+    PrepareParams::new(1_000_000, 999_500, DEFAULT_ACTION_IDXS.to_vec())
 }
 
 pub fn representative_lookup_table(ixs: &[Instruction]) -> AddressLookupTableAccount {
@@ -744,7 +734,7 @@ impl ValidatePrepareFixture {
             current_nonce(svm, &self.accounts.mint_nonce),
         );
         let address_book_entry =
-            self.address_book_entry(params.target_chain_id, &params.target_token);
+            self.address_book_entry(handler_data.target_chain_id, &handler_data.target_token);
         let validate_ix = validate_and_prepare_ix(
             &self.payer.pubkey(),
             &self.owner.pubkey(),
@@ -768,7 +758,7 @@ pub fn across_params_for(
     fx: &ValidatePrepareFixture,
     params: &PrepareParams,
 ) -> AcrossDepositParams {
-    AcrossDepositParams::from_prepare(params, fx.payer.pubkey(), 3_600, 900)
+    AcrossDepositParams::from_prepare(params, &fx.handler_data, fx.payer.pubkey(), 3_600, 900)
 }
 
 pub fn execute_deposit_across_ix(

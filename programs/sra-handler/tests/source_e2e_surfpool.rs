@@ -48,8 +48,8 @@ fn surfpool_log(message: impl AsRef<str>) {
     eprintln!("[surfpool-test] {}", message.as_ref());
 }
 
-fn default_prepare_params_rpc(fx: &SurfpoolSourceFixture) -> PrepareParams {
-    let mut params = sample_prepare_params(fx.target_token);
+fn default_prepare_params_rpc(_fx: &SurfpoolSourceFixture) -> PrepareParams {
+    let mut params = sample_prepare_params();
     params.input_amount = INPUT_AMOUNT;
     params.output_amount = OUTPUT_WITHIN_SLIPPAGE;
     params
@@ -244,7 +244,7 @@ impl SurfpoolSourceFixture {
         let address_book_root_pubkey = address_book_root.pubkey();
         let handler_data = sample_handler_data(address_book_root_pubkey);
         let target_token = sample_target_token();
-        let target_chain_id = sample_prepare_params(target_token).target_chain_id;
+        let target_chain_id = handler_data.target_chain_id;
         let salt = [0xAB; 32];
         let (sra_config, _) = derive_sra_pda(&owner.pubkey(), &handler_data, &salt);
         let accounts =
@@ -409,7 +409,7 @@ impl SurfpoolSourceFixture {
         let current_nonce = self.current_nonce()?;
         surfpool_log(format!(
             "invoke_source_flow: starting for target_chain_id={} input_amount={} output_amount={} current_nonce={}",
-            params.target_chain_id,
+            self.handler_data.target_chain_id,
             params.input_amount,
             params.output_amount,
             current_nonce
@@ -417,8 +417,8 @@ impl SurfpoolSourceFixture {
         let address_book_entry = derive_address_book_pda(
             &self.address_book_root,
             &USDC_MINT,
-            params.target_chain_id,
-            &params.target_token,
+            self.handler_data.target_chain_id,
+            &self.target_token,
         )
         .0;
         let execute_ix = execute_deposit_across_ix(
@@ -430,7 +430,7 @@ impl SurfpoolSourceFixture {
                 handler_data: self.handler_data.clone(),
                 sra_config: self.sra_config,
                 source_mint: USDC_MINT,
-                target_chain_id: params.target_chain_id,
+                target_chain_id: self.handler_data.target_chain_id,
                 target_token: self.target_token,
                 adapter_program: ADAPTER_PROGRAM_ID,
                 accounts: self.accounts.clone(),
@@ -442,6 +442,7 @@ impl SurfpoolSourceFixture {
             &params,
             AcrossDepositParams::from_prepare(
                 &params,
+                &self.handler_data,
                 self.payer.pubkey(),
                 FILL_DEADLINE_OFFSET_SECS,
                 EXCLUSIVITY_PERIOD_SECS,

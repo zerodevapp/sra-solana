@@ -13,6 +13,7 @@ use anchor_lang::{
 };
 
 use crate::source_deposit::{AcrossDepositParams, PrepareParams};
+use crate::types::SourceHandlerData;
 
 pub const DEFAULT_ACTION_IDXS: [u64; 2] = [3, 7];
 
@@ -64,22 +65,32 @@ pub fn empty_instruction() -> Instruction {
     }
 }
 
+pub fn sample_handler_data() -> SourceHandlerData {
+    SourceHandlerData {
+        address_book_root: Pubkey::new_unique(),
+        target_chain_id: 42_161,
+        target_handler: evm_bytes32(0x11),
+        target_adapter: evm_bytes32(0x22),
+        recipient: evm_bytes32(0x33),
+        app_id: [0x44u8; 32],
+        target_token: evm_bytes32(0xAB),
+        allowed_slippage_bps: 50,
+        allowed_adapters: vec![Pubkey::new_unique()],
+    }
+}
+
 pub fn sample_prepare_params() -> PrepareParams {
-    PrepareParams::new(
-        123,
-        456,
-        42_161,
-        evm_bytes32(0x11),
-        evm_bytes32(0x22),
-        evm_bytes32(0x33),
-        [0x44u8; 32],
-        evm_bytes32(0xAB),
-        DEFAULT_ACTION_IDXS.to_vec(),
-    )
+    PrepareParams::new(123, 456, DEFAULT_ACTION_IDXS.to_vec())
 }
 
 pub fn sample_across_deposit(prepare: &PrepareParams) -> AcrossDepositParams {
-    AcrossDepositParams::from_prepare(prepare, Pubkey::new_unique(), 60, 30)
+    AcrossDepositParams::from_prepare(
+        prepare,
+        &sample_handler_data(),
+        Pubkey::new_unique(),
+        60,
+        30,
+    )
 }
 
 fn borrow_instruction(ix: &Instruction) -> BorrowedInstruction<'_> {

@@ -61,6 +61,7 @@ pub(crate) fn verify_previous_handler_ix(
     require!(
         AcrossDepositParams::from_prepare(
             &args.params,
+            &args.handler_data,
             deposit.exclusive_relayer,
             deposit.fill_deadline_offset,
             deposit.exclusivity_period,
@@ -80,25 +81,10 @@ mod tests {
     use sra_common::{
         instruction_data::{encode_anchor_instruction_data, instruction_data_hash},
         test_utils::{
-            empty_instruction, sample_across_deposit, sample_prepare_params,
+            empty_instruction, sample_across_deposit, sample_handler_data, sample_prepare_params,
             InstructionsSysvarFixture,
         },
-        types::SourceHandlerData,
     };
-
-    fn sample_handler_data() -> SourceHandlerData {
-        SourceHandlerData {
-            address_book_root: Pubkey::new_unique(),
-            target_chain_id: 42_161,
-            target_handler: [0x11; 32],
-            target_adapter: [0x22; 32],
-            recipient: [0x33; 32],
-            app_id: [0x44; 32],
-            target_token: [0xAB; 32],
-            allowed_slippage_bps: 50,
-            allowed_adapters: vec![Pubkey::new_unique()],
-        }
-    }
 
     fn previous_validate_ix(
         sra_config: Pubkey,

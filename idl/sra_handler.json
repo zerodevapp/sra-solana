@@ -1041,6 +1041,11 @@
     },
     {
       "name": "PrepareParams",
+      "docs": [
+        "Per-deposit inputs. Routing is NOT here: it lives in the authenticated",
+        "`SourceHandlerData` (committed into the SRA identity), so a deposit cannot",
+        "redirect funds. Only the amounts and action selection vary per deposit."
+      ],
       "type": {
         "kind": "struct",
         "fields": [
@@ -1051,55 +1056,6 @@
           {
             "name": "output_amount",
             "type": "u64"
-          },
-          {
-            "name": "target_chain_id",
-            "type": "u64"
-          },
-          {
-            "name": "target_handler",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "target_adapter",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "recipient",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "app_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "target_token",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
           },
           {
             "name": "action_idxs",

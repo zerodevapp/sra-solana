@@ -35,19 +35,19 @@ pub fn build_deposit_now_bundle(
     deposit: &AcrossDepositParams,
     prepared_nonce: u64,
 ) -> Result<DepositNowBuild> {
-    let target_handler = narrow_evm_address(&prepare.target_handler)?;
-    let target_adapter = narrow_evm_address(&prepare.target_adapter)?;
-    let target_token = narrow_evm_address(&prepare.target_token)?;
+    let target_handler = narrow_evm_address(&deposit.target_handler)?;
+    let target_adapter = narrow_evm_address(&deposit.target_adapter)?;
+    let target_token = narrow_evm_address(&deposit.target_token)?;
 
     let message = Message {
-        account: prepare.recipient,
+        account: deposit.recipient,
         init_code: Vec::new(),
         deposit_info: DepositInfo {
             deposit_param: TokenParam {
                 token: source_token_hash(input_mint),
                 amount: u256_from_u64(prepare.input_amount),
             },
-            target_chain_id: u256_from_u64(prepare.target_chain_id),
+            target_chain_id: u256_from_u64(deposit.target_chain_id),
             target_param: TokenParam {
                 token: target_token,
                 amount: u256_from_u64(prepare.output_amount),
@@ -60,7 +60,7 @@ pub fn build_deposit_now_bundle(
             .copied()
             .map(u256_from_u64)
             .collect(),
-        app_id: prepare.app_id,
+        app_id: deposit.app_id,
     };
     let canonical_message = abi_encode_sra_message(
         &target_adapter,
@@ -73,12 +73,12 @@ pub fn build_deposit_now_bundle(
 
     let params = DepositNowParams {
         depositor: *adapter_authority,
-        recipient: Pubkey::new_from_array(prepare.target_adapter),
+        recipient: Pubkey::new_from_array(deposit.target_adapter),
         input_token: *input_mint,
-        output_token: Pubkey::new_from_array(prepare.target_token),
+        output_token: Pubkey::new_from_array(deposit.target_token),
         input_amount: prepare.input_amount,
         output_amount: u256_from_u64(prepare.output_amount),
-        destination_chain_id: prepare.target_chain_id,
+        destination_chain_id: deposit.target_chain_id,
         exclusive_relayer: deposit.exclusive_relayer,
         fill_deadline_offset: deposit.fill_deadline_offset,
         exclusivity_period: deposit.exclusivity_period,
@@ -100,6 +100,7 @@ pub fn build_deposit_now_bundle(
 mod tests {
     use super::*;
     use sra_common::source_deposit::PrepareParams;
+    use sra_common::test_utils::sample_handler_data;
 
     fn evm_bytes32(byte: u8) -> [u8; 32] {
         let mut out = [0u8; 32];
@@ -118,40 +119,24 @@ mod tests {
     }
 
     #[test]
-    fn build_deposit_now_bundle_uses_prepare_intent_fields() {
+    fn build_deposit_now_bundle_uses_routing_from_deposit() {
         let adapter_authority = Pubkey::new_unique();
         let input_mint = Pubkey::new_unique();
-        let prepare = PrepareParams::new(
-            11,
-            22,
-            42_161,
-            evm_bytes32(0x11),
-            evm_bytes32(0x22),
-            evm_bytes32(0x33),
-            [0x44u8; 32],
-            evm_bytes32(0xbb),
-            vec![1, 2],
-        );
+        let prepare = PrepareParams::new(11, 22, vec![1, 2]);
         let deposit = AcrossDepositParams {
-            input_amount: 99,
-            output_amount: u256_from_u64(88),
+            input_amount: 11,
+            output_amount: u256_from_u64(22),
             target_chain_id: 10,
             target_handler: evm_bytes32(0x55),
             target_adapter: evm_bytes32(0x66),
             recipient: evm_bytes32(0x77),
             app_id: [0x88u8; 32],
             target_token: evm_bytes32(0xaa),
-            action_idxs: vec![9, 10],
+            action_idxs: vec![1, 2],
             exclusive_relayer: Pubkey::new_unique(),
             fill_deadline_offset: 600,
             exclusivity_period: 120,
         };
-        let matching_deposit = AcrossDepositParams::from_prepare(
-            &prepare,
-            deposit.exclusive_relayer,
-            deposit.fill_deadline_offset,
-            deposit.exclusivity_period,
-        );
 
         let build = build_deposit_now_bundle(
             &adapter_authority,
@@ -162,16 +147,8 @@ mod tests {
             7,
         )
         .unwrap();
-        let matching = build_deposit_now_bundle(
-            &adapter_authority,
-            &sample_sra_config(),
-            &input_mint,
-            &prepare,
-            &matching_deposit,
-            7,
-        )
-        .unwrap();
 
+        // Amounts come from prepare; routing comes from the attested deposit.
         assert_eq!(build.params.input_amount, prepare.input_amount);
         assert_eq!(
             build.params.output_amount,
@@ -179,34 +156,27 @@ mod tests {
         );
         assert_eq!(
             build.params.output_token,
-            Pubkey::new_from_array(prepare.target_token)
+            Pubkey::new_from_array(deposit.target_token)
         );
-        assert_eq!(build.params.destination_chain_id, prepare.target_chain_id);
+        assert_eq!(build.params.destination_chain_id, deposit.target_chain_id);
         assert_eq!(
             build.params.recipient,
-            Pubkey::new_from_array(prepare.target_adapter)
+            Pubkey::new_from_array(deposit.target_adapter)
         );
-        assert_eq!(build.message, matching.message);
-        assert_eq!(build.replay_hash, matching.replay_hash);
-        assert_eq!(build.params.message, matching.params.message);
     }
 
     #[test]
     fn build_deposit_now_bundle_distinct_nonces_produce_distinct_messages_and_replay_hashes() {
         let adapter_authority = Pubkey::new_unique();
         let input_mint = Pubkey::new_unique();
-        let prepare = PrepareParams::new(
-            11,
-            22,
-            42_161,
-            evm_bytes32(0x11),
-            evm_bytes32(0x22),
-            evm_bytes32(0x33),
-            [0x44u8; 32],
-            evm_bytes32(0xbb),
-            vec![1, 2],
+        let prepare = PrepareParams::new(11, 22, vec![1, 2]);
+        let deposit = AcrossDepositParams::from_prepare(
+            &prepare,
+            &sample_handler_data(),
+            Pubkey::new_unique(),
+            600,
+            120,
         );
-        let deposit = AcrossDepositParams::from_prepare(&prepare, Pubkey::new_unique(), 600, 120);
         let sra_config = sample_sra_config();
 
         let build_0 = build_deposit_now_bundle(

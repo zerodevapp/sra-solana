@@ -1,6 +1,7 @@
 use sra_common::{
     instruction_data::{decode_anchor_instruction_data, encode_anchor_instruction_data},
     source_deposit::{AcrossDepositParams, PrepareParams},
+    types::SourceHandlerData,
 };
 
 fn evm_bytes32(byte: u8) -> [u8; 32] {
@@ -9,18 +10,22 @@ fn evm_bytes32(byte: u8) -> [u8; 32] {
     out
 }
 
+fn sample_handler_data() -> SourceHandlerData {
+    SourceHandlerData {
+        address_book_root: anchor_lang::prelude::Pubkey::new_unique(),
+        target_chain_id: 42_161,
+        target_handler: evm_bytes32(0x11),
+        target_adapter: evm_bytes32(0x22),
+        recipient: evm_bytes32(0x33),
+        app_id: [0x44u8; 32],
+        target_token: evm_bytes32(0x55),
+        allowed_slippage_bps: 50,
+        allowed_adapters: vec![],
+    }
+}
+
 fn sample_prepare_params() -> PrepareParams {
-    PrepareParams::new(
-        7,
-        9,
-        42_161,
-        evm_bytes32(0x11),
-        evm_bytes32(0x22),
-        evm_bytes32(0x33),
-        [0x44u8; 32],
-        evm_bytes32(0x55),
-        vec![1, 2],
-    )
+    PrepareParams::new(7, 9, vec![1, 2])
 }
 
 #[test]
@@ -38,6 +43,7 @@ fn decode_across_deposit_params_round_trips_valid_data() {
     let prepare = sample_prepare_params();
     let params = AcrossDepositParams::from_prepare(
         &prepare,
+        &sample_handler_data(),
         anchor_lang::prelude::Pubkey::new_from_array([6u8; 32]),
         600,
         120,

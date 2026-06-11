@@ -14,8 +14,8 @@ const INPUT: u64 = 1_000_000;
 // 50 bps slippage tolerance -> min acceptable = 995_000 for INPUT = 1_000_000.
 const OUTPUT_WITHIN_SLIPPAGE: u64 = 999_500;
 
-fn default_prepare_params(fx: &ValidatePrepareFixture) -> PrepareParams {
-    sample_prepare_params(fx.target_token)
+fn default_prepare_params(_fx: &ValidatePrepareFixture) -> PrepareParams {
+    sample_prepare_params()
 }
 
 fn build_deposit_bundle(
@@ -46,8 +46,8 @@ fn invoke_source_flow(
     let address_book_entry = derive_address_book_pda(
         &fx.address_book_root,
         &fx.source_mint,
-        params.target_chain_id,
-        &params.target_token,
+        fx.target_chain_id,
+        &fx.target_token,
     )
     .0;
     let mut across = across_params_for(fx, &params);
@@ -118,12 +118,12 @@ fn validate_and_prepare_happy_path() {
     assert_eq!(ev.nonce, 0, "event carries the pre-increment nonce");
     assert_eq!(ev.input_amount, INPUT);
     assert_eq!(ev.output_amount, OUTPUT_WITHIN_SLIPPAGE);
-    assert_eq!(ev.target_chain_id, params.target_chain_id);
-    assert_eq!(ev.target_handler, params.target_handler);
-    assert_eq!(ev.target_adapter, params.target_adapter);
-    assert_eq!(ev.recipient, params.recipient);
-    assert_eq!(ev.app_id, params.app_id);
-    assert_eq!(ev.target_token, params.target_token);
+    assert_eq!(ev.target_chain_id, fx.handler_data.target_chain_id);
+    assert_eq!(ev.target_handler, fx.handler_data.target_handler);
+    assert_eq!(ev.target_adapter, fx.handler_data.target_adapter);
+    assert_eq!(ev.recipient, fx.handler_data.recipient);
+    assert_eq!(ev.app_id, fx.handler_data.app_id);
+    assert_eq!(ev.target_token, fx.handler_data.target_token);
     assert_eq!(ev.action_idxs, params.action_idxs);
 }
 
@@ -170,7 +170,7 @@ fn execute_deposit_emits_across_deposit_executed() {
         ev.output_amount,
         sra_common::source_deposit::handler_output_amount_u256(params.output_amount)
     );
-    assert_eq!(ev.target_token, params.target_token);
+    assert_eq!(ev.target_token, fx.handler_data.target_token);
     assert_eq!(ev.action_idxs, params.action_idxs);
     assert_eq!(ev.exclusive_relayer, fx.payer.pubkey());
     assert_eq!(ev.fill_deadline_offset, 3_600);
@@ -233,7 +233,7 @@ fn validate_and_prepare_wrong_next_ix_program_rejected() {
     );
     bad_ix.program_id = PROGRAM_ID;
 
-    let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
+    let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let validate_ix = validate_and_prepare_ix(
         &fx.payer.pubkey(),
         &fx.owner.pubkey(),
@@ -267,7 +267,7 @@ fn validate_and_prepare_wrong_next_ix_routing_rejected() {
     let mut across = across_params_for(&fx, &prepare);
     across.action_idxs[1] += 1;
 
-    let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
+    let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let execute_ix = execute_deposit_across_ix(
         &fx.payer.pubkey(),
         &fx,
@@ -313,7 +313,7 @@ fn validate_and_prepare_wrong_next_ix_sra_config_rejected() {
     let prepare = default_prepare_params(&fx);
     let across = across_params_for(&fx, &prepare);
 
-    let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
+    let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let mut execute_ix = execute_deposit_across_ix(
         &fx.payer.pubkey(),
         &fx,
@@ -362,7 +362,7 @@ fn validate_and_prepare_wrong_next_ix_source_mint_rejected() {
     let prepare = default_prepare_params(&fx);
     let across = across_params_for(&fx, &prepare);
 
-    let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
+    let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let mut execute_ix = execute_deposit_across_ix(
         &fx.payer.pubkey(),
         &fx,
@@ -419,7 +419,7 @@ fn validate_and_prepare_wrong_next_ix_exclusive_relayer_rejected() {
         current_nonce(&svm, &fx.accounts.mint_nonce),
     );
 
-    let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
+    let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let validate_ix = validate_and_prepare_ix(
         &fx.payer.pubkey(),
         &fx.owner.pubkey(),
@@ -469,7 +469,7 @@ fn validate_and_prepare_malformed_next_ix_data_rejected() {
     let prepare = default_prepare_params(&fx);
     let across = across_params_for(&fx, &prepare);
 
-    let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
+    let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let mut execute_ix = execute_deposit_across_ix(
         &fx.payer.pubkey(),
         &fx,
@@ -1052,7 +1052,7 @@ fn validate_and_prepare_sequential_nonce_increments() {
             ev.nonce, expected_pre_nonce,
             "deposit #{expected_pre_nonce} carries pre-increment nonce",
         );
-        assert_eq!(ev.target_token, params.target_token);
+        assert_eq!(ev.target_token, fx.handler_data.target_token);
         assert_eq!(ev.action_idxs, params.action_idxs);
 
         let n = fetch_mint_nonce(&svm, &fx.accounts.mint_nonce);
@@ -1227,67 +1227,55 @@ fn validate_and_prepare_multi_mint_single_sra_independent_nonces() {
 }
 
 #[test]
-fn validate_and_prepare_route_mismatch_rejected() {
-    // EVM RouteConfig parity: routing is committed at install (folded into
-    // the SRA identity via handler_data_hash). A deposit whose params diverge from
-    // the committed route on ANY field must be rejected before funds move — a
-    // compromised tx-builder must not be able to redirect a deposit the way it
-    // could on a Solana port that left routing as free per-deposit input.
-    type RouteMutator = fn(&mut PrepareParams);
-    let cases: [(&str, RouteMutator); 6] = [
-        ("target_chain_id", |params| params.target_chain_id = 10),
-        ("target_handler", |params| {
-            params.target_handler = evm_bytes32(0x12)
-        }),
-        ("target_adapter", |params| {
-            params.target_adapter = evm_bytes32(0x23)
-        }),
-        ("recipient", |params| params.recipient = evm_bytes32(0x34)),
-        ("app_id", |params| params.app_id = [0x45u8; 32]),
-        ("target_token", |params| {
-            params.target_token = evm_bytes32(0xBC)
-        }),
-    ];
+fn validate_and_prepare_adapter_routing_mismatch_rejected() {
+    // Routing lives only in the committed handler_data; the paired adapter ix
+    // cannot smuggle a different route. A tampered AcrossDepositParams.target_token
+    // fails the IX-attestation byte-compare against the reconstructed committed route.
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    let prepare = default_prepare_params(&fx);
 
-    for (name, mutate) in cases {
-        let mut svm = setup_svm();
-        let fx = ValidatePrepareFixture::new(&mut svm);
-        let mut params = default_prepare_params(&fx);
-        mutate(&mut params);
-        // Ensure an enabled address-book entry exists for whatever (chain, token)
-        // the mutated params point at, so the rejection is attributable to the
-        // route-commitment check rather than a missing/disabled book entry.
-        setup_address_book_entry(
-            &mut svm,
-            &fx.payer,
-            &fx.owner,
-            &fx.address_book_root,
-            &fx.source_mint,
-            params.target_chain_id,
-            params.target_token,
-            6,
-        );
+    let mut across = across_params_for(&fx, &prepare);
+    across.target_token = evm_bytes32(0xBC);
 
-        let err = fx
-            .invoke(&mut svm, params)
-            .expect_err(&format!("{name} mismatch must reject"))
-            .err
-            .clone();
+    let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
+    let execute_ix = execute_deposit_across_ix(
+        &fx.payer.pubkey(),
+        &fx,
+        &fetch_sra_config(&svm, &fx.sra_config),
+        &prepare,
+        across,
+        current_nonce(&svm, &fx.accounts.mint_nonce),
+    );
+    let validate_ix = validate_and_prepare_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.accounts,
+        &fx.owner_ata,
+        &fx.address_book_root,
+        &address_book_entry,
+        fx.handler_data.clone(),
+        prepare.clone(),
+        &execute_ix,
+    );
 
-        assert_eq!(
-            err,
-            TransactionError::InstructionError(
-                0,
-                InstructionError::Custom(SraError::RouteMismatch.into()),
-            ),
-            "{name} mismatch must reject with RouteMismatch",
-        );
-        assert_eq!(
-            fetch_token_balance(&svm, &fx.owner_ata),
-            OWNER_STARTING_BALANCE,
-            "{name} mismatch must leave owner funds untouched",
-        );
-    }
+    let err = send_instructions(
+        &mut svm,
+        &[validate_ix, execute_ix],
+        &fx.payer,
+        &[&fx.owner],
+    )
+    .expect_err("tampered adapter routing must reject")
+    .err
+    .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            1,
+            InstructionError::Custom(SraError::PairedInstructionMismatch.into()),
+        )
+    );
 }
 
 #[test]
