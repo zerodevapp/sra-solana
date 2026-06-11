@@ -275,8 +275,8 @@ mod tests {
 
     #[test]
     fn route_config_hash_does_not_validate() {
-        // Guard: route_config_hash hashes raw bytes only (it feeds `seeds = [...]`);
-        // a route-invalid Σ amount_bps = 200% must still hash, never error.
+        // Guard: route_config_hash feeds `seeds = [...]`, so it must not validate
+        // action *contents* — a route-invalid Σ amount_bps = 200% must still hash.
         let mint = Pubkey::new_from_array([10u8; 32]);
         let actions = vec![
             SolanaAction::SplTransfer {
