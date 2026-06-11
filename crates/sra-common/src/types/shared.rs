@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-/// Global fee config — used by destination finalize_fill.
+/// Global fee config consumed by the destination fill path.
 /// PDA seeds: ["fee_config"]
 #[account]
 #[derive(InitSpace)]

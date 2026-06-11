@@ -90,4 +90,7 @@ pub enum SraError {
 
     #[msg("Deposit routing does not match the committed SRA route")]
     RouteMismatch,
+
+    #[msg("app_id must be non-zero")]
+    InvalidAppId,
 }

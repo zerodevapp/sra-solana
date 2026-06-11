@@ -26,10 +26,16 @@ use solana_system_interface::program as system_program;
 use sra_common::{
     constants::ACROSS_SPOKE_POOL_ID,
     instruction_data::encode_anchor_instruction_data,
-    seeds::{SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_SRA},
+    seeds::{
+        SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_APP_FEE, SEED_FEE_CONFIG, SEED_MINT_NONCE,
+        SEED_SRA,
+    },
     source_deposit::{AcrossDepositParams, PrepareParams},
     test_utils::DEFAULT_ACTION_IDXS,
-    types::{AddressBookEntry, AddressBookRoot, MintNonce, SourceHandlerData, SraConfig},
+    types::{
+        AddressBookEntry, AddressBookRoot, AppFeeEntry, FeeConfig, MintNonce, SourceHandlerData,
+        SraConfig,
+    },
 };
 use std::{fs, path::PathBuf};
 
@@ -394,6 +400,78 @@ pub fn fetch_address_book_entry(svm: &LiteSVM, pda: &Pubkey) -> AddressBookEntry
 pub fn fetch_mint_nonce(svm: &LiteSVM, pda: &Pubkey) -> MintNonce {
     let acct = svm.get_account(pda).expect("mint_nonce account exists");
     MintNonce::try_deserialize(&mut acct.data.as_slice()).expect("valid MintNonce")
+}
+
+// --- Fee config / app fee (shared destination instructions) ---
+
+pub fn derive_fee_config_pda() -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[SEED_FEE_CONFIG], &PROGRAM_ID)
+}
+
+pub fn derive_app_fee_pda(app_id: &[u8; 32]) -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[SEED_APP_FEE, app_id], &PROGRAM_ID)
+}
+
+pub fn initialize_fee_config_ix(
+    payer: &Pubkey,
+    admin: &Pubkey,
+    protocol_fee_bps: u16,
+    protocol_fee_recipient: Pubkey,
+) -> Instruction {
+    let (fee_config, _) = derive_fee_config_pda();
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::InitializeFeeConfig {
+            payer: *payer,
+            admin: *admin,
+            fee_config,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::InitializeFeeConfig {
+            protocol_fee_bps,
+            protocol_fee_recipient,
+        }
+        .data(),
+    }
+}
+
+pub fn register_app_fee_ix(
+    payer: &Pubkey,
+    admin: &Pubkey,
+    app_id: [u8; 32],
+    app_fee_bps: u16,
+    app_fee_recipient: Pubkey,
+) -> Instruction {
+    let (fee_config, _) = derive_fee_config_pda();
+    let (app_fee_entry, _) = derive_app_fee_pda(&app_id);
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::RegisterAppFee {
+            payer: *payer,
+            admin: *admin,
+            fee_config,
+            app_fee_entry,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::RegisterAppFee {
+            app_id,
+            app_fee_bps,
+            app_fee_recipient,
+        }
+        .data(),
+    }
+}
+
+pub fn fetch_fee_config(svm: &LiteSVM, pda: &Pubkey) -> FeeConfig {
+    let acct = svm.get_account(pda).expect("fee_config account exists");
+    FeeConfig::try_deserialize(&mut acct.data.as_slice()).expect("valid FeeConfig")
+}
+
+pub fn fetch_app_fee_entry(svm: &LiteSVM, pda: &Pubkey) -> AppFeeEntry {
+    let acct = svm.get_account(pda).expect("app_fee_entry account exists");
+    AppFeeEntry::try_deserialize(&mut acct.data.as_slice()).expect("valid AppFeeEntry")
 }
 
 pub fn seed_mint_nonce_account(svm: &mut LiteSVM, pda: &Pubkey, nonce: u64, bump: u8) {

@@ -24,6 +24,22 @@ pub struct AddressBookEntrySet {
     pub target_decimals: u8,
 }
 
+#[event]
+pub struct FeeConfigInitialized {
+    pub fee_config: Pubkey,
+    pub admin: Pubkey,
+    pub protocol_fee_bps: u16,
+    pub protocol_fee_recipient: Pubkey,
+}
+
+#[event]
+pub struct AppFeeRegistered {
+    pub app_fee_entry: Pubkey,
+    pub app_id: [u8; 32],
+    pub app_fee_bps: u16,
+    pub app_fee_recipient: Pubkey,
+}
+
 /// Emitted by `validate_and_prepare` after funds reach adapter custody. Carries
 /// the routing inputs needed to build the target-specific bridge message.
 #[event]

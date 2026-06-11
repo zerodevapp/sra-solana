@@ -55,4 +55,30 @@ pub mod sra_handler {
             paired_adapter_ix_data_hash,
         )
     }
+
+    pub fn initialize_fee_config(
+        ctx: Context<InitializeFeeConfig>,
+        protocol_fee_bps: u16,
+        protocol_fee_recipient: Pubkey,
+    ) -> Result<()> {
+        instructions::shared::fees::initialize_fee_config_handler(
+            ctx,
+            protocol_fee_bps,
+            protocol_fee_recipient,
+        )
+    }
+
+    pub fn register_app_fee(
+        ctx: Context<RegisterAppFee>,
+        app_id: [u8; 32],
+        app_fee_bps: u16,
+        app_fee_recipient: Pubkey,
+    ) -> Result<()> {
+        instructions::shared::fees::register_app_fee_handler(
+            ctx,
+            app_id,
+            app_fee_bps,
+            app_fee_recipient,
+        )
+    }
 }

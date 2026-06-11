@@ -42,6 +42,67 @@
       "args": []
     },
     {
+      "name": "initialize_fee_config",
+      "discriminator": [
+        62,
+        162,
+        20,
+        133,
+        121,
+        65,
+        145,
+        27
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "fee_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "protocol_fee_recipient",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
       "name": "initialize_sra",
       "discriminator": [
         141,
@@ -125,6 +186,102 @@
               32
             ]
           }
+        }
+      ]
+    },
+    {
+      "name": "register_app_fee",
+      "discriminator": [
+        120,
+        119,
+        84,
+        26,
+        161,
+        24,
+        83,
+        228
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "fee_config"
+          ]
+        },
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "app_fee_entry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  112,
+                  112,
+                  95,
+                  102,
+                  101,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "app_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "app_id",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "app_fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "app_fee_recipient",
+          "type": "pubkey"
         }
       ]
     },
@@ -688,6 +845,32 @@
       ]
     },
     {
+      "name": "AppFeeEntry",
+      "discriminator": [
+        94,
+        233,
+        234,
+        176,
+        219,
+        41,
+        113,
+        184
+      ]
+    },
+    {
+      "name": "FeeConfig",
+      "discriminator": [
+        143,
+        52,
+        146,
+        187,
+        219,
+        123,
+        76,
+        155
+      ]
+    },
+    {
       "name": "MintNonce",
       "discriminator": [
         207,
@@ -742,6 +925,19 @@
       ]
     },
     {
+      "name": "AppFeeRegistered",
+      "discriminator": [
+        110,
+        112,
+        145,
+        162,
+        10,
+        9,
+        117,
+        189
+      ]
+    },
+    {
       "name": "DepositPrepared",
       "discriminator": [
         187,
@@ -752,6 +948,19 @@
         77,
         103,
         114
+      ]
+    },
+    {
+      "name": "FeeConfigInitialized",
+      "discriminator": [
+        99,
+        232,
+        112,
+        161,
+        28,
+        61,
+        171,
+        178
       ]
     },
     {
@@ -878,6 +1087,68 @@
           },
           {
             "name": "owner",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AppFeeEntry",
+      "docs": [
+        "Per-app fee. PDA seeds: [\"app_fee\", app_id]",
+        "Constraint: protocol_fee_bps + app_fee_bps <= MAX_FEE_BPS (1000 = 10%)"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "app_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "app_fee_recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AppFeeRegistered",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "app_fee_entry",
+            "type": "pubkey"
+          },
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "app_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "app_fee_recipient",
             "type": "pubkey"
           }
         ]
@@ -1014,6 +1285,58 @@
             "type": {
               "vec": "u64"
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeeConfig",
+      "docs": [
+        "Global fee config consumed by the destination fill path.",
+        "PDA seeds: [\"fee_config\"]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "protocol_fee_recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeeConfigInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "fee_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "protocol_fee_recipient",
+            "type": "pubkey"
           }
         ]
       }
