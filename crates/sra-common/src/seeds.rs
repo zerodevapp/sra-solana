@@ -273,6 +273,30 @@ mod tests {
         assert_ne!(h1, [0u8; 32]);
     }
 
+    #[test]
+    fn route_config_hash_does_not_validate() {
+        // Regression guard: business validation (e.g. Σ amount_bps ≤ 10000) must NOT
+        // live inside route_config_hash. The hash is used directly in `seeds = [...]`,
+        // and an early-return/panic during PDA derivation in `try_accounts` is
+        // undebuggable. The hash commits raw bytes only; semantic checks belong to the
+        // instruction body.
+        let mint = Pubkey::new_from_array([10u8; 32]);
+        // Two actions whose amount_bps sum to 200% — semantically invalid for a route
+        // but within the length bound, so the hash must still compute.
+        let actions = vec![
+            SolanaAction::SplTransfer {
+                recipient: Pubkey::new_from_array([20u8; 32]),
+                amount_bps: 10_000,
+            },
+            SolanaAction::SplTransfer {
+                recipient: Pubkey::new_from_array([21u8; 32]),
+                amount_bps: 10_000,
+            },
+        ];
+        let h = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions).unwrap();
+        assert_ne!(h, [0u8; 32]);
+    }
+
     // -- Golden vector tests (pinned digests, independently computed) --
     // These catch regressions in field order, endianness, or serialization format.
     // Golden vectors computed externally via Python Keccak-256 (pycryptodome).

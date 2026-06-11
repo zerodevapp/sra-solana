@@ -29,6 +29,11 @@ pub struct SolanaSraRoute {
     pub action_config: Vec<SolanaAction>,
     // Immutable (NOT in config_hash)
     pub salt: [u8; 32],
+    /// Snapshot of `expected_mint`'s decimals, captured from the validated `Mint`
+    /// account at route creation (never from caller args). Kept out of the
+    /// config_hash because it is derivable from `expected_mint`; stored so
+    /// downstream cross-decimal math and indexers need not re-read the mint.
+    pub expected_decimals: u8,
     // Mutable
     #[max_len(MAX_ADAPTERS)]
     pub allowed_adapters: Vec<Pubkey>,
@@ -74,10 +79,10 @@ mod tests {
     #[test]
     fn solana_sra_route_init_space() {
         // 32 owner + 8 source_chain_id + 32 expected_mint + 32 app_id
-        // + 4 + (35 * 4) action_config + 32 salt
+        // + 4 + (35 * 4) action_config + 32 salt + 1 expected_decimals
         // + 4 + (32 * 8) allowed_adapters + 2 fee_bps + 1 paused + 1 bump
-        // = 32 + 8 + 32 + 32 + 144 + 32 + 260 + 2 + 1 + 1 = 544
-        assert_eq!(SolanaSraRoute::INIT_SPACE, 544);
+        // = 32 + 8 + 32 + 32 + 144 + 32 + 1 + 260 + 2 + 1 + 1 = 545
+        assert_eq!(SolanaSraRoute::INIT_SPACE, 545);
     }
 
     #[test]
