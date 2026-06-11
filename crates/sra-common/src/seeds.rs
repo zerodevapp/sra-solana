@@ -25,6 +25,16 @@ pub const SEED_APP_FEE: &[u8] = b"app_fee";
 pub const SEED_ADAPTER_AUTHORITY: &[u8] = b"adapter_authority";
 pub const SEED_VERIFIED_FILL: &[u8] = b"verified_fill";
 
+/// Signer seeds for the `adapter_authority` PDA that owns adapter custody —
+/// the single source for the seed scheme shared by the deposit and recovery
+/// instructions. Pass as `&[&seeds]` to `CpiContext::new_with_signer`.
+pub fn adapter_authority_signer_seeds<'a>(
+    sra_config_key: &'a [u8],
+    bump: &'a [u8; 1],
+) -> [&'a [u8]; 3] {
+    [SEED_ADAPTER_AUTHORITY, sra_config_key, bump]
+}
+
 // ---------------------------------------------------------------------------
 // Source config_hash
 // ---------------------------------------------------------------------------

@@ -79,7 +79,7 @@ pub fn sample_prepare_params() -> PrepareParams {
 }
 
 pub fn sample_across_deposit(prepare: &PrepareParams) -> AcrossDepositParams {
-    AcrossDepositParams::from_prepare(prepare, Pubkey::new_unique(), 60, 30)
+    AcrossDepositParams::from_prepare(prepare, Pubkey::new_unique(), 600, 30)
 }
 
 fn borrow_instruction(ix: &Instruction) -> BorrowedInstruction<'_> {

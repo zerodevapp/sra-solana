@@ -78,6 +78,12 @@ pub struct ExecuteDepositAcross<'info> {
 /// bundle is built from the verified prepare data plus the Across-specific
 /// execution fields in `params`.
 pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) -> Result<()> {
+    // Reject unreasonable Across timing before any token movement.
+    sra_common::source_deposit::validate_across_timing(
+        params.fill_deadline_offset,
+        params.exclusivity_period,
+    )?;
+
     let prepare = crate::utils::ix_attestation::verify_previous_handler_ix(
         &ctx.accounts.instructions_sysvar.to_account_info(),
         &ctx.accounts.sra_config.key(),
@@ -103,11 +109,11 @@ pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) 
     );
 
     let sra_config_key = ctx.accounts.sra_config.key();
-    let adapter_authority_seeds: &[&[u8]] = &[
-        SEED_ADAPTER_AUTHORITY,
+    let adapter_authority_bump = [ctx.bumps.adapter_authority];
+    let adapter_authority_seeds = sra_common::seeds::adapter_authority_signer_seeds(
         sra_config_key.as_ref(),
-        &[ctx.bumps.adapter_authority],
-    ];
+        &adapter_authority_bump,
+    );
     approve_checked(
         CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
@@ -117,7 +123,7 @@ pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) 
                 delegate: ctx.accounts.delegate.to_account_info(),
                 authority: ctx.accounts.adapter_authority.to_account_info(),
             },
-            &[adapter_authority_seeds],
+            &[&adapter_authority_seeds],
         ),
         deposit.params.input_amount,
         ctx.accounts.input_mint.decimals,

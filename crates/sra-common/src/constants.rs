@@ -31,3 +31,7 @@ pub const USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTD
 
 /// Across SVM SpokePool program ID on mainnet.
 pub const ACROSS_SPOKE_POOL_ID: Pubkey = pubkey!("DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru");
+
+/// Min Across `fill_deadline_offset` (seconds): too short forces instant expiry
+/// and strands the refund in `adapter_custody`.
+pub const MIN_FILL_DEADLINE_OFFSET: u32 = 300;
