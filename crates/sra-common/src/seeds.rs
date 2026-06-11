@@ -275,14 +275,9 @@ mod tests {
 
     #[test]
     fn route_config_hash_does_not_validate() {
-        // Regression guard: business validation (e.g. Σ amount_bps ≤ 10000) must NOT
-        // live inside route_config_hash. The hash is used directly in `seeds = [...]`,
-        // and an early-return/panic during PDA derivation in `try_accounts` is
-        // undebuggable. The hash commits raw bytes only; semantic checks belong to the
-        // instruction body.
+        // Guard: route_config_hash hashes raw bytes only (it feeds `seeds = [...]`);
+        // a route-invalid Σ amount_bps = 200% must still hash, never error.
         let mint = Pubkey::new_from_array([10u8; 32]);
-        // Two actions whose amount_bps sum to 200% — semantically invalid for a route
-        // but within the length bound, so the hash must still compute.
         let actions = vec![
             SolanaAction::SplTransfer {
                 recipient: Pubkey::new_from_array([20u8; 32]),

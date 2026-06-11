@@ -29,10 +29,8 @@ pub struct SolanaSraRoute {
     pub action_config: Vec<SolanaAction>,
     // Immutable (NOT in config_hash)
     pub salt: [u8; 32],
-    /// Snapshot of `expected_mint`'s decimals, captured from the validated `Mint`
-    /// account at route creation (never from caller args). Kept out of the
-    /// config_hash because it is derivable from `expected_mint`; stored so
-    /// downstream cross-decimal math and indexers need not re-read the mint.
+    /// `expected_mint` decimals, snapshotted from the validated `Mint` at creation.
+    /// Non-hash (derivable from `expected_mint`); cached for cross-decimal math.
     pub expected_decimals: u8,
     // Mutable
     #[max_len(MAX_ADAPTERS)]
