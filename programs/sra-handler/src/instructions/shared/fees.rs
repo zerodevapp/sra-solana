@@ -29,8 +29,7 @@ pub(crate) fn initialize_fee_config_handler(
     protocol_fee_bps: u16,
     protocol_fee_recipient: Pubkey,
 ) -> Result<()> {
-    // Bound the protocol fee at write time so the stored value is a hard invariant:
-    // any consumer can assume `protocol_fee_bps + app_fee_bps <= MAX_FEE_BPS`.
+    // Bound at write time so consumers can rely on protocol + app <= MAX_FEE_BPS.
     require!(protocol_fee_bps <= MAX_FEE_BPS, SraError::FeeTooHigh);
 
     let fee_config = &mut ctx.accounts.fee_config;
@@ -49,11 +48,8 @@ pub(crate) fn initialize_fee_config_handler(
     Ok(())
 }
 
-/// Admin-gated upsert of a per-app fee. Only the fee-config admin may register or
-/// update an entry (`has_one = admin`), so app-id assignment is admin-controlled.
-/// The anti-spoofing guarantee is completed by the fill path, which MUST look up
-/// `app_fee_entry` from committed route state (the route's `app_id`), never caller
-/// input, so an app can only be paid against its own committed id.
+/// Admin-gated upsert of a per-app fee; the fill path MUST key `app_fee_entry`
+/// off the committed `route.app_id` (never caller input) to prevent spoofing.
 #[derive(Accounts)]
 #[instruction(app_id: [u8; 32])]
 pub struct RegisterAppFee<'info> {
@@ -83,12 +79,10 @@ pub(crate) fn register_app_fee_handler(
     app_fee_bps: u16,
     app_fee_recipient: Pubkey,
 ) -> Result<()> {
-    // app_id == 0 is the reserved "no app fee" sentinel; it must never resolve to a
-    // real entry.
+    // app_id 0 is the "no app fee" sentinel; not registrable.
     require!(app_id != [0u8; 32], SraError::InvalidAppId);
 
-    // Cap the combined take against the live protocol fee. u32 widening keeps the
-    // sum overflow-free for any u16 app_fee_bps.
+    // u32 widening keeps the bps sum overflow-free.
     let combined = ctx.accounts.fee_config.protocol_fee_bps as u32 + app_fee_bps as u32;
     require!(combined <= MAX_FEE_BPS as u32, SraError::FeeTooHigh);
 
