@@ -89,10 +89,14 @@ mod tests {
     fn sample_handler_data() -> SourceHandlerData {
         SourceHandlerData {
             address_book_root: Pubkey::new_unique(),
-            fallback_recipient: [0xF0; 32],
+            target_chain_id: 42_161,
+            target_handler: [0x11; 32],
+            target_adapter: [0x22; 32],
+            recipient: [0x33; 32],
+            app_id: [0x44; 32],
+            target_token: [0xAB; 32],
             allowed_slippage_bps: 50,
             allowed_adapters: vec![Pubkey::new_unique()],
-            action_config_hash: [0x44; 32],
         }
     }
 

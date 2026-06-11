@@ -82,10 +82,12 @@ pub enum SraError {
     #[msg("Source handler data does not match immutable SRA identity")]
     InvalidHandlerData,
 
-    // -- Across timing bounds (appended to keep prior codes stable) --
     #[msg("Across fill deadline offset below minimum")]
     FillDeadlineTooShort,
 
     #[msg("Across exclusivity period exceeds fill deadline offset")]
     ExclusivityExceedsDeadline,
+
+    #[msg("Deposit routing does not match the committed SRA route")]
+    RouteMismatch,
 }

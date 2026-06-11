@@ -109,10 +109,14 @@ mod tests {
     fn test_handler_data() -> SourceHandlerData {
         SourceHandlerData {
             address_book_root: Pubkey::new_from_array([3u8; 32]),
-            fallback_recipient: [4u8; 32],
+            target_chain_id: 42_161,
+            target_handler: [4u8; 32],
+            target_adapter: [5u8; 32],
+            recipient: [6u8; 32],
+            app_id: [7u8; 32],
+            target_token: [8u8; 32],
             allowed_slippage_bps: 50,
-            allowed_adapters: vec![Pubkey::new_from_array([5u8; 32])],
-            action_config_hash: [6u8; 32],
+            allowed_adapters: vec![Pubkey::new_from_array([9u8; 32])],
         }
     }
 
@@ -133,7 +137,7 @@ mod tests {
     fn handler_data_hash_different_payload() {
         let handler_data = test_handler_data();
         let mut different = handler_data.clone();
-        different.fallback_recipient = [9u8; 32];
+        different.recipient = [9u8; 32];
         assert_ne!(
             handler_data_hash(&handler_data),
             handler_data_hash(&different)
@@ -212,7 +216,7 @@ mod tests {
     fn config_hash_different_handler_data() {
         let data_hash = handler_data_hash(&test_handler_data());
         let mut different_handler_data = test_handler_data();
-        different_handler_data.action_config_hash = [8u8; 32];
+        different_handler_data.target_adapter = [11u8; 32];
         let different_handler_data_hash = handler_data_hash(&different_handler_data);
 
         let h1 = config_hash(&test_owner(), &test_final_handler(), &data_hash);
