@@ -58,27 +58,67 @@ pub mod sra_handler {
 
     pub fn initialize_fee_config(
         ctx: Context<InitializeFeeConfig>,
-        protocol_fee_bps: u16,
-        protocol_fee_recipient: Pubkey,
+        fee_recipient: Pubkey,
     ) -> Result<()> {
-        instructions::shared::fees::initialize_fee_config_handler(
+        instructions::shared::fees::initialize_fee_config_handler(ctx, fee_recipient)
+    }
+
+    pub fn set_fee_recipient(ctx: Context<SetFeeRecipient>, new_recipient: Pubkey) -> Result<()> {
+        instructions::shared::fees::set_fee_recipient_handler(ctx, new_recipient)
+    }
+
+    pub fn set_protocol_fee(
+        ctx: Context<SetProtocolFee>,
+        app_id: [u8; 32],
+        default_fee_bps: u16,
+        allow_override: bool,
+    ) -> Result<()> {
+        instructions::shared::fees::set_protocol_fee_handler(
             ctx,
-            protocol_fee_bps,
-            protocol_fee_recipient,
+            app_id,
+            default_fee_bps,
+            allow_override,
         )
     }
 
-    pub fn register_app_fee(
-        ctx: Context<RegisterAppFee>,
+    pub fn remove_protocol_fee(ctx: Context<RemoveProtocolFee>, app_id: [u8; 32]) -> Result<()> {
+        instructions::shared::fees::remove_protocol_fee_handler(ctx, app_id)
+    }
+
+    pub fn set_asset_fee_tier(
+        ctx: Context<SetAssetFeeTier>,
         app_id: [u8; 32],
-        app_fee_bps: u16,
-        app_fee_recipient: Pubkey,
+        mint: Pubkey,
+        threshold: u64,
+        below_bps: u16,
+        above_or_equal_bps: u16,
     ) -> Result<()> {
-        instructions::shared::fees::register_app_fee_handler(
+        instructions::shared::fees::set_asset_fee_tier_handler(
             ctx,
             app_id,
-            app_fee_bps,
-            app_fee_recipient,
+            mint,
+            threshold,
+            below_bps,
+            above_or_equal_bps,
         )
+    }
+
+    pub fn remove_asset_fee_tier(
+        ctx: Context<RemoveAssetFeeTier>,
+        app_id: [u8; 32],
+        mint: Pubkey,
+    ) -> Result<()> {
+        instructions::shared::fees::remove_asset_fee_tier_handler(ctx, app_id, mint)
+    }
+
+    pub fn set_pending_admin(
+        ctx: Context<SetPendingAdmin>,
+        new_pending_admin: Pubkey,
+    ) -> Result<()> {
+        instructions::shared::fees::set_pending_admin_handler(ctx, new_pending_admin)
+    }
+
+    pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
+        instructions::shared::fees::accept_admin_handler(ctx)
     }
 }
