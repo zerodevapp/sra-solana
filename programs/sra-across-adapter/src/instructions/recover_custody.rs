@@ -43,11 +43,11 @@ pub fn handler(ctx: Context<RecoverStuckCustody>) -> Result<()> {
     let amount = ctx.accounts.adapter_custody.amount;
     require!(amount > 0, AcrossAdapterError::NothingToRecover);
     let sra_config_key = ctx.accounts.sra_config.key();
-    let signer_seeds: &[&[&[u8]]] = &[&[
-        SEED_ADAPTER_AUTHORITY,
+    let adapter_authority_bump = [ctx.bumps.adapter_authority];
+    let adapter_authority_seeds = sra_common::seeds::adapter_authority_signer_seeds(
         sra_config_key.as_ref(),
-        &[ctx.bumps.adapter_authority],
-    ]];
+        &adapter_authority_bump,
+    );
     transfer_checked(
         CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
@@ -57,7 +57,7 @@ pub fn handler(ctx: Context<RecoverStuckCustody>) -> Result<()> {
                 to: ctx.accounts.owner_token_account.to_account_info(),
                 authority: ctx.accounts.adapter_authority.to_account_info(),
             },
-            signer_seeds,
+            &[&adapter_authority_seeds],
         ),
         amount,
         ctx.accounts.mint.decimals,
