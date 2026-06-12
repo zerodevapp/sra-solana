@@ -64,7 +64,7 @@ pub(crate) fn verify_previous_handler_ix(
             deposit.exclusive_relayer,
             deposit.fill_deadline_offset,
             deposit.exclusivity_period,
-        ) == *deposit,
+        )? == *deposit,
         SraError::PairedInstructionMismatch
     );
     Ok(args.params)

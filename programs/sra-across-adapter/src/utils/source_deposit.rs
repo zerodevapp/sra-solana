@@ -38,6 +38,12 @@ pub fn build_deposit_now_bundle(
     let target_handler = narrow_evm_address(&prepare.target_handler)?;
     let target_adapter = narrow_evm_address(&prepare.target_adapter)?;
     let target_token = narrow_evm_address(&prepare.target_token)?;
+    // v15: the protocol fee is collected by IX 1 before custody hand-off, so
+    // custody holds (and Across pulls) the NET — EVM bridges `amountAfterFee`
+    // (SRAHandler.sol:384). The ABI Message's deposit param stays GROSS: EVM
+    // encodes `params.amount` there (SRAHandler.sol:361) and never reads it
+    // on fill, so this is byte parity, not a value the destination consumes.
+    let bridged_amount = prepare.net_input_amount()?;
 
     let message = Message {
         account: prepare.recipient,
@@ -76,7 +82,7 @@ pub fn build_deposit_now_bundle(
         recipient: Pubkey::new_from_array(prepare.target_adapter),
         input_token: *input_mint,
         output_token: Pubkey::new_from_array(prepare.target_token),
-        input_amount: prepare.input_amount,
+        input_amount: bridged_amount,
         output_amount: u256_from_u64(prepare.output_amount),
         destination_chain_id: prepare.target_chain_id,
         exclusive_relayer: deposit.exclusive_relayer,
@@ -99,12 +105,55 @@ pub fn build_deposit_now_bundle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sra_common::constants::NO_FEE_BPS_OVERRIDE;
     use sra_common::source_deposit::PrepareParams;
 
     fn evm_bytes32(byte: u8) -> [u8; 32] {
         let mut out = [0u8; 32];
         out[12..].fill(byte);
         out
+    }
+
+    #[test]
+    fn build_deposit_now_bundle_bridges_net_and_encodes_gross_message() {
+        // Custody only holds input - fee after IX 1, so the Across deposit
+        // pulls the NET (EVM bridges `amountAfterFee`, SRAHandler.sol:384).
+        // The ABI Message's deposit param stays GROSS — EVM encodes
+        // `params.amount` there (SRAHandler.sol:361) and never reads it on
+        // fill; byte parity for identical deposits matters to indexers.
+        let prepare = PrepareParams::new(
+            11,
+            22,
+            42_161,
+            evm_bytes32(0x11),
+            evm_bytes32(0x22),
+            evm_bytes32(0x33),
+            [0x44u8; 32],
+            evm_bytes32(0xbb),
+            vec![1, 2],
+            2,
+            false,
+            NO_FEE_BPS_OVERRIDE,
+        );
+        let deposit = AcrossDepositParams::from_prepare(&prepare, Pubkey::new_unique(), 600, 120)
+            .expect("valid fee must convert");
+
+        let build = build_deposit_now_bundle(
+            &Pubkey::new_unique(),
+            &sample_sra_config(),
+            &Pubkey::new_unique(),
+            &prepare,
+            &deposit,
+            7,
+        )
+        .unwrap();
+
+        assert_eq!(build.params.input_amount, 9, "Across pulls the net");
+        assert_eq!(
+            build.message.deposit_info.deposit_param.amount,
+            u256_from_u64(11),
+            "ABI message encodes the GROSS deposit amount (EVM parity)",
+        );
     }
 
     fn sample_sra_config() -> SraConfig {
@@ -131,6 +180,9 @@ mod tests {
             [0x44u8; 32],
             evm_bytes32(0xbb),
             vec![1, 2],
+            0,
+            false,
+            NO_FEE_BPS_OVERRIDE,
         );
         let deposit = AcrossDepositParams {
             input_amount: 99,
@@ -151,7 +203,8 @@ mod tests {
             deposit.exclusive_relayer,
             deposit.fill_deadline_offset,
             deposit.exclusivity_period,
-        );
+        )
+        .expect("sample params must produce a valid net amount");
 
         let build = build_deposit_now_bundle(
             &adapter_authority,
@@ -205,8 +258,12 @@ mod tests {
             [0x44u8; 32],
             evm_bytes32(0xbb),
             vec![1, 2],
+            0,
+            false,
+            NO_FEE_BPS_OVERRIDE,
         );
-        let deposit = AcrossDepositParams::from_prepare(&prepare, Pubkey::new_unique(), 600, 120);
+        let deposit = AcrossDepositParams::from_prepare(&prepare, Pubkey::new_unique(), 600, 120)
+            .expect("sample params must produce a valid net amount");
         let sra_config = sample_sra_config();
 
         let build_0 = build_deposit_now_bundle(

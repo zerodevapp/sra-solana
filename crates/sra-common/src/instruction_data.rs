@@ -49,6 +49,9 @@ mod tests {
             app_id: [7u8; 32],
             target_token: [3u8; 32],
             action_idxs: vec![8],
+            protocol_fee_amount: 0,
+            is_sponsor: false,
+            protocol_fee_bps_override: crate::constants::NO_FEE_BPS_OVERRIDE,
         };
         let data = encode_anchor_instruction_data("wrong_name", &params);
 

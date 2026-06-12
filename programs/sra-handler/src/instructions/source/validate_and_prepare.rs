@@ -7,8 +7,15 @@ use solana_sdk_ids::{bpf_loader, bpf_loader_deprecated, bpf_loader_upgradeable, 
 use sra_common::{
     constants::{BPS_DENOMINATOR, MAX_ACTION_IDXS},
     errors::SraError,
-    seeds::{SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_SRA},
-    types::{AddressBookEntry, AddressBookRoot, MintNonce, SourceHandlerData, SraConfig},
+    fees::compute_protocol_fee,
+    seeds::{
+        SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_ASSET_FEE_TIER, SEED_FEE_CONFIG,
+        SEED_MINT_NONCE, SEED_PROTOCOL_FEE, SEED_SRA,
+    },
+    types::{
+        AddressBookEntry, AddressBookRoot, AssetFeeTier, FeeConfig, MintNonce, ProtocolFeeConfig,
+        SourceHandlerData, SraConfig,
+    },
 };
 
 use crate::events::DepositPrepared;
@@ -45,35 +52,38 @@ fn output_satisfies_slippage_floor(
     let scaled_input = (input_amount as u128)
         .checked_mul(slippage_numerator)
         .ok_or(SraError::ArithmeticOverflow)?;
+    // [TOB-SRA-3 / #50] The minimum must round UP (EVM `mulDivUp` + ceil
+    // downscale): a floored bound is strictly weaker than `slippage_bps`
+    // tolerates whenever the product does not divide exactly.
+    let min_acceptable_source_units = scaled_input.div_ceil(denom);
 
     if input_decimals >= output_decimals {
-        let min_acceptable = scaled_input / denom;
+        // Comparing the up-scaled output against the ceil'd source-side
+        // minimum is exactly EVM's double-ceil:
+        // output >= ceil(min / 10^k)  <=>  output * 10^k >= min.
         let mut scaled_output = output_amount as u128;
 
         for _ in 0..(input_decimals - output_decimals) {
-            if scaled_output >= min_acceptable {
+            if scaled_output >= min_acceptable_source_units {
                 return Ok(true);
             }
             scaled_output *= 10;
         }
 
-        return Ok(scaled_output >= min_acceptable);
+        return Ok(scaled_output >= min_acceptable_source_units);
     }
 
+    // Up-scaling multiplies the ceil'd minimum exactly (EVM `_scaleAmount`
+    // needs no rounding in this direction); early-return keeps the
+    // intermediate below `output` and therefore overflow-free.
     let output = output_amount as u128;
-    let mut min_acceptable = scaled_input / denom;
-    let mut remainder = scaled_input % denom;
+    let mut min_acceptable = min_acceptable_source_units;
 
     for _ in 0..(output_decimals - input_decimals) {
         if min_acceptable > output / 10 {
             return Ok(false);
         }
-
         min_acceptable *= 10;
-        let next_remainder = remainder * 10;
-        min_acceptable += next_remainder / denom;
-        remainder = next_remainder % denom;
-
         if min_acceptable > output {
             return Ok(false);
         }
@@ -84,10 +94,11 @@ fn output_satisfies_slippage_floor(
 
 pub use sra_common::source_deposit::PrepareParams;
 
-/// Validates a source deposit, moves funds into adapter custody, and emits the
-/// routing inputs consumed by the paired adapter instruction.
+/// Validates a source deposit, collects the protocol fee, moves the net into
+/// adapter custody, and emits the routing inputs consumed by the paired
+/// adapter instruction.
 #[derive(Accounts)]
-#[instruction(_handler_data: SourceHandlerData, params: PrepareParams)]
+#[instruction(handler_data: SourceHandlerData, params: PrepareParams)]
 pub struct ValidateAndPrepare<'info> {
     /// Pays tx fees. Separated from `owner` to enable gas sponsorship.
     #[account(mut)]
@@ -154,12 +165,73 @@ pub struct ValidateAndPrepare<'info> {
         bump = address_book_entry.bump,
     )]
     pub address_book_entry: Box<Account<'info, AddressBookEntry>>,
+    // v15 fee accounts (source-side collection). The two per-app PDAs are
+    // ALWAYS supplied, never Option: an Anchor Option account's *presence* is
+    // caller-chosen, so "absent == no fee" would let a depositor omit an
+    // existing fee config and pay zero. Their addresses are seeds-constrained
+    // to the COMMITTED handler_data.app_id; existence (EVM `isSet`) is an
+    // on-chain fact read in-body (`data_is_empty()` == not configured).
+    #[account(
+        seeds = [SEED_FEE_CONFIG],
+        bump = fee_config.bump,
+    )]
+    pub fee_config: Box<Account<'info, FeeConfig>>,
+    /// CHECK: PDA ["protocol_fee", handler_data.app_id] at the canonical bump;
+    /// empty data == no fee for this app — existence is read in-body, never
+    /// caller-claimed.
+    #[account(
+        seeds = [SEED_PROTOCOL_FEE, handler_data.app_id.as_ref()],
+        bump,
+    )]
+    pub protocol_fee_config: UncheckedAccount<'info>,
+    /// CHECK: PDA ["asset_fee_tier", handler_data.app_id, source_mint] at the
+    /// canonical bump; empty data == no tier, fall back to `default_fee_bps`.
+    #[account(
+        seeds = [
+            SEED_ASSET_FEE_TIER,
+            handler_data.app_id.as_ref(),
+            source_mint.key().as_ref(),
+        ],
+        bump,
+    )]
+    pub asset_fee_tier: UncheckedAccount<'info>,
+    /// Canonical ATA(fee_config.fee_recipient, source_mint); required iff the
+    /// resolved fee is positive. Option is sound here because the failure
+    /// direction is closed: omitting it blocks the deposit, never the fee.
+    #[account(
+        mut,
+        associated_token::mint = source_mint,
+        associated_token::authority = fee_config.fee_recipient,
+    )]
+    pub fee_recipient_token_account: Option<Box<Account<'info, TokenAccount>>>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
     /// CHECK: Instructions sysvar used to verify the next adapter instruction.
     #[account(address = instructions::ID)]
     pub instructions_sysvar: UncheckedAccount<'info>,
+}
+
+/// Reads a maybe-uninitialized program-owned PDA. The account meta is always
+/// supplied (seeds-pinned at the struct level), so emptiness here is the
+/// on-chain truth — EVM `isSet == false` — never a caller claim. Non-empty
+/// data passes the same checks `Account::try_from` would apply — owner, then
+/// discriminator + deserialize (`try_deserialize`) — restated here because the
+/// canonical wrapper's lifetime contract cannot return owned data from a
+/// temporary `AccountInfo`.
+fn read_optional_program_account<T: AccountDeserialize + Owner>(
+    info: AccountInfo,
+) -> Result<Option<T>> {
+    if info.data_is_empty() {
+        return Ok(None);
+    }
+    require_keys_eq!(
+        *info.owner,
+        T::owner(),
+        ErrorCode::AccountOwnedByWrongProgram
+    );
+    let data = info.try_borrow_data()?;
+    T::try_deserialize(&mut data.as_ref()).map(Some)
 }
 
 pub(crate) fn handler(
@@ -240,7 +312,75 @@ pub(crate) fn handler(
         )?;
     }
 
-    // Compare the decimal-normalized slippage floor without scaling into overflowing intermediates.
+    // The SRA PDA signs both the fee leg and the custody leg below.
+    let ch = handler_data.config_hash(
+        &ctx.accounts.sra_config.owner,
+        &ctx.accounts.sra_config.final_handler,
+    );
+    let owner_bytes = ctx.accounts.sra_config.owner.to_bytes();
+    let salt = ctx.accounts.sra_config.salt;
+    let bump_arr = [ctx.accounts.sra_config.bump];
+    let seeds: &[&[u8]] = &[
+        SEED_SRA,
+        owner_bytes.as_ref(),
+        ch.as_ref(),
+        salt.as_ref(),
+        bump_arr.as_ref(),
+    ];
+    let signer_seeds: &[&[&[u8]]] = &[seeds];
+
+    // Protocol fee (v15 — EVM `_buildSourceFeeCalls` parity). Recompute the
+    // fee from the committed app_id + live admin state and require the
+    // attested `params.protocol_fee_amount` to match: the explicit-arg +
+    // in-body-recheck pattern puts the fee in the attested bytes so the
+    // adapter derives the net bridged amount with no fee state of its own.
+    // An admin fee update racing an in-flight deposit fails closed here.
+    let protocol_fee_config = read_optional_program_account::<ProtocolFeeConfig>(
+        ctx.accounts.protocol_fee_config.to_account_info(),
+    )?;
+    let asset_fee_tier = read_optional_program_account::<AssetFeeTier>(
+        ctx.accounts.asset_fee_tier.to_account_info(),
+    )?;
+    let expected_fee = compute_protocol_fee(
+        params.is_sponsor,
+        &ctx.accounts.fee_config.fee_recipient,
+        protocol_fee_config.as_ref(),
+        asset_fee_tier.as_ref(),
+        params.input_amount,
+        params.protocol_fee_bps_override,
+    )?;
+    require!(
+        params.protocol_fee_amount == expected_fee,
+        SraError::FeeMismatch
+    );
+    if expected_fee > 0 {
+        let fee_recipient_token_account = ctx
+            .accounts
+            .fee_recipient_token_account
+            .as_ref()
+            .ok_or(SraError::MissingFeeRecipientAccount)?;
+        let cpi_accounts = TransferChecked {
+            from: ctx.accounts.sra_vault.to_account_info(),
+            mint: ctx.accounts.source_mint.to_account_info(),
+            to: fee_recipient_token_account.to_account_info(),
+            authority: ctx.accounts.sra_config.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            cpi_accounts,
+            signer_seeds,
+        );
+        transfer_checked(cpi_ctx, expected_fee, ctx.accounts.source_mint.decimals)?;
+    }
+    // Guaranteed by the FeeMismatch equality above; kept checked because the
+    // adapter independently derives the same value from the attested bytes.
+    let bridged_amount = params.net_input_amount()?;
+
+    // Compare the decimal-normalized slippage floor without scaling into
+    // overflowing intermediates. The floor is derived from the GROSS input —
+    // EVM applies slippage to the gross `params.amount` on both routes
+    // ([TOB-SRA-5 / #47]), so the protocol fee eats into the tolerance
+    // rather than hiding outside it.
     require!(
         output_satisfies_slippage_floor(
             params.input_amount,
@@ -254,24 +394,8 @@ pub(crate) fn handler(
 
     let nonce_now = ctx.accounts.mint_nonce.nonce;
 
-    // Transfer from the SRA vault into adapter custody.
+    // Transfer the net from the SRA vault into adapter custody.
     {
-        let ch = handler_data.config_hash(
-            &ctx.accounts.sra_config.owner,
-            &ctx.accounts.sra_config.final_handler,
-        );
-        let owner_bytes = ctx.accounts.sra_config.owner.to_bytes();
-        let salt = ctx.accounts.sra_config.salt;
-        let bump_arr = [ctx.accounts.sra_config.bump];
-        let seeds: &[&[u8]] = &[
-            SEED_SRA,
-            owner_bytes.as_ref(),
-            ch.as_ref(),
-            salt.as_ref(),
-            bump_arr.as_ref(),
-        ];
-        let signer_seeds: &[&[&[u8]]] = &[seeds];
-
         let cpi_accounts = TransferChecked {
             from: ctx.accounts.sra_vault.to_account_info(),
             mint: ctx.accounts.source_mint.to_account_info(),
@@ -283,11 +407,7 @@ pub(crate) fn handler(
             cpi_accounts,
             signer_seeds,
         );
-        transfer_checked(
-            cpi_ctx,
-            params.input_amount,
-            ctx.accounts.source_mint.decimals,
-        )?;
+        transfer_checked(cpi_ctx, bridged_amount, ctx.accounts.source_mint.decimals)?;
     }
 
     // Persist the PDA bump on first init, then advance the nonce.
@@ -306,6 +426,7 @@ pub(crate) fn handler(
         adapter_program: adapter_key,
         nonce: nonce_now,
         input_amount: params.input_amount,
+        protocol_fee_amount: expected_fee,
         output_amount: params.output_amount,
         target_chain_id: params.target_chain_id,
         target_handler: params.target_handler,
@@ -366,5 +487,50 @@ mod tests {
             validate_adapter_program(&program.account_info())
                 .unwrap_or_else(|_| panic!("{name} loader-owned program should be accepted"));
         }
+    }
+
+    // [TOB-SRA-3 / #50] The slippage minimum must round UP at every step, like
+    // EVM's `mulDivUp` + ceil-downscale — a floored minimum is strictly weaker
+    // than `slippage_bps` tolerates. These inputs are chosen so the BPS product
+    // does NOT divide exactly: floor and ceil disagree, making the rounding
+    // direction observable.
+
+    #[test]
+    fn slippage_floor_rounds_up_equal_decimals() {
+        // 1_000_001 * 9_950 = 9_950_009_950 → /10^4 = 995_000.995
+        // EVM minimum = ceil = 995_001; a floored bound would accept 995_000.
+        assert!(!output_satisfies_slippage_floor(1_000_001, 6, 995_000, 6, 50).unwrap());
+        assert!(output_satisfies_slippage_floor(1_000_001, 6, 995_001, 6, 50).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_rounds_up_on_upscale() {
+        // Same product; min = ceil(995_000.995) * 10 = 9_950_010 in 7dp output
+        // units. A floor(N·10/10^4) bound would accept 9_950_009.
+        assert!(!output_satisfies_slippage_floor(1_000_001, 6, 9_950_009, 7, 50).unwrap());
+        assert!(output_satisfies_slippage_floor(1_000_001, 6, 9_950_010, 7, 50).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_rounds_up_on_downscale() {
+        // 10_051 * 9_950 = 100_007_450 → /10^4 = 10_000.745 → ceil 10_001 in
+        // source (7dp) units. Output 1_000 (6dp) upscales to 10_000 — under the
+        // ceil'd minimum, over a floored one.
+        assert!(!output_satisfies_slippage_floor(10_051, 7, 1_000, 6, 50).unwrap());
+        assert!(output_satisfies_slippage_floor(10_051, 7, 1_001, 6, 50).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_exact_division_boundary_unchanged() {
+        // 1_000_000 * 9_950 / 10_000 = 995_000 exactly — floor == ceil; the
+        // historical boundary behavior stays.
+        assert!(output_satisfies_slippage_floor(1_000_000, 6, 995_000, 6, 50).unwrap());
+        assert!(!output_satisfies_slippage_floor(1_000_000, 6, 994_999, 6, 50).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_zero_slippage_requires_full_amount() {
+        assert!(output_satisfies_slippage_floor(1_000_000, 6, 1_000_000, 6, 0).unwrap());
+        assert!(!output_satisfies_slippage_floor(1_000_000, 6, 999_999, 6, 0).unwrap());
     }
 }

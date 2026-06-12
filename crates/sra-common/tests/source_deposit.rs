@@ -20,6 +20,9 @@ fn sample_prepare_params() -> PrepareParams {
         [0x44u8; 32],
         evm_bytes32(0x55),
         vec![1, 2],
+        1,
+        false,
+        sra_common::constants::NO_FEE_BPS_OVERRIDE,
     )
 }
 
@@ -41,7 +44,8 @@ fn decode_across_deposit_params_round_trips_valid_data() {
         anchor_lang::prelude::Pubkey::new_from_array([6u8; 32]),
         600,
         120,
-    );
+    )
+    .expect("sample params must produce a valid net amount");
     let data = encode_anchor_instruction_data("execute_deposit_across", &params);
 
     let decoded =

@@ -19,6 +19,10 @@ pub const BPS_DENOMINATOR: u16 = 10_000;
 /// Matches EVM `require(_feeBps <= 1000)` in BaseHandler.sol:267,275.
 pub const MAX_FEE_BPS: u16 = 1_000;
 
+/// Sentinel for "no per-deposit fee override".
+/// Matches EVM `type(uint16).max` in `TriggerParams.protocolFeeBpsOverride`.
+pub const NO_FEE_BPS_OVERRIDE: u16 = u16::MAX;
+
 /// Max slippage in basis points (100%).
 /// Matches EVM `require(slippageBps <= BPS_DENOMINATOR)` in SRAHandler.sol:78.
 pub const MAX_SLIPPAGE_BPS: u16 = BPS_DENOMINATOR;
