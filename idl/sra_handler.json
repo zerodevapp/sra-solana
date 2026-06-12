@@ -8,6 +8,52 @@
   },
   "instructions": [
     {
+      "name": "accept_admin",
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "pending_admin",
+          "signer": true,
+          "relations": [
+            "fee_config"
+          ]
+        },
+        {
+          "name": "fee_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "initialize_address_book_root",
       "discriminator": [
         165,
@@ -40,6 +86,63 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "initialize_fee_config",
+      "discriminator": [
+        62,
+        162,
+        20,
+        133,
+        121,
+        65,
+        145,
+        27
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "fee_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "fee_recipient",
+          "type": "pubkey"
+        }
+      ]
     },
     {
       "name": "initialize_sra",
@@ -119,6 +222,192 @@
         },
         {
           "name": "salt",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "remove_asset_fee_tier",
+      "discriminator": [
+        60,
+        0,
+        205,
+        88,
+        100,
+        21,
+        171,
+        122
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "Receives the closed PDA's rent."
+          ],
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "fee_config"
+          ]
+        },
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_fee_tier",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  102,
+                  101,
+                  101,
+                  95,
+                  116,
+                  105,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "app_id"
+              },
+              {
+                "kind": "arg",
+                "path": "mint"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "app_id",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "remove_protocol_fee",
+      "discriminator": [
+        9,
+        254,
+        130,
+        184,
+        197,
+        196,
+        96,
+        67
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "Receives the closed PDA's rent."
+          ],
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "fee_config"
+          ]
+        },
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "protocol_fee_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  102,
+                  101,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "app_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "app_id",
           "type": {
             "array": [
               "u8",
@@ -223,6 +512,352 @@
         {
           "name": "target_decimals",
           "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "set_asset_fee_tier",
+      "discriminator": [
+        18,
+        28,
+        152,
+        85,
+        201,
+        114,
+        138,
+        37
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "fee_config"
+          ]
+        },
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "protocol_fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  102,
+                  101,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "app_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_fee_tier",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  102,
+                  101,
+                  101,
+                  95,
+                  116,
+                  105,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "app_id"
+              },
+              {
+                "kind": "arg",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "app_id",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "threshold",
+          "type": "u64"
+        },
+        {
+          "name": "below_bps",
+          "type": "u16"
+        },
+        {
+          "name": "above_or_equal_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "set_fee_recipient",
+      "discriminator": [
+        227,
+        18,
+        215,
+        42,
+        237,
+        246,
+        151,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "fee_config"
+          ]
+        },
+        {
+          "name": "fee_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "new_recipient",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_pending_admin",
+      "discriminator": [
+        248,
+        204,
+        95,
+        229,
+        240,
+        21,
+        219,
+        3
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "fee_config"
+          ]
+        },
+        {
+          "name": "fee_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "new_pending_admin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_protocol_fee",
+      "discriminator": [
+        173,
+        239,
+        83,
+        242,
+        136,
+        43,
+        144,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "fee_config"
+          ]
+        },
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "protocol_fee_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  102,
+                  101,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "app_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "app_id",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "default_fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "allow_override",
+          "type": "bool"
         }
       ]
     },
@@ -688,6 +1323,32 @@
       ]
     },
     {
+      "name": "AssetFeeTier",
+      "discriminator": [
+        88,
+        184,
+        76,
+        84,
+        15,
+        33,
+        50,
+        23
+      ]
+    },
+    {
+      "name": "FeeConfig",
+      "discriminator": [
+        143,
+        52,
+        146,
+        187,
+        219,
+        123,
+        76,
+        155
+      ]
+    },
+    {
       "name": "MintNonce",
       "discriminator": [
         207,
@@ -698,6 +1359,19 @@
         162,
         153,
         119
+      ]
+    },
+    {
+      "name": "ProtocolFeeConfig",
+      "discriminator": [
+        81,
+        109,
+        12,
+        19,
+        140,
+        182,
+        21,
+        238
       ]
     },
     {
@@ -742,6 +1416,45 @@
       ]
     },
     {
+      "name": "AdminTransferred",
+      "discriminator": [
+        255,
+        147,
+        182,
+        5,
+        199,
+        217,
+        38,
+        179
+      ]
+    },
+    {
+      "name": "AssetFeeTierRemoved",
+      "discriminator": [
+        108,
+        79,
+        170,
+        134,
+        133,
+        28,
+        55,
+        131
+      ]
+    },
+    {
+      "name": "AssetFeeTierUpdated",
+      "discriminator": [
+        218,
+        54,
+        194,
+        254,
+        187,
+        183,
+        157,
+        95
+      ]
+    },
+    {
       "name": "DepositPrepared",
       "discriminator": [
         187,
@@ -752,6 +1465,71 @@
         77,
         103,
         114
+      ]
+    },
+    {
+      "name": "FeeConfigInitialized",
+      "discriminator": [
+        99,
+        232,
+        112,
+        161,
+        28,
+        61,
+        171,
+        178
+      ]
+    },
+    {
+      "name": "FeeRecipientUpdated",
+      "discriminator": [
+        24,
+        150,
+        233,
+        92,
+        169,
+        221,
+        233,
+        244
+      ]
+    },
+    {
+      "name": "PendingAdminSet",
+      "discriminator": [
+        53,
+        122,
+        151,
+        23,
+        62,
+        199,
+        171,
+        136
+      ]
+    },
+    {
+      "name": "ProtocolFeeRemoved",
+      "discriminator": [
+        22,
+        14,
+        179,
+        156,
+        101,
+        44,
+        8,
+        202
+      ]
+    },
+    {
+      "name": "ProtocolFeeUpdated",
+      "discriminator": [
+        172,
+        56,
+        83,
+        113,
+        219,
+        69,
+        69,
+        105
       ]
     },
     {
@@ -879,6 +1657,126 @@
           {
             "name": "owner",
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AdminTransferred",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "old_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_admin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AssetFeeTier",
+      "docs": [
+        "Per-(app, mint) volume tier (EVM `assetFeeTiers[appId][asset]`).",
+        "PDA seeds: [\"asset_fee_tier\", app_id, mint]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "threshold",
+            "docs": [
+              "Amount boundary in the mint's native units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "below_bps",
+            "docs": [
+              "Fee bps when amount < threshold; <= MAX_FEE_BPS."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "above_or_equal_bps",
+            "docs": [
+              "Fee bps when amount >= threshold; <= MAX_FEE_BPS."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AssetFeeTierRemoved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AssetFeeTierUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "threshold",
+            "type": "u64"
+          },
+          {
+            "name": "below_bps",
+            "type": "u16"
+          },
+          {
+            "name": "above_or_equal_bps",
+            "type": "u16"
           }
         ]
       }
@@ -1019,6 +1917,75 @@
       }
     },
     {
+      "name": "FeeConfig",
+      "docs": [
+        "Global fee state: admin + the single fee recipient."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_admin",
+            "docs": [
+              "Pubkey::default() = none (2-step admin transfer)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_recipient",
+            "docs": [
+              "Pubkey::default() = fees disabled globally."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeeConfigInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "fee_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_recipient",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeeRecipientUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "old_fee_recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_fee_recipient",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
       "name": "MintNonce",
       "docs": [
         "Persistent nonce per `(sra_config, source_mint)`. The owner-signed deposit",
@@ -1035,6 +2002,22 @@
           {
             "name": "bump",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PendingAdminSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_admin",
+            "type": "pubkey"
           }
         ]
       }
@@ -1106,6 +2089,88 @@
             "type": {
               "vec": "u64"
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProtocolFeeConfig",
+      "docs": [
+        "Per-app protocol fee (EVM `protocolFeeConfig[appId]`). The app is the fee",
+        "payer, never a payee — all fees go to `FeeConfig.fee_recipient`.",
+        "PDA seeds: [\"protocol_fee\", app_id]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "default_fee_bps",
+            "docs": [
+              "Fallback when no asset tier matches; <= MAX_FEE_BPS."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "allow_override",
+            "docs": [
+              "Honor a per-deposit bps override (EVM `allowOverride`)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProtocolFeeRemoved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProtocolFeeUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "default_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "allow_override",
+            "type": "bool"
           }
         ]
       }

@@ -15,9 +15,17 @@ describe("sra-handler", () => {
 
   it("Exposes the expected generated client instruction surface", async () => {
     const expectedInstructionNames = [
+      "acceptAdmin",
       "initializeAddressBookRoot",
+      "initializeFeeConfig",
       "initializeSra",
+      "removeAssetFeeTier",
+      "removeProtocolFee",
       "setAddressBookEntry",
+      "setAssetFeeTier",
+      "setFeeRecipient",
+      "setPendingAdmin",
+      "setProtocolFee",
       "validateAndPrepare",
     ];
     const removedInstructionNames = ["updateAdapters", "updateSlippage"];

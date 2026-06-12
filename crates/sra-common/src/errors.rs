@@ -90,4 +90,12 @@ pub enum SraError {
 
     #[msg("Deposit routing does not match the committed SRA route")]
     RouteMismatch,
+
+    // Reserved — no longer raised (any app_id is registrable, EVM parity);
+    // kept so later codes stay stable.
+    #[msg("app_id must be non-zero")]
+    InvalidAppId,
+
+    #[msg("Pending admin must be non-default")]
+    InvalidPendingAdmin,
 }

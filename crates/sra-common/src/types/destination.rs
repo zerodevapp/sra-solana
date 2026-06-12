@@ -32,7 +32,6 @@ pub struct SolanaSraRoute {
     // Mutable
     #[max_len(MAX_ADAPTERS)]
     pub allowed_adapters: Vec<Pubkey>,
-    pub fee_bps: u16,
     pub paused: bool,
     pub bump: u8,
 }
@@ -75,9 +74,9 @@ mod tests {
     fn solana_sra_route_init_space() {
         // 32 owner + 8 source_chain_id + 32 expected_mint + 32 app_id
         // + 4 + (35 * 4) action_config + 32 salt
-        // + 4 + (32 * 8) allowed_adapters + 2 fee_bps + 1 paused + 1 bump
-        // = 32 + 8 + 32 + 32 + 144 + 32 + 260 + 2 + 1 + 1 = 544
-        assert_eq!(SolanaSraRoute::INIT_SPACE, 544);
+        // + 4 + (32 * 8) allowed_adapters + 1 paused + 1 bump
+        // = 32 + 8 + 32 + 32 + 144 + 32 + 260 + 1 + 1 = 542
+        assert_eq!(SolanaSraRoute::INIT_SPACE, 542);
     }
 
     #[test]

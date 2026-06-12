@@ -19,7 +19,8 @@ pub const SEED_EXECUTION: &[u8] = b"execution";
 
 // Shared (handler-owned)
 pub const SEED_FEE_CONFIG: &[u8] = b"fee_config";
-pub const SEED_APP_FEE: &[u8] = b"app_fee";
+pub const SEED_PROTOCOL_FEE: &[u8] = b"protocol_fee";
+pub const SEED_ASSET_FEE_TIER: &[u8] = b"asset_fee_tier";
 
 // Adapter-owned
 pub const SEED_ADAPTER_AUTHORITY: &[u8] = b"adapter_authority";

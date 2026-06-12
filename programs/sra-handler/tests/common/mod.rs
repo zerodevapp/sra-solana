@@ -26,10 +26,16 @@ use solana_system_interface::program as system_program;
 use sra_common::{
     constants::ACROSS_SPOKE_POOL_ID,
     instruction_data::encode_anchor_instruction_data,
-    seeds::{SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_MINT_NONCE, SEED_SRA},
+    seeds::{
+        SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_ASSET_FEE_TIER, SEED_FEE_CONFIG,
+        SEED_MINT_NONCE, SEED_PROTOCOL_FEE, SEED_SRA,
+    },
     source_deposit::{AcrossDepositParams, PrepareParams},
     test_utils::DEFAULT_ACTION_IDXS,
-    types::{AddressBookEntry, AddressBookRoot, MintNonce, SourceHandlerData, SraConfig},
+    types::{
+        AddressBookEntry, AddressBookRoot, AssetFeeTier, FeeConfig, MintNonce, ProtocolFeeConfig,
+        SourceHandlerData, SraConfig,
+    },
 };
 use std::{fs, path::PathBuf};
 
@@ -394,6 +400,187 @@ pub fn fetch_address_book_entry(svm: &LiteSVM, pda: &Pubkey) -> AddressBookEntry
 pub fn fetch_mint_nonce(svm: &LiteSVM, pda: &Pubkey) -> MintNonce {
     let acct = svm.get_account(pda).expect("mint_nonce account exists");
     MintNonce::try_deserialize(&mut acct.data.as_slice()).expect("valid MintNonce")
+}
+
+// --- Fee admin (shared; will be consumed by the source deposit path) ---
+
+pub fn derive_fee_config_pda() -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[SEED_FEE_CONFIG], &PROGRAM_ID)
+}
+
+pub fn derive_protocol_fee_pda(app_id: &[u8; 32]) -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[SEED_PROTOCOL_FEE, app_id], &PROGRAM_ID)
+}
+
+pub fn derive_asset_fee_tier_pda(app_id: &[u8; 32], mint: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[SEED_ASSET_FEE_TIER, app_id, mint.as_ref()], &PROGRAM_ID)
+}
+
+pub fn initialize_fee_config_ix(
+    payer: &Pubkey,
+    admin: &Pubkey,
+    fee_recipient: Pubkey,
+) -> Instruction {
+    let (fee_config, _) = derive_fee_config_pda();
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::InitializeFeeConfig {
+            payer: *payer,
+            admin: *admin,
+            fee_config,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::InitializeFeeConfig { fee_recipient }.data(),
+    }
+}
+
+pub fn set_fee_recipient_ix(admin: &Pubkey, new_recipient: Pubkey) -> Instruction {
+    let (fee_config, _) = derive_fee_config_pda();
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::SetFeeRecipient {
+            admin: *admin,
+            fee_config,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::SetFeeRecipient { new_recipient }.data(),
+    }
+}
+
+pub fn set_protocol_fee_ix(
+    payer: &Pubkey,
+    admin: &Pubkey,
+    app_id: [u8; 32],
+    default_fee_bps: u16,
+    allow_override: bool,
+) -> Instruction {
+    let (fee_config, _) = derive_fee_config_pda();
+    let (protocol_fee_config, _) = derive_protocol_fee_pda(&app_id);
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::SetProtocolFee {
+            payer: *payer,
+            admin: *admin,
+            fee_config,
+            protocol_fee_config,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::SetProtocolFee {
+            app_id,
+            default_fee_bps,
+            allow_override,
+        }
+        .data(),
+    }
+}
+
+pub fn remove_protocol_fee_ix(admin: &Pubkey, app_id: [u8; 32]) -> Instruction {
+    let (fee_config, _) = derive_fee_config_pda();
+    let (protocol_fee_config, _) = derive_protocol_fee_pda(&app_id);
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::RemoveProtocolFee {
+            admin: *admin,
+            fee_config,
+            protocol_fee_config,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::RemoveProtocolFee { app_id }.data(),
+    }
+}
+
+pub fn set_asset_fee_tier_ix(
+    payer: &Pubkey,
+    admin: &Pubkey,
+    app_id: [u8; 32],
+    mint: Pubkey,
+    threshold: u64,
+    below_bps: u16,
+    above_or_equal_bps: u16,
+) -> Instruction {
+    let (fee_config, _) = derive_fee_config_pda();
+    let (protocol_fee_config, _) = derive_protocol_fee_pda(&app_id);
+    let (asset_fee_tier, _) = derive_asset_fee_tier_pda(&app_id, &mint);
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::SetAssetFeeTier {
+            payer: *payer,
+            admin: *admin,
+            fee_config,
+            protocol_fee_config,
+            asset_fee_tier,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::SetAssetFeeTier {
+            app_id,
+            mint,
+            threshold,
+            below_bps,
+            above_or_equal_bps,
+        }
+        .data(),
+    }
+}
+
+pub fn remove_asset_fee_tier_ix(admin: &Pubkey, app_id: [u8; 32], mint: Pubkey) -> Instruction {
+    let (fee_config, _) = derive_fee_config_pda();
+    let (asset_fee_tier, _) = derive_asset_fee_tier_pda(&app_id, &mint);
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::RemoveAssetFeeTier {
+            admin: *admin,
+            fee_config,
+            asset_fee_tier,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::RemoveAssetFeeTier { app_id, mint }.data(),
+    }
+}
+
+pub fn set_pending_admin_ix(admin: &Pubkey, new_pending_admin: Pubkey) -> Instruction {
+    let (fee_config, _) = derive_fee_config_pda();
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::SetPendingAdmin {
+            admin: *admin,
+            fee_config,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::SetPendingAdmin { new_pending_admin }.data(),
+    }
+}
+
+pub fn accept_admin_ix(pending_admin: &Pubkey) -> Instruction {
+    let (fee_config, _) = derive_fee_config_pda();
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::AcceptAdmin {
+            pending_admin: *pending_admin,
+            fee_config,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::AcceptAdmin {}.data(),
+    }
+}
+
+pub fn fetch_fee_config(svm: &LiteSVM, pda: &Pubkey) -> FeeConfig {
+    let acct = svm.get_account(pda).expect("fee_config account exists");
+    FeeConfig::try_deserialize(&mut acct.data.as_slice()).expect("valid FeeConfig")
+}
+
+pub fn fetch_protocol_fee_config(svm: &LiteSVM, pda: &Pubkey) -> ProtocolFeeConfig {
+    let acct = svm
+        .get_account(pda)
+        .expect("protocol_fee_config account exists");
+    ProtocolFeeConfig::try_deserialize(&mut acct.data.as_slice()).expect("valid ProtocolFeeConfig")
+}
+
+pub fn fetch_asset_fee_tier(svm: &LiteSVM, pda: &Pubkey) -> AssetFeeTier {
+    let acct = svm.get_account(pda).expect("asset_fee_tier account exists");
+    AssetFeeTier::try_deserialize(&mut acct.data.as_slice()).expect("valid AssetFeeTier")
 }
 
 pub fn seed_mint_nonce_account(svm: &mut LiteSVM, pda: &Pubkey, nonce: u64, bump: u8) {

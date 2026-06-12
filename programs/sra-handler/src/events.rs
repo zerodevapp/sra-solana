@@ -24,6 +24,58 @@ pub struct AddressBookEntrySet {
     pub target_decimals: u8,
 }
 
+#[event]
+pub struct FeeConfigInitialized {
+    pub fee_config: Pubkey,
+    pub admin: Pubkey,
+    pub fee_recipient: Pubkey,
+}
+
+#[event]
+pub struct FeeRecipientUpdated {
+    pub old_fee_recipient: Pubkey,
+    pub new_fee_recipient: Pubkey,
+}
+
+#[event]
+pub struct ProtocolFeeUpdated {
+    pub app_id: [u8; 32],
+    pub default_fee_bps: u16,
+    pub allow_override: bool,
+}
+
+#[event]
+pub struct ProtocolFeeRemoved {
+    pub app_id: [u8; 32],
+}
+
+#[event]
+pub struct AssetFeeTierUpdated {
+    pub app_id: [u8; 32],
+    pub mint: Pubkey,
+    pub threshold: u64,
+    pub below_bps: u16,
+    pub above_or_equal_bps: u16,
+}
+
+#[event]
+pub struct AssetFeeTierRemoved {
+    pub app_id: [u8; 32],
+    pub mint: Pubkey,
+}
+
+#[event]
+pub struct PendingAdminSet {
+    pub admin: Pubkey,
+    pub pending_admin: Pubkey,
+}
+
+#[event]
+pub struct AdminTransferred {
+    pub old_admin: Pubkey,
+    pub new_admin: Pubkey,
+}
+
 /// Emitted by `validate_and_prepare` after funds reach adapter custody. Carries
 /// the routing inputs needed to build the target-specific bridge message.
 #[event]
