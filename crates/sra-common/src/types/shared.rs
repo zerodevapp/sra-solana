@@ -1,9 +1,6 @@
 use anchor_lang::prelude::*;
 
-/// Global fee state: admin + the single fee recipient (EVM BaseHandler parity).
-/// Will be consumed by the source deposit path (resolver lands separately);
-/// the destination charges nothing.
-/// PDA seeds: ["fee_config"]
+/// Global fee state: admin + the single fee recipient.
 #[account]
 #[derive(InitSpace)]
 pub struct FeeConfig {
@@ -17,7 +14,6 @@ pub struct FeeConfig {
 
 /// Per-app protocol fee (EVM `protocolFeeConfig[appId]`). The app is the fee
 /// payer, never a payee — all fees go to `FeeConfig.fee_recipient`.
-/// PDA existence == EVM `isSet`; `remove_protocol_fee` closes the PDA.
 /// PDA seeds: ["protocol_fee", app_id]
 #[account]
 #[derive(InitSpace)]
@@ -31,7 +27,6 @@ pub struct ProtocolFeeConfig {
 }
 
 /// Per-(app, mint) volume tier (EVM `assetFeeTiers[appId][asset]`).
-/// PDA existence == EVM `tier.isSet`; `remove_asset_fee_tier` closes the PDA.
 /// PDA seeds: ["asset_fee_tier", app_id, mint]
 #[account]
 #[derive(InitSpace)]

@@ -24,8 +24,6 @@ pub struct AddressBookEntrySet {
     pub target_decimals: u8,
 }
 
-// -- Fee admin (EVM BaseHandler event parity) --
-
 #[event]
 pub struct FeeConfigInitialized {
     pub fee_config: Pubkey,

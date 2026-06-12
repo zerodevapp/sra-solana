@@ -35,8 +35,6 @@ pub struct SolanaSraRoute {
     pub paused: bool,
     pub bump: u8,
 }
-// No fee_bps: the destination charges nothing — fees are collected on the
-// source chain (EVM parity).
 
 /// Execution status state machine for fill lifecycle.
 /// Borsh-serialized as a single u8 discriminant (no variant data). Size = 1 byte.

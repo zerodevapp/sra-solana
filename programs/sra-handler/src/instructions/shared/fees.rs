@@ -1,8 +1,5 @@
-//! Fee admin (EVM BaseHandler parity): a per-app tiered PROTOCOL fee paid to one
-//! global `fee_recipient`. Apps are fee payers, never payees. PDA existence is
-//! the EVM `isSet` flag — `remove_*` closes the PDA. Will be consumed by the
-//! source deposit path (the resolver lands separately); the destination
-//! charges nothing.
+//! Fee admin: a per-app tiered PROTOCOL fee paid to one global
+//! `fee_recipient`. Apps are fee payers, never payees.
 
 use anchor_lang::prelude::*;
 use sra_common::{
@@ -21,10 +18,6 @@ use crate::events::{
 // initialize_fee_config
 // ---------------------------------------------------------------------------
 
-/// First-caller-wins singleton (EVM sets `admin` atomically in the
-/// constructor; Solana cannot). Deployment policy: initialize in the same
-/// bundle as the deploy and VERIFY `fee_config.admin` before burning the
-/// upgrade authority — a squatted singleton is unrecoverable afterwards.
 #[derive(Accounts)]
 pub struct InitializeFeeConfig<'info> {
     #[account(mut)]
@@ -41,7 +34,7 @@ pub struct InitializeFeeConfig<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// `fee_recipient = Pubkey::default()` leaves fees disabled (EVM address(0)).
+/// `fee_recipient = Pubkey::default()` leaves fees disabled.
 pub(crate) fn initialize_fee_config_handler(
     ctx: Context<InitializeFeeConfig>,
     fee_recipient: Pubkey,
@@ -72,7 +65,7 @@ pub struct SetFeeRecipient<'info> {
     pub fee_config: Account<'info, FeeConfig>,
 }
 
-/// `Pubkey::default()` disables all fees globally (EVM setFeeRecipient(0)).
+/// `Pubkey::default()` disables all fees globally.
 pub(crate) fn set_fee_recipient_handler(
     ctx: Context<SetFeeRecipient>,
     new_recipient: Pubkey,
@@ -112,9 +105,7 @@ pub struct SetProtocolFee<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Upsert (EVM setProtocolFee + setProtocolFeeOverridable). Any `app_id` is
-/// registrable, including zero — `protocolFeeConfig[bytes32(0)]` prices
-/// app-less deposits on EVM.
+/// Upsert. Any `app_id` is registrable, including zero — `protocolFeeConfig[bytes32(0)]` prices app-less deposits.
 pub(crate) fn set_protocol_fee_handler(
     ctx: Context<SetProtocolFee>,
     app_id: [u8; 32],
@@ -155,10 +146,7 @@ pub struct RemoveProtocolFee<'info> {
     pub protocol_fee_config: Account<'info, ProtocolFeeConfig>,
 }
 
-/// Closing the PDA is the EVM `removeProtocolFee` — the app's fee falls back
-/// to "not configured" (= 0). Existing `AssetFeeTier` PDAs survive (inert
-/// while no config exists, revived by re-registration — same as EVM's
-/// dangling `assetFeeTiers` entries).
+/// Existing `AssetFeeTier` PDAs survive while no config exists, revived by re-registration.
 pub(crate) fn remove_protocol_fee_handler(
     ctx: Context<RemoveProtocolFee>,
     _app_id: [u8; 32],
@@ -181,8 +169,6 @@ pub struct SetAssetFeeTier<'info> {
     pub admin: Signer<'info>,
     #[account(seeds = [SEED_FEE_CONFIG], bump = fee_config.bump, has_one = admin)]
     pub fee_config: Account<'info, FeeConfig>,
-    /// Must exist (EVM ProtocolFeeNotSet): a tier refines an app's configured
-    /// fee; it cannot create one.
     #[account(seeds = [SEED_PROTOCOL_FEE, app_id.as_ref()], bump = protocol_fee_config.bump)]
     pub protocol_fee_config: Account<'info, ProtocolFeeConfig>,
     #[account(
@@ -196,8 +182,7 @@ pub struct SetAssetFeeTier<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// `mint` is a key, not a validated account — EVM keys tiers by raw asset
-/// address; registration is admin-gated either way.
+/// `mint` is a key, not a validated account — registration is admin-gated either way.
 pub(crate) fn set_asset_fee_tier_handler(
     ctx: Context<SetAssetFeeTier>,
     app_id: [u8; 32],
@@ -230,10 +215,7 @@ pub(crate) fn set_asset_fee_tier_handler(
     Ok(())
 }
 
-/// Deliberately does NOT require a live `ProtocolFeeConfig` (divergence from
-/// EVM, which gates tier writes on `pf.isSet`): this permits cleaning up — and
-/// reclaiming rent from — tiers left dangling by `remove_protocol_fee`, which
-/// EVM strands until re-registration.
+/// Deliberately does NOT require a live `ProtocolFeeConfig` (vs EVM's `ProtocolFeeNotSet`).
 #[derive(Accounts)]
 #[instruction(app_id: [u8; 32], mint: Pubkey)]
 pub struct RemoveAssetFeeTier<'info> {
@@ -279,7 +261,6 @@ pub(crate) fn set_pending_admin_handler(
     ctx: Context<SetPendingAdmin>,
     new_pending_admin: Pubkey,
 ) -> Result<()> {
-    // EVM parity: setPendingAdmin(address(0)) reverts.
     require!(
         new_pending_admin != Pubkey::default(),
         SraError::InvalidPendingAdmin
