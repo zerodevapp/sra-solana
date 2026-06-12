@@ -2299,14 +2299,14 @@
           {
             "name": "is_sponsor",
             "docs": [
-              "EVM `isSponsor` — owner-signed assertion that skips the protocol fee."
+              "Owner-signed assertion that skips the protocol fee."
             ],
             "type": "bool"
           },
           {
             "name": "protocol_fee_bps_override",
             "docs": [
-              "`NO_FEE_BPS_OVERRIDE` (u16::MAX) = no override (EVM sentinel)."
+              "`NO_FEE_BPS_OVERRIDE` (u16::MAX) = no override."
             ],
             "type": "u16"
           }

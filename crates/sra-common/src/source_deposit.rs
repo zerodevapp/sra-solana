@@ -16,14 +16,10 @@ pub struct PrepareParams {
     pub app_id: [u8; 32],
     pub target_token: [u8; 32],
     pub action_idxs: Vec<u64>,
-    // v15 fee fields (EVM TriggerParams parity). Caller-computed, recomputed
-    // in-body by the handler and equality-checked (FeeMismatch). Living in the
-    // attested bytes lets the adapter derive the net bridged amount
-    // (input - fee) with no fee state of its own.
     pub protocol_fee_amount: u64,
-    /// EVM `isSponsor` — owner-signed assertion that skips the protocol fee.
+    /// Owner-signed assertion that skips the protocol fee.
     pub is_sponsor: bool,
-    /// `NO_FEE_BPS_OVERRIDE` (u16::MAX) = no override (EVM sentinel).
+    /// `NO_FEE_BPS_OVERRIDE` (u16::MAX) = no override.
     pub protocol_fee_bps_override: u16,
 }
 
@@ -87,9 +83,7 @@ impl PrepareParams {
     }
 
     /// Amount actually bridged: gross input minus the attested protocol fee
-    /// (EVM `amountAfterFee`). Fails closed when the fee exceeds the input —
-    /// a state the handler's `FeeMismatch` recheck makes unreachable, kept
-    /// defensive because the adapter also derives the net from these bytes.
+    /// Fails closed when the fee exceeds the input.
     pub fn net_input_amount(&self) -> Result<u64> {
         self.input_amount
             .checked_sub(self.protocol_fee_amount)

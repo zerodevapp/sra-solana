@@ -20,7 +20,6 @@ pub const BPS_DENOMINATOR: u16 = 10_000;
 pub const MAX_FEE_BPS: u16 = 1_000;
 
 /// Sentinel for "no per-deposit fee override".
-/// Matches EVM `type(uint16).max` in `TriggerParams.protocolFeeBpsOverride`.
 pub const NO_FEE_BPS_OVERRIDE: u16 = u16::MAX;
 
 /// Max slippage in basis points (100%).
