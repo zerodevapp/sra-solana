@@ -1,11 +1,9 @@
 //! Source protocol-fee resolution (v15, EVM parity).
 //!
 //! Pure helpers shared by the handler (on-chain recompute), tests, and the
-//! eventual TS SDK mirror. Semantics track `sra-stx` `BaseHandler.sol`
-//! byte-for-byte in observable behavior — including the short-circuit ORDER:
+//! eventual TS SDK mirror. including the short-circuit order:
 //! sponsor and the `_calculateFees` guards return zero BEFORE the override
-//! bound check, and an override supplied while `allow_override == false` is
-//! silently ignored (EVM has no revert on that path).
+//! bound check
 
 use anchor_lang::prelude::*;
 
@@ -13,12 +11,8 @@ use crate::constants::{BPS_DENOMINATOR, MAX_FEE_BPS, NO_FEE_BPS_OVERRIDE};
 use crate::errors::SraError;
 use crate::types::{AssetFeeTier, ProtocolFeeConfig};
 
-/// Mirrors EVM `_resolveProtocolFeeBps`. The caller guarantees the app's
-/// `ProtocolFeeConfig` exists (EVM `pf.isSet` — on Solana, PDA existence).
-///
 /// The `<= MAX_FEE_BPS` bound is evaluated ONLY when the override is honored
-/// (`bps_override != NO_FEE_BPS_OVERRIDE && allow_override`), exactly like the
-/// `require` inside EVM's honored branch.
+/// (`bps_override != NO_FEE_BPS_OVERRIDE && allow_override`)
 pub fn resolve_protocol_fee_bps(
     config: &ProtocolFeeConfig,
     tier: Option<&AssetFeeTier>,
@@ -39,9 +33,10 @@ pub fn resolve_protocol_fee_bps(
     Ok(config.default_fee_bps)
 }
 
-/// Mirrors the EVM sponsor skip (`if (!isSponsor) _calculateFees(...)`) plus
-/// `_calculateFees` itself: recipient-unset and config-absent return zero
-/// before any bps resolution, then `fee = floor(amount * bps / 10_000)`.
+/// Computes the protocol fee for a deposit. The zero paths — sponsored
+/// deposit, no global fee recipient, no fee config for the app — return
+/// before any bps resolution (so an out-of-bounds override cannot error on
+/// them); otherwise `fee = floor(amount * bps / 10_000)`.
 ///
 /// Takes the recipient itself so the "`Pubkey::default()` = fees disabled
 /// globally" sentinel stays owned by the fee layer, not re-derived at call
