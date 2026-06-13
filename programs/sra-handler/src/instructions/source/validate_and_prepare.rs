@@ -197,7 +197,11 @@ fn read_optional_program_account<T: AccountDeserialize + Owner>(
     if info.data_is_empty() {
         return Ok(None);
     }
-    require_keys_eq!(*info.owner, T::owner(), ErrorCode::AccountOwnedByWrongProgram);
+    require_keys_eq!(
+        *info.owner,
+        T::owner(),
+        ErrorCode::AccountOwnedByWrongProgram
+    );
     let data = info.try_borrow_data()?;
     T::try_deserialize(&mut data.as_ref()).map(Some)
 }
@@ -353,7 +357,10 @@ pub(crate) fn handler(
     let nonce_now = ctx.accounts.mint_nonce.nonce;
 
     // Transfer the net from the SRA vault into adapter custody.
-    transfer_from_vault(ctx.accounts.adapter_custody.to_account_info(), bridged_amount)?;
+    transfer_from_vault(
+        ctx.accounts.adapter_custody.to_account_info(),
+        bridged_amount,
+    )?;
 
     // Persist the PDA bump on first init, then advance the nonce.
     let mint_nonce = &mut ctx.accounts.mint_nonce;
