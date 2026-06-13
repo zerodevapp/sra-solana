@@ -58,13 +58,15 @@ pub(crate) fn verify_previous_handler_ix(
         )) == args.paired_adapter_ix_data_hash,
         SraError::PairedInstructionMismatch
     );
+    let expected_deposit = AcrossDepositParams::from_prepare(
+        &args.params,
+        deposit.exclusive_relayer,
+        deposit.fill_deadline_offset,
+        deposit.exclusivity_period,
+    )
+    .map_err(|_| error!(SraError::PairedInstructionMismatch))?;
     require!(
-        AcrossDepositParams::from_prepare(
-            &args.params,
-            deposit.exclusive_relayer,
-            deposit.fill_deadline_offset,
-            deposit.exclusivity_period,
-        ) == *deposit,
+        expected_deposit == *deposit,
         SraError::PairedInstructionMismatch
     );
     Ok(args.params)
@@ -291,6 +293,47 @@ mod tests {
 
             assert_eq!(err, expected, "{name} must reject");
         }
+    }
+
+    #[test]
+    fn verify_previous_handler_ix_rejects_fee_exceeding_input_as_mismatch() {
+        // A handler params payload whose attested fee exceeds the input can
+        // never have executed (the handler's FeeMismatch check precedes the
+        // adapter), but the verifier must still keep its error surface closed:
+        // conversion failure is a pairing mismatch, not a leaked
+        // ArithmeticOverflow.
+        let prepare = sample_prepare_params();
+        let mut bad_prepare = prepare.clone();
+        bad_prepare.protocol_fee_amount = bad_prepare.input_amount + 1;
+        let deposit = sample_across_deposit(&prepare);
+        let expected_hash = instruction_data_hash(&encode_anchor_instruction_data(
+            "execute_deposit_across",
+            &deposit,
+        ));
+        let sra_config = Pubkey::new_unique();
+        let source_mint = Pubkey::new_unique();
+        let adapter_program = Pubkey::new_unique();
+        let previous = previous_validate_ix(
+            sra_config,
+            source_mint,
+            adapter_program,
+            &bad_prepare,
+            expected_hash,
+        );
+        let current = empty_instruction();
+        let mut sysvar = InstructionsSysvarFixture::new(1, &[previous, current]);
+        let account_info = sysvar.account_info();
+
+        let err = verify_previous_handler_ix(
+            &account_info,
+            &sra_config,
+            &source_mint,
+            &adapter_program,
+            &deposit,
+        )
+        .expect_err("fee above input must reject");
+
+        assert_eq!(err, error!(SraError::PairedInstructionMismatch));
     }
 
     #[test]

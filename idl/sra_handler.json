@@ -1250,6 +1250,192 @@
           "name": "address_book_entry"
         },
         {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "protocol_fee_config",
+          "docs": [
+            "empty data == no fee for this app — existence is read in-body, never",
+            "caller-claimed."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  102,
+                  101,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "handler_data.app_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_fee_tier",
+          "docs": [
+            "canonical bump; empty data == no tier, fall back to `default_fee_bps`."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  102,
+                  101,
+                  101,
+                  95,
+                  116,
+                  105,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "handler_data.app_id"
+              },
+              {
+                "kind": "account",
+                "path": "source_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_recipient_token_account",
+          "docs": [
+            "Canonical ATA(fee_config.fee_recipient, source_mint)"
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "fee_config.fee_recipient",
+                "account": "FeeConfig"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "source_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
@@ -1821,8 +2007,18 @@
           {
             "name": "input_amount",
             "docs": [
-              "Tokens pulled from the owner ATA into the SRA vault and forwarded",
-              "to adapter custody in the same transaction."
+              "Gross tokens pulled from the owner ATA into the SRA vault. The amount",
+              "forwarded to adapter custody and bridged in the same transaction is",
+              "`input_amount - protocol_fee_amount`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "protocol_fee_amount",
+            "docs": [
+              "Protocol fee collected on the source. Zero when fees are",
+              "disabled globally, the app has no fee config, or the deposit is",
+              "sponsored."
             ],
             "type": "u64"
           },
@@ -1830,7 +2026,8 @@
             "name": "output_amount",
             "docs": [
               "Minimum output amount the destination must honor; enforced here via",
-              "the slippage check and re-honored by the target-specific adapter flow."
+              "the slippage check (floored from the GROSS input)",
+              "and re-honored by the target-specific adapter flow."
             ],
             "type": "u64"
           },
@@ -2029,6 +2226,9 @@
         "fields": [
           {
             "name": "input_amount",
+            "docs": [
+              "Gross deposit; the protocol fee is deducted from this on the source."
+            ],
             "type": "u64"
           },
           {
@@ -2089,6 +2289,24 @@
             "type": {
               "vec": "u64"
             }
+          },
+          {
+            "name": "protocol_fee_amount",
+            "type": "u64"
+          },
+          {
+            "name": "is_sponsor",
+            "docs": [
+              "Owner-signed assertion that skips the protocol fee."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "protocol_fee_bps_override",
+            "docs": [
+              "`NO_FEE_BPS_OVERRIDE` (u16::MAX) = no override."
+            ],
+            "type": "u16"
           }
         ]
       }

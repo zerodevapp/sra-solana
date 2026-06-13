@@ -305,6 +305,27 @@ impl SurfpoolSourceFixture {
         )?;
         surfpool_log(format!("bootstrap: ensured owner ATA {}", owner_ata));
 
+        // the fee config singleton is a REQUIRED deposit account. The
+        // forked mainnet ledger has no singleton for our (dev-keyed) program,
+        // so initialize it with the disabled (default) recipient — deposits
+        // then exercise the genesis-like zero-fee path. Skip when an earlier
+        // E2E run on the same fork already created it (first-caller-wins).
+        if rpc.get_account(&derive_fee_config_pda().0).is_err() {
+            let fee_admin = Keypair::new();
+            let initialize_fee_config =
+                initialize_fee_config_ix(&payer.pubkey(), &fee_admin.pubkey(), Pubkey::default());
+            send_legacy_transaction(
+                &rpc,
+                "initialize_fee_config",
+                &payer,
+                &[&fee_admin],
+                &[initialize_fee_config],
+            )?;
+            surfpool_log("bootstrap: initialized fee config singleton (fees disabled)");
+        } else {
+            surfpool_log("bootstrap: fee config singleton already present");
+        }
+
         let initialize_ix = initialize_sra_ix(
             &payer.pubkey(),
             &owner.pubkey(),
@@ -426,6 +447,7 @@ impl SurfpoolSourceFixture {
             &ValidatePrepareFixture {
                 payer: self.payer.insecure_clone(),
                 owner: self.owner.insecure_clone(),
+                fee_admin: Keypair::new(),
                 address_book_root: self.address_book_root,
                 handler_data: self.handler_data.clone(),
                 sra_config: self.sra_config,
@@ -445,7 +467,8 @@ impl SurfpoolSourceFixture {
                 self.payer.pubkey(),
                 FILL_DEADLINE_OFFSET_SECS,
                 EXCLUSIVITY_PERIOD_SECS,
-            ),
+            )
+            .expect("prepare params must produce a valid net amount"),
             current_nonce,
         );
         let validate_ix = validate_and_prepare_ix(
@@ -455,6 +478,7 @@ impl SurfpoolSourceFixture {
             &self.owner_ata,
             &self.address_book_root,
             &address_book_entry,
+            None,
             self.handler_data.clone(),
             params.clone(),
             &execute_ix,

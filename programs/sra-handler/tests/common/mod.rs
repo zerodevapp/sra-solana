@@ -139,6 +139,9 @@ pub fn sample_prepare_params(target_token: [u8; 32]) -> PrepareParams {
         [0x44u8; 32],
         target_token,
         DEFAULT_ACTION_IDXS.to_vec(),
+        0,
+        false,
+        sra_common::constants::NO_FEE_BPS_OVERRIDE,
     )
 }
 
@@ -698,6 +701,7 @@ impl ValidatePrepareAccounts {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn validate_and_prepare_ix(
     fee_payer: &Pubkey,
     owner: &Pubkey,
@@ -705,6 +709,7 @@ pub fn validate_and_prepare_ix(
     owner_token_account: &Pubkey,
     address_book_root: &Pubkey,
     address_book_entry: &Pubkey,
+    fee_recipient_token_account: Option<Pubkey>,
     handler_data: SourceHandlerData,
     params: PrepareParams,
     paired_execute_ix: &Instruction,
@@ -727,6 +732,11 @@ pub fn validate_and_prepare_ix(
             adapter_program: accounts.adapter_program,
             address_book_root: *address_book_root,
             address_book_entry: *address_book_entry,
+            fee_config: derive_fee_config_pda().0,
+            protocol_fee_config: derive_protocol_fee_pda(&handler_data.app_id).0,
+            asset_fee_tier: derive_asset_fee_tier_pda(&handler_data.app_id, &accounts.source_mint)
+                .0,
+            fee_recipient_token_account,
             token_program: TOKEN_PROGRAM_ID,
             associated_token_program: ATA_PROGRAM_ID,
             system_program: system_program::ID,
@@ -747,6 +757,11 @@ pub const OWNER_STARTING_BALANCE: u64 = 10_000_000;
 pub struct ValidatePrepareFixture {
     pub payer: Keypair,
     pub owner: Keypair,
+    /// Admin of the singleton fee config. The fixture initializes the config
+    /// with `Pubkey::default()` recipient (fees globally disabled) so the
+    /// zero-fee deposit paths run against genesis-like fee state; fee tests
+    /// use this admin to enable fees.
+    pub fee_admin: Keypair,
     pub address_book_root: Pubkey,
     pub handler_data: SourceHandlerData,
     pub sra_config: Pubkey,
@@ -810,6 +825,21 @@ impl ValidatePrepareFixture {
         let payer = funded_keypair(svm, 100 * SOL);
         let owner = funded_keypair(svm, SOL);
 
+        let fee_admin = funded_keypair(svm, SOL);
+        if svm.get_account(&derive_fee_config_pda().0).is_none() {
+            send_instructions(
+                svm,
+                &[initialize_fee_config_ix(
+                    &payer.pubkey(),
+                    &fee_admin.pubkey(),
+                    Pubkey::default(),
+                )],
+                &payer,
+                &[&fee_admin],
+            )
+            .expect("fee config init must succeed");
+        }
+
         let address_book_root = init_address_book_root(svm, &payer, &owner);
         let target_chain_id = 42_161;
         let target_token = sample_target_token();
@@ -862,6 +892,7 @@ impl ValidatePrepareFixture {
         Self {
             payer,
             owner,
+            fee_admin,
             address_book_root,
             handler_data,
             sra_config,
@@ -901,7 +932,7 @@ impl ValidatePrepareFixture {
         params: PrepareParams,
     ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
     {
-        self.invoke_with_handler_data(svm, self.handler_data.clone(), params, vec![])
+        self.invoke_full(svm, self.handler_data.clone(), params, vec![], None, None)
     }
 
     pub fn invoke_with(
@@ -911,7 +942,14 @@ impl ValidatePrepareFixture {
         between_ixs: Vec<Instruction>,
     ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
     {
-        self.invoke_with_handler_data(svm, self.handler_data.clone(), params, between_ixs)
+        self.invoke_full(
+            svm,
+            self.handler_data.clone(),
+            params,
+            between_ixs,
+            None,
+            None,
+        )
     }
 
     pub fn invoke_with_handler_data(
@@ -920,6 +958,60 @@ impl ValidatePrepareFixture {
         handler_data: SourceHandlerData,
         params: PrepareParams,
         between_ixs: Vec<Instruction>,
+    ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
+    {
+        self.invoke_full(svm, handler_data, params, between_ixs, None, None)
+    }
+
+    pub fn invoke_with_fee_ata(
+        &self,
+        svm: &mut LiteSVM,
+        params: PrepareParams,
+        fee_recipient_token_account: Option<Pubkey>,
+    ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
+    {
+        self.invoke_full(
+            svm,
+            self.handler_data.clone(),
+            params,
+            vec![],
+            fee_recipient_token_account,
+            None,
+        )
+    }
+
+    /// Builds the normal 2-IX flow, then replaces the account-meta holding
+    /// `victim` with `substitute` in the validate instruction — substitution
+    /// suites pin that every fee account is constraint-bound, never
+    /// caller-chosen.
+    pub fn invoke_with_fee_accounts_mutation(
+        &self,
+        svm: &mut LiteSVM,
+        params: PrepareParams,
+        fee_recipient_token_account: Option<Pubkey>,
+        victim: Pubkey,
+        substitute: Pubkey,
+    ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
+    {
+        self.invoke_full(
+            svm,
+            self.handler_data.clone(),
+            params,
+            vec![],
+            fee_recipient_token_account,
+            Some((victim, substitute)),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn invoke_full(
+        &self,
+        svm: &mut LiteSVM,
+        handler_data: SourceHandlerData,
+        params: PrepareParams,
+        between_ixs: Vec<Instruction>,
+        fee_recipient_token_account: Option<Pubkey>,
+        validate_meta_substitution: Option<(Pubkey, Pubkey)>,
     ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
     {
         let execute_ix = execute_deposit_across_ix(
@@ -932,17 +1024,26 @@ impl ValidatePrepareFixture {
         );
         let address_book_entry =
             self.address_book_entry(params.target_chain_id, &params.target_token);
-        let validate_ix = validate_and_prepare_ix(
+        let mut validate_ix = validate_and_prepare_ix(
             &self.payer.pubkey(),
             &self.owner.pubkey(),
             &self.accounts,
             &self.owner_ata,
             &self.address_book_root,
             &address_book_entry,
+            fee_recipient_token_account,
             handler_data,
             params.clone(),
             &execute_ix,
         );
+        if let Some((victim, substitute)) = validate_meta_substitution {
+            let slot = validate_ix
+                .accounts
+                .iter()
+                .position(|meta| meta.pubkey == victim)
+                .expect("victim account must be present in the validate instruction");
+            validate_ix.accounts[slot].pubkey = substitute;
+        }
 
         let mut ixs = vec![validate_ix];
         ixs.extend(between_ixs);
@@ -956,6 +1057,7 @@ pub fn across_params_for(
     params: &PrepareParams,
 ) -> AcrossDepositParams {
     AcrossDepositParams::from_prepare(params, fx.payer.pubkey(), 3_600, 900)
+        .expect("prepare params must produce a valid net amount")
 }
 
 pub fn execute_deposit_across_ix(

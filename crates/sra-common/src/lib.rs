@@ -8,6 +8,7 @@ declare_id!("Gte7LViTnE2UixBF59Xfu2sSqcmHhMNANj42yUkYpkdo");
 pub mod abi;
 pub mod constants;
 pub mod errors;
+pub mod fees;
 pub mod instruction_data;
 pub mod seeds;
 pub mod source_deposit;

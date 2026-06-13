@@ -75,11 +75,15 @@ pub fn sample_prepare_params() -> PrepareParams {
         [0x44u8; 32],
         evm_bytes32(0xAB),
         DEFAULT_ACTION_IDXS.to_vec(),
+        0,
+        false,
+        crate::constants::NO_FEE_BPS_OVERRIDE,
     )
 }
 
 pub fn sample_across_deposit(prepare: &PrepareParams) -> AcrossDepositParams {
     AcrossDepositParams::from_prepare(prepare, Pubkey::new_unique(), 600, 30)
+        .expect("sample prepare params must produce a valid net amount")
 }
 
 fn borrow_instruction(ix: &Instruction) -> BorrowedInstruction<'_> {

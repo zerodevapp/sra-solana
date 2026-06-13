@@ -88,11 +88,17 @@ pub struct DepositPrepared {
     pub adapter_program: Pubkey,
     /// Nonce captured before the prepare handler increments it.
     pub nonce: u64,
-    /// Tokens pulled from the owner ATA into the SRA vault and forwarded
-    /// to adapter custody in the same transaction.
+    /// Gross tokens pulled from the owner ATA into the SRA vault. The amount
+    /// forwarded to adapter custody and bridged in the same transaction is
+    /// `input_amount - protocol_fee_amount`.
     pub input_amount: u64,
+    /// Protocol fee collected on the source. Zero when fees are
+    /// disabled globally, the app has no fee config, or the deposit is
+    /// sponsored.
+    pub protocol_fee_amount: u64,
     /// Minimum output amount the destination must honor; enforced here via
-    /// the slippage check and re-honored by the target-specific adapter flow.
+    /// the slippage check (floored from the GROSS input)
+    /// and re-honored by the target-specific adapter flow.
     pub output_amount: u64,
     /// Runtime target chain id from `PrepareParams`.
     pub target_chain_id: u64,

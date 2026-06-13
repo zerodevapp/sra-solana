@@ -98,4 +98,11 @@ pub enum SraError {
 
     #[msg("Pending admin must be non-default")]
     InvalidPendingAdmin,
+
+    // -- Source: protocol fee collection (S9, appended to keep prior codes stable) --
+    #[msg("Attested protocol fee does not match the resolved fee")]
+    FeeMismatch,
+
+    #[msg("Fee recipient token account required when the fee is positive")]
+    MissingFeeRecipientAccount,
 }
