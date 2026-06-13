@@ -58,9 +58,6 @@ pub(crate) fn verify_previous_handler_ix(
         )) == args.paired_adapter_ix_data_hash,
         SraError::PairedInstructionMismatch
     );
-    // Any conversion failure (e.g. attested fee exceeding the input) is a
-    // pairing mismatch by definition here — the attestation surface keeps its
-    // three-variant error contract instead of leaking the underlying cause.
     let expected_deposit = AcrossDepositParams::from_prepare(
         &args.params,
         deposit.exclusive_relayer,

@@ -52,15 +52,9 @@ fn output_satisfies_slippage_floor(
     let scaled_input = (input_amount as u128)
         .checked_mul(slippage_numerator)
         .ok_or(SraError::ArithmeticOverflow)?;
-    // [TOB-SRA-3 / #50] The minimum must round UP (EVM `mulDivUp` + ceil
-    // downscale): a floored bound is strictly weaker than `slippage_bps`
-    // tolerates whenever the product does not divide exactly.
     let min_acceptable_source_units = scaled_input.div_ceil(denom);
 
     if input_decimals >= output_decimals {
-        // Comparing the up-scaled output against the ceil'd source-side
-        // minimum is exactly EVM's double-ceil:
-        // output >= ceil(min / 10^k)  <=>  output * 10^k >= min.
         let mut scaled_output = output_amount as u128;
 
         for _ in 0..(input_decimals - output_decimals) {
@@ -72,10 +66,6 @@ fn output_satisfies_slippage_floor(
 
         return Ok(scaled_output >= min_acceptable_source_units);
     }
-
-    // Up-scaling multiplies the ceil'd minimum exactly (EVM `_scaleAmount`
-    // needs no rounding in this direction); early-return keeps the
-    // intermediate below `output` and therefore overflow-free.
     let output = output_amount as u128;
     let mut min_acceptable = min_acceptable_source_units;
 
@@ -165,12 +155,6 @@ pub struct ValidateAndPrepare<'info> {
         bump = address_book_entry.bump,
     )]
     pub address_book_entry: Box<Account<'info, AddressBookEntry>>,
-    // v15 fee accounts (source-side collection). The two per-app PDAs are
-    // ALWAYS supplied, never Option: an Anchor Option account's *presence* is
-    // caller-chosen, so "absent == no fee" would let a depositor omit an
-    // existing fee config and pay zero. Their addresses are seeds-constrained
-    // to the COMMITTED handler_data.app_id; existence (EVM `isSet`) is an
-    // on-chain fact read in-body (`data_is_empty()` == not configured).
     #[account(
         seeds = [SEED_FEE_CONFIG],
         bump = fee_config.bump,
@@ -195,9 +179,7 @@ pub struct ValidateAndPrepare<'info> {
         bump,
     )]
     pub asset_fee_tier: UncheckedAccount<'info>,
-    /// Canonical ATA(fee_config.fee_recipient, source_mint); required iff the
-    /// resolved fee is positive. Option is sound here because the failure
-    /// direction is closed: omitting it blocks the deposit, never the fee.
+    /// Canonical ATA(fee_config.fee_recipient, source_mint)
     #[account(
         mut,
         associated_token::mint = source_mint,

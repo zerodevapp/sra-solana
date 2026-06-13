@@ -38,11 +38,6 @@ pub fn build_deposit_now_bundle(
     let target_handler = narrow_evm_address(&prepare.target_handler)?;
     let target_adapter = narrow_evm_address(&prepare.target_adapter)?;
     let target_token = narrow_evm_address(&prepare.target_token)?;
-    // v15: the protocol fee is collected by IX 1 before custody hand-off, so
-    // custody holds (and Across pulls) the NET — EVM bridges `amountAfterFee`
-    // (SRAHandler.sol:384). The ABI Message's deposit param stays GROSS: EVM
-    // encodes `params.amount` there (SRAHandler.sol:361) and never reads it
-    // on fill, so this is byte parity, not a value the destination consumes.
     let bridged_amount = prepare.net_input_amount()?;
 
     let message = Message {
@@ -116,11 +111,6 @@ mod tests {
 
     #[test]
     fn build_deposit_now_bundle_bridges_net_and_encodes_gross_message() {
-        // Custody only holds input - fee after IX 1, so the Across deposit
-        // pulls the NET (EVM bridges `amountAfterFee`, SRAHandler.sol:384).
-        // The ABI Message's deposit param stays GROSS — EVM encodes
-        // `params.amount` there (SRAHandler.sol:361) and never reads it on
-        // fill; byte parity for identical deposits matters to indexers.
         let prepare = PrepareParams::new(
             11,
             22,
