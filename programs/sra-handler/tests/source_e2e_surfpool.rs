@@ -305,7 +305,7 @@ impl SurfpoolSourceFixture {
         )?;
         surfpool_log(format!("bootstrap: ensured owner ATA {}", owner_ata));
 
-        // v15: the fee config singleton is a REQUIRED deposit account. The
+        // the fee config singleton is a REQUIRED deposit account. The
         // forked mainnet ledger has no singleton for our (dev-keyed) program,
         // so initialize it with the disabled (default) recipient — deposits
         // then exercise the genesis-like zero-fee path. Skip when an earlier

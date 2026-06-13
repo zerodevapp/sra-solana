@@ -49,37 +49,29 @@ fn output_satisfies_slippage_floor(
 ) -> Result<bool> {
     let denom = BPS_DENOMINATOR as u128;
     let slippage_numerator = (BPS_DENOMINATOR - slippage_bps) as u128;
-    let scaled_input = (input_amount as u128)
+    let min_source = (input_amount as u128)
         .checked_mul(slippage_numerator)
-        .ok_or(SraError::ArithmeticOverflow)?;
-    let min_acceptable_source_units = scaled_input.div_ceil(denom);
+        .ok_or(SraError::ArithmeticOverflow)?
+        .div_ceil(denom);
 
-    if input_decimals >= output_decimals {
-        let mut scaled_output = output_amount as u128;
+    // Put both sides on the same decimal scale by multiplying the
+    // lower-decimal side up by 10^|Δ|, then compare once. `output * 10^k >= min`
+    // is exactly EVM's double-ceil (`output >= ceil(min / 10^k)`) for integers.
+    let (lhs, rhs) = if input_decimals >= output_decimals {
+        let k = (input_decimals - output_decimals) as u32;
+        (
+            (output_amount as u128).saturating_mul(10u128.saturating_pow(k)),
+            min_source,
+        )
+    } else {
+        let k = (output_decimals - input_decimals) as u32;
+        (
+            output_amount as u128,
+            min_source.saturating_mul(10u128.saturating_pow(k)),
+        )
+    };
 
-        for _ in 0..(input_decimals - output_decimals) {
-            if scaled_output >= min_acceptable_source_units {
-                return Ok(true);
-            }
-            scaled_output *= 10;
-        }
-
-        return Ok(scaled_output >= min_acceptable_source_units);
-    }
-    let output = output_amount as u128;
-    let mut min_acceptable = min_acceptable_source_units;
-
-    for _ in 0..(output_decimals - input_decimals) {
-        if min_acceptable > output / 10 {
-            return Ok(false);
-        }
-        min_acceptable *= 10;
-        if min_acceptable > output {
-            return Ok(false);
-        }
-    }
-
-    Ok(output >= min_acceptable)
+    Ok(lhs >= rhs)
 }
 
 pub use sra_common::source_deposit::PrepareParams;
@@ -194,24 +186,18 @@ pub struct ValidateAndPrepare<'info> {
     pub instructions_sysvar: UncheckedAccount<'info>,
 }
 
-/// Reads a maybe-uninitialized program-owned PDA. The account meta is always
-/// supplied (seeds-pinned at the struct level), so emptiness here is the
-/// on-chain truth — EVM `isSet == false` — never a caller claim. Non-empty
-/// data passes the same checks `Account::try_from` would apply — owner, then
-/// discriminator + deserialize (`try_deserialize`) — restated here because the
-/// canonical wrapper's lifetime contract cannot return owned data from a
-/// temporary `AccountInfo`.
+/// Reads a maybe-uninitialized, seeds-pinned program-owned PDA. Empty data ==
+/// not configured (EVM `isSet == false`); otherwise apply the same owner +
+/// discriminator + deserialize checks `Account::try_from` would — hand-rolled
+/// because `try_from` needs a `&'info AccountInfo<'info>` we can't produce from
+/// a derived (temporary) account info.
 fn read_optional_program_account<T: AccountDeserialize + Owner>(
     info: AccountInfo,
 ) -> Result<Option<T>> {
     if info.data_is_empty() {
         return Ok(None);
     }
-    require_keys_eq!(
-        *info.owner,
-        T::owner(),
-        ErrorCode::AccountOwnedByWrongProgram
-    );
+    require_keys_eq!(*info.owner, T::owner(), ErrorCode::AccountOwnedByWrongProgram);
     let data = info.try_borrow_data()?;
     T::try_deserialize(&mut data.as_ref()).map(Some)
 }
@@ -240,12 +226,6 @@ pub(crate) fn handler(
         SraError::InvalidAddressBook
     );
 
-    // EVM RouteConfig parity: the routing tuple is committed at install
-    // (folded into the SRA identity via `handler_data.hash()`, verified above).
-    // A deposit must echo the committed route exactly — it cannot redirect to a
-    // different chain, handler, adapter, recipient, app, or target token. This
-    // mirrors EVM `trigger()` reading routing from stored `RouteConfig` rather
-    // than from caller-supplied params (sra-stx/src/handler/SRAHandler.sol).
     require!(
         handler_data.target_chain_id == params.target_chain_id
             && handler_data.target_handler == params.target_handler
@@ -311,12 +291,24 @@ pub(crate) fn handler(
     ];
     let signer_seeds: &[&[&[u8]]] = &[seeds];
 
-    // Protocol fee (v15 — EVM `_buildSourceFeeCalls` parity). Recompute the
-    // fee from the committed app_id + live admin state and require the
-    // attested `params.protocol_fee_amount` to match: the explicit-arg +
-    // in-body-recheck pattern puts the fee in the attested bytes so the
-    // adapter derives the net bridged amount with no fee state of its own.
-    // An admin fee update racing an in-flight deposit fails closed here.
+    let transfer_from_vault = |to, amount: u64| -> Result<()> {
+        transfer_checked(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                TransferChecked {
+                    from: ctx.accounts.sra_vault.to_account_info(),
+                    mint: ctx.accounts.source_mint.to_account_info(),
+                    to,
+                    authority: ctx.accounts.sra_config.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            amount,
+            ctx.accounts.source_mint.decimals,
+        )
+    };
+
+    // Recompute protocol fee from live admin state and require attested `protocol_fee_amount`.
     let protocol_fee_config = read_optional_program_account::<ProtocolFeeConfig>(
         ctx.accounts.protocol_fee_config.to_account_info(),
     )?;
@@ -341,28 +333,12 @@ pub(crate) fn handler(
             .fee_recipient_token_account
             .as_ref()
             .ok_or(SraError::MissingFeeRecipientAccount)?;
-        let cpi_accounts = TransferChecked {
-            from: ctx.accounts.sra_vault.to_account_info(),
-            mint: ctx.accounts.source_mint.to_account_info(),
-            to: fee_recipient_token_account.to_account_info(),
-            authority: ctx.accounts.sra_config.to_account_info(),
-        };
-        let cpi_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            cpi_accounts,
-            signer_seeds,
-        );
-        transfer_checked(cpi_ctx, expected_fee, ctx.accounts.source_mint.decimals)?;
+        transfer_from_vault(fee_recipient_token_account.to_account_info(), expected_fee)?;
     }
-    // Guaranteed by the FeeMismatch equality above; kept checked because the
-    // adapter independently derives the same value from the attested bytes.
     let bridged_amount = params.net_input_amount()?;
 
     // Compare the decimal-normalized slippage floor without scaling into
-    // overflowing intermediates. The floor is derived from the GROSS input —
-    // EVM applies slippage to the gross `params.amount` on both routes
-    // ([TOB-SRA-5 / #47]), so the protocol fee eats into the tolerance
-    // rather than hiding outside it.
+    // overflowing intermediates.
     require!(
         output_satisfies_slippage_floor(
             params.input_amount,
@@ -377,20 +353,7 @@ pub(crate) fn handler(
     let nonce_now = ctx.accounts.mint_nonce.nonce;
 
     // Transfer the net from the SRA vault into adapter custody.
-    {
-        let cpi_accounts = TransferChecked {
-            from: ctx.accounts.sra_vault.to_account_info(),
-            mint: ctx.accounts.source_mint.to_account_info(),
-            to: ctx.accounts.adapter_custody.to_account_info(),
-            authority: ctx.accounts.sra_config.to_account_info(),
-        };
-        let cpi_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            cpi_accounts,
-            signer_seeds,
-        );
-        transfer_checked(cpi_ctx, bridged_amount, ctx.accounts.source_mint.decimals)?;
-    }
+    transfer_from_vault(ctx.accounts.adapter_custody.to_account_info(), bridged_amount)?;
 
     // Persist the PDA bump on first init, then advance the nonce.
     let mint_nonce = &mut ctx.accounts.mint_nonce;
@@ -471,11 +434,7 @@ mod tests {
         }
     }
 
-    // [TOB-SRA-3 / #50] The slippage minimum must round UP at every step, like
-    // EVM's `mulDivUp` + ceil-downscale — a floored minimum is strictly weaker
-    // than `slippage_bps` tolerates. These inputs are chosen so the BPS product
-    // does NOT divide exactly: floor and ceil disagree, making the rounding
-    // direction observable.
+    //  The slippage minimum must round UP at every step
 
     #[test]
     fn slippage_floor_rounds_up_equal_decimals() {
@@ -514,5 +473,24 @@ mod tests {
     fn slippage_floor_zero_slippage_requires_full_amount() {
         assert!(output_satisfies_slippage_floor(1_000_000, 6, 1_000_000, 6, 0).unwrap());
         assert!(!output_satisfies_slippage_floor(1_000_000, 6, 999_999, 6, 0).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_extreme_decimal_gap_saturates_correctly() {
+        // 40-decimal gap: 10^40 overflows u128, so the scaled side saturates.
+        // The clamp must stay on the correct side of the comparison.
+
+        // Scale output UP (input finer): a non-zero output 40 decimals below
+        // the input is astronomically more than the minimum once normalized,
+        // so it clears — the saturated u128::MAX still satisfies `>= min`.
+        assert!(output_satisfies_slippage_floor(1, 40, 1, 0, 50).unwrap());
+
+        // Scale the minimum UP (output finer): the minimum normalized 40
+        // decimals above the input dwarfs any u64 output, so it cannot clear —
+        // the saturated minimum stays above `output`.
+        assert!(!output_satisfies_slippage_floor(1_000_000, 0, u64::MAX, 40, 50).unwrap());
+
+        // A zero output never clears a positive minimum, even under saturation.
+        assert!(!output_satisfies_slippage_floor(1, 0, 0, 40, 50).unwrap());
     }
 }

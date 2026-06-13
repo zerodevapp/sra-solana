@@ -825,11 +825,6 @@ impl ValidatePrepareFixture {
         let payer = funded_keypair(svm, 100 * SOL);
         let owner = funded_keypair(svm, SOL);
 
-        // The fee config singleton is a REQUIRED deposit account (deploy
-        // policy initializes it in the deploy bundle); recipient defaults to
-        // disabled so legacy zero-fee paths are exercised against it. It is a
-        // first-caller-wins singleton, so a second fixture in the same SVM
-        // (e.g. the concurrent-SRAs test) reuses the existing one.
         let fee_admin = funded_keypair(svm, SOL);
         if svm.get_account(&derive_fee_config_pda().0).is_none() {
             send_instructions(
@@ -988,8 +983,7 @@ impl ValidatePrepareFixture {
     /// Builds the normal 2-IX flow, then replaces the account-meta holding
     /// `victim` with `substitute` in the validate instruction — substitution
     /// suites pin that every fee account is constraint-bound, never
-    /// caller-chosen. Locating the victim by value (not by slot index) keeps
-    /// the pin immune to account-order changes in `ValidateAndPrepare`.
+    /// caller-chosen.
     pub fn invoke_with_fee_accounts_mutation(
         &self,
         svm: &mut LiteSVM,

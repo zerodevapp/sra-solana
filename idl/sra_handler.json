@@ -1343,9 +1343,7 @@
         {
           "name": "fee_recipient_token_account",
           "docs": [
-            "Canonical ATA(fee_config.fee_recipient, source_mint); required iff the",
-            "resolved fee is positive. Option is sound here because the failure",
-            "direction is closed: omitting it blocks the deposit, never the fee."
+            "Canonical ATA(fee_config.fee_recipient, source_mint)"
           ],
           "writable": true,
           "optional": true,
