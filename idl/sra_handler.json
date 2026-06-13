@@ -2016,9 +2016,9 @@
           {
             "name": "protocol_fee_amount",
             "docs": [
-              "Protocol fee collected on the source (v15). Zero when fees are",
+              "Protocol fee collected on the source. Zero when fees are",
               "disabled globally, the app has no fee config, or the deposit is",
-              "sponsored. The EVM `ProtocolFeeApplied` event collapses into this."
+              "sponsored."
             ],
             "type": "u64"
           },
@@ -2026,7 +2026,7 @@
             "name": "output_amount",
             "docs": [
               "Minimum output amount the destination must honor; enforced here via",
-              "the slippage check (floored from the GROSS input, TOB-SRA-5 parity)",
+              "the slippage check (floored from the GROSS input)",
               "and re-honored by the target-specific adapter flow."
             ],
             "type": "u64"
