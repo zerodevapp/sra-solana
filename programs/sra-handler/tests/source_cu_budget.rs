@@ -8,12 +8,6 @@
 //! under that production budget — so an Anchor/dependency upgrade (or our own
 //! code) that silently doubles the CU cost fails here instead of on mainnet.
 //!
-//! The runtime CU limit is set to the Solana maximum (not 400k) so the
-//! transaction always completes and the actual consumption is always readable,
-//! even on a regression that blows the production budget; the *assertion*, not
-//! the runtime limit, is the gate (a regression then fails with the real number
-//! visible rather than an opaque "compute budget exceeded").
-//!
 //! Measurement notes:
 //! - The reported CU includes the compute-budget instruction's own fixed cost,
 //!   which production pays identically — so the comparison is apples-to-apples
@@ -22,15 +16,6 @@
 //!   over an ALT. ALTs compress account addresses in the serialized message
 //!   (tx *size*, pinned by `source_tx_size.rs`); execution CU is unaffected, so
 //!   this measures the production CU faithfully.
-//! - CAVEAT: these run against the mock SpokePool, whose `deposit_now` is
-//!   lighter than real Across (no event CPI / deposit accounting). The numbers
-//!   here are therefore an optimistic lower bound for the IX-2 (adapter) leg;
-//!   they soundly gate our-code/Anchor-upgrade regressions but understate the
-//!   real-Across ceiling. The real ceiling is exercised by the nightly Surfpool
-//!   E2E (`source_e2e_surfpool.rs`), which requests exactly `SOURCE_CU_BUDGET`
-//!   and so fails hard if real Across pushes the flow over it. A follow-up
-//!   could have that E2E log+assert `compute_units_consumed` for real-Across
-//!   headroom visibility (unverifiable without a live Surfpool).
 
 mod common;
 
@@ -42,17 +27,14 @@ use sra_common::{constants::MAX_ACTION_IDXS, source_deposit::PrepareParams};
 // `SOURCE_CU_BUDGET` (the production-requested 400k limit) is the shared
 // constant from `common` — the same value `compute_budget_ix` requests.
 
-/// Runtime CU limit for measurement: the Solana maximum, so the tx always
-/// completes regardless of consumption and the actual is always logged. The
-/// budget assertion below is the real gate.
+/// Runtime CU limit for measurement: the Solana maximum
 const MEASUREMENT_CU_LIMIT: u32 = 1_400_000;
 
 const DEFAULT_FEE_BPS: u16 = 30;
 const DEFAULT_FEE: u64 = 3_000; // sample input (1_000_000) * 30 / 10_000
 
 /// Builds the production-shaped `[compute_budget, IX 1, IX 2]` source flow,
-/// executes it, and returns the CU consumed. Panics if the flow does not
-/// succeed — a CU test only means something against a flow that actually runs.
+/// executes it, and returns the CU consumed.
 fn measure_source_2ix_cu(
     svm: &mut LiteSVM,
     fx: &ValidatePrepareFixture,
@@ -92,7 +74,6 @@ fn measure_source_2ix_cu(
     .compute_units_consumed
 }
 
-/// Logs the actual against the budget (headroom visibility) and asserts under.
 fn assert_under_budget(consumed: u64, label: &str) {
     // `SOURCE_CU_BUDGET` is a u32 (the runtime CU-limit type); widen losslessly
     // to compare against the u64 `compute_units_consumed`.
@@ -107,9 +88,7 @@ fn assert_under_budget(consumed: u64, label: &str) {
 }
 
 /// Enables a global recipient + a default protocol fee for the fixture's
-/// committed app_id, and returns the canonical recipient fee ATA. Mirrors
-/// `source_fee_collection.rs::enable_protocol_fee` (kept local — the CU suite
-/// must not depend on another test module).
+/// committed app_id, and returns the canonical recipient fee ATA. 
 fn enable_protocol_fee(svm: &mut LiteSVM, fx: &ValidatePrepareFixture) -> Pubkey {
     let recipient = Pubkey::new_unique();
     send_instructions(
@@ -142,9 +121,6 @@ fn max_action_idxs_params(target_token: [u8; 32]) -> PrepareParams {
 fn source_2ix_flow_under_cu_budget() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-
-    // Representative deposit: default action_idxs, fees globally off (fixture
-    // default) — the common case the budget is sized for.
     let consumed =
         measure_source_2ix_cu(&mut svm, &fx, sample_prepare_params(fx.target_token), None);
     assert_under_budget(consumed, "representative, no fee");
@@ -155,9 +131,7 @@ fn source_2ix_flow_max_action_idxs_under_cu_budget() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
 
-    // Largest routing payload: MAX_ACTION_IDXS entries widen the ABI message
-    // and the delegate seed hash (more keccak input) — the action_idxs-driven
-    // worst case.
+    // Largest routing payload: MAX_ACTION_IDXS entries
     let consumed =
         measure_source_2ix_cu(&mut svm, &fx, max_action_idxs_params(fx.target_token), None);
     assert_under_budget(consumed, "max action_idxs, no fee");
@@ -171,7 +145,7 @@ fn source_2ix_flow_with_fee_max_action_idxs_under_cu_budget() {
 
     // Heaviest production path: protocol fee ON adds a second token CPI
     // (vault -> fee-recipient `transfer_checked`) on top of the max-action_idxs
-    // payload — the true production ceiling, not just the fee-disabled path.
+    // payload.
     let mut params = max_action_idxs_params(fx.target_token);
     params.protocol_fee_amount = DEFAULT_FEE;
 
