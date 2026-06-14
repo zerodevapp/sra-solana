@@ -108,4 +108,7 @@ pub enum SraError {
 
     #[msg("Input amount must be greater than zero")]
     ZeroInputAmount,
+    // -- Source: install/route field validation (appended to keep prior codes stable) --
+    #[msg("Routing field is zero or routes to the local Solana chain")]
+    InvalidRouteField,
 }

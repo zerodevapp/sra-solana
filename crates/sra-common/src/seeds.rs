@@ -97,7 +97,7 @@ pub fn route_config_hash(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::{MAX_ADAPTERS, MAX_SLIPPAGE_BPS};
+    use crate::constants::{MAX_ADAPTERS, MAX_SLIPPAGE_BPS, SOLANA_CHAIN_ID};
 
     fn test_owner() -> Pubkey {
         Pubkey::new_from_array([1u8; 32])
@@ -153,34 +153,45 @@ mod tests {
         let _ = handler_data_hash(&handler_data);
     }
 
-    #[test]
-    fn validate_rejects_too_many_adapters() {
-        let mut handler_data = test_handler_data();
-        handler_data.allowed_adapters = (0..=MAX_ADAPTERS)
-            .map(|i| Pubkey::new_from_array([i as u8; 32]))
-            .collect();
-
-        let err = handler_data.validate().unwrap_err();
-        match err {
+    fn expect_validate_error(handler_data: &SourceHandlerData, expected_name: &str) {
+        match handler_data.validate().unwrap_err() {
             anchor_lang::error::Error::AnchorError(anchor_err) => {
-                assert_eq!(anchor_err.error_name, "TooManyAdapters");
+                assert_eq!(anchor_err.error_name, expected_name);
             }
             other => panic!("expected AnchorError, got {other:?}"),
         }
     }
 
     #[test]
+    fn validate_rejects_too_many_adapters() {
+        let mut handler_data = test_handler_data();
+        handler_data.allowed_adapters = (0..=MAX_ADAPTERS)
+            .map(|i| Pubkey::new_from_array([i as u8; 32]))
+            .collect();
+        expect_validate_error(&handler_data, "TooManyAdapters");
+    }
+
+    #[test]
     fn validate_rejects_invalid_slippage() {
         let mut handler_data = test_handler_data();
         handler_data.allowed_slippage_bps = MAX_SLIPPAGE_BPS + 1;
+        expect_validate_error(&handler_data, "InvalidSlippage");
+    }
 
-        let err = handler_data.validate().unwrap_err();
-        match err {
-            anchor_lang::error::Error::AnchorError(anchor_err) => {
-                assert_eq!(anchor_err.error_name, "InvalidSlippage");
-            }
-            other => panic!("expected AnchorError, got {other:?}"),
-        }
+    #[test]
+    fn validate_rejects_solana_chain_id_self_route() {
+        let mut handler_data = test_handler_data();
+        handler_data.target_chain_id = SOLANA_CHAIN_ID;
+        expect_validate_error(&handler_data, "InvalidRouteField");
+    }
+
+    #[test]
+    fn validate_accepts_fully_specified_route() {
+        // Baseline: the all-non-zero, non-self-chain fixture passes cleanly, so
+        // the rejections above are field-specific, not a blanket failure.
+        test_handler_data()
+            .validate()
+            .expect("a fully specified route must validate");
     }
 
     #[test]

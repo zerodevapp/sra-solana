@@ -4,6 +4,7 @@ use anchor_lang::error::ErrorCode;
 use common::*;
 use solana_sdk::signer::Signer;
 use solana_sdk::{instruction::InstructionError, transaction::TransactionError};
+use sra_common::errors::SraError;
 
 #[test]
 fn initialize_sra_happy_path() {
@@ -173,5 +174,46 @@ fn initialize_sra_rejects_mismatched_sra_pda() {
             0,
             InstructionError::Custom(ErrorCode::ConstraintSeeds as u32),
         )
+    );
+}
+
+#[test]
+fn initialize_sra_zero_target_handler_rejected() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let address_book_root = init_address_book_root(&mut svm, &payer, &owner);
+
+    let mut handler_data = sample_handler_data(address_book_root);
+    handler_data.target_handler = [0u8; 32];
+    let salt = [0xF0u8; 32];
+    let (pda, _) = derive_sra_pda(&owner.pubkey(), &handler_data, &salt);
+
+    let ix = initialize_sra_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        &address_book_root,
+        &pda,
+        handler_data,
+        salt,
+    );
+    let err = send_ix_expect_err(
+        &mut svm,
+        ix,
+        &payer,
+        &[&owner],
+        "initialize_sra must reject a zero target_handler route",
+    );
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::InvalidRouteField.into()),
+        )
+    );
+    assert!(
+        svm.get_account(&pda).is_none(),
+        "no SRA account may be created for a rejected route"
     );
 }
