@@ -39,31 +39,6 @@ impl SourceHandlerData {
             self.allowed_slippage_bps <= MAX_SLIPPAGE_BPS,
             SraError::InvalidSlippage
         );
-        // Zero-value routing rejection. `bytes32_to_evm_address` only rejects
-        // non-zero *upper* bytes, so an all-zero bytes32 narrows cleanly to
-        // `address(0)`; since the routing tuple is folded into the SRA's PDA
-        // identity at install, a typo'd install would permanently burn every
-        // deposit to the zero address on the target chain. Reject at the
-        // commitment point — for an immutable program, an install accepted here
-        // can never be repaired.
-        //
-        // Compared with the EVM handler's `_onInstall` (sra-stx `SRAHandler.sol`):
-        //   - target_chain_id != 0 / target_token != 0: same checks EVM makes
-        //     (SRAHandler.sol:111-112 — `InvalidTargetToken`).
-        //   - recipient != 0: deliberate divergence. EVM normalizes a zero
-        //     recipient to `msg.sender` (the installing account, L115-117); a
-        //     Solana installer is a keypair with no target-chain address to
-        //     substitute, so the only safe behavior is to reject rather than
-        //     silently default.
-        //   - target_handler / target_adapter != 0: no EVM `RouteConfig` analog
-        //     (the EVM struct carries neither — the bridge implicitly knows the
-        //     destination handler). On Solana these are the destination addresses
-        //     the adapter ABI-encodes into the bridge message, so zero would
-        //     deliver the bridged funds to `address(0)`.
-        //   - target_chain_id != SOLANA_CHAIN_ID: Solana adaptation of EVM's
-        //     same-chain branch (L119, `targetChainId == block.chainid` executes
-        //     locally). There is no same-chain-EVM path on Solana, so a self-route
-        //     through an EVM adapter is structurally unfulfillable.
         require!(
             self.target_handler != [0u8; 32]
                 && self.target_adapter != [0u8; 32]

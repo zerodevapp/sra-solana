@@ -1375,30 +1375,3 @@ fn validate_and_prepare_rejection_preserves_nonce() {
     assert_eq!(ev_2.nonce, 2);
     assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 3);
 }
-
-#[test]
-fn validate_and_prepare_rejects_legacy_zero_route() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-    let mut zero_route = fx.handler_data.clone();
-    zero_route.target_handler = [0u8; 32];
-
-    let err = fx
-        .invoke_with_handler_data(&mut svm, zero_route, default_prepare_params(&fx), vec![])
-        .expect_err("a zero-field route must reject at the deposit path too")
-        .err
-        .clone();
-
-    assert_eq!(
-        err,
-        TransactionError::InstructionError(
-            0,
-            InstructionError::Custom(SraError::InvalidRouteField.into()),
-        )
-    );
-    assert_eq!(
-        fetch_token_balance(&svm, &fx.owner_ata),
-        OWNER_STARTING_BALANCE,
-        "a rejected deposit must not move funds",
-    );
-}

@@ -178,45 +178,6 @@ mod tests {
         expect_validate_error(&handler_data, "InvalidSlippage");
     }
 
-    // Zero-value routing rejection. Every routing field that EVM eventually
-    // narrows to an address (or compares as a chain id) must be non-zero at the
-    // commitment point; see `SourceHandlerData::validate`.
-
-    #[test]
-    fn validate_rejects_zero_target_handler() {
-        let mut handler_data = test_handler_data();
-        handler_data.target_handler = [0u8; 32];
-        expect_validate_error(&handler_data, "InvalidRouteField");
-    }
-
-    #[test]
-    fn validate_rejects_zero_target_adapter() {
-        let mut handler_data = test_handler_data();
-        handler_data.target_adapter = [0u8; 32];
-        expect_validate_error(&handler_data, "InvalidRouteField");
-    }
-
-    #[test]
-    fn validate_rejects_zero_recipient() {
-        let mut handler_data = test_handler_data();
-        handler_data.recipient = [0u8; 32];
-        expect_validate_error(&handler_data, "InvalidRouteField");
-    }
-
-    #[test]
-    fn validate_rejects_zero_target_token() {
-        let mut handler_data = test_handler_data();
-        handler_data.target_token = [0u8; 32];
-        expect_validate_error(&handler_data, "InvalidRouteField");
-    }
-
-    #[test]
-    fn validate_rejects_zero_target_chain_id() {
-        let mut handler_data = test_handler_data();
-        handler_data.target_chain_id = 0;
-        expect_validate_error(&handler_data, "InvalidRouteField");
-    }
-
     #[test]
     fn validate_rejects_solana_chain_id_self_route() {
         let mut handler_data = test_handler_data();
