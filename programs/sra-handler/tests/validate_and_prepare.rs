@@ -1375,3 +1375,91 @@ fn validate_and_prepare_rejection_preserves_nonce() {
     assert_eq!(ev_2.nonce, 2);
     assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 3);
 }
+
+#[test]
+fn validate_and_prepare_zero_input_amount_rejected() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+
+    let err = fx
+        .invoke(
+            &mut svm,
+            PrepareParams {
+                input_amount: 0,
+                output_amount: 0,
+                ..default_prepare_params(&fx)
+            },
+        )
+        .expect_err("zero input amount must reject")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::ZeroInputAmount.into()),
+        )
+    );
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.owner_ata),
+        OWNER_STARTING_BALANCE
+    );
+    assert_eq!(current_nonce(&svm, &fx.accounts.mint_nonce), 0);
+}
+
+#[test]
+fn validate_and_prepare_token_2022_mint_rejected() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    restamp_mint_as_token_2022(&mut svm, &fx.source_mint);
+
+    let err = fx
+        .invoke(&mut svm, default_prepare_params(&fx))
+        .expect_err("token-2022 source mint must reject by construction")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(
+                anchor_lang::error::ErrorCode::AccountOwnedByWrongProgram as u32,
+            ),
+        )
+    );
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.owner_ata),
+        OWNER_STARTING_BALANCE
+    );
+    assert_eq!(current_nonce(&svm, &fx.accounts.mint_nonce), 0);
+}
+
+#[test]
+fn validate_and_prepare_frozen_owner_ata_fails_cleanly() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    freeze_token_account(&mut svm, &fx.owner_ata);
+
+    let err = fx
+        .invoke(&mut svm, default_prepare_params(&fx))
+        .expect_err("frozen owner ATA must reject")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(
+                litesvm_token::spl_token::error::TokenError::AccountFrozen as u32,
+            ),
+        )
+    );
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.owner_ata),
+        OWNER_STARTING_BALANCE
+    );
+    assert_eq!(current_nonce(&svm, &fx.accounts.mint_nonce), 0);
+}

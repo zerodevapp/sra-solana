@@ -604,6 +604,28 @@ pub fn derive_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
     get_associated_token_address(owner, mint)
 }
 
+pub const TOKEN_2022_PROGRAM_ID: Pubkey =
+    Pubkey::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
+pub fn restamp_mint_as_token_2022(svm: &mut LiteSVM, mint: &Pubkey) {
+    let mut account = svm.get_account(mint).expect("mint account exists");
+    account.owner = TOKEN_2022_PROGRAM_ID;
+    svm.set_account(*mint, account)
+        .expect("restamp mint owner should succeed");
+}
+
+pub fn freeze_token_account(svm: &mut LiteSVM, ata: &Pubkey) {
+    use litesvm_token::spl_token::state::AccountState;
+    use solana_sdk::program_pack::Pack;
+
+    let mut account = svm.get_account(ata).expect("token account exists");
+    let mut token = SplTokenAccount::unpack(&account.data).expect("initialized SPL token account");
+    token.state = AccountState::Frozen;
+    token.pack_into_slice(&mut account.data);
+    svm.set_account(*ata, account)
+        .expect("freeze token account should succeed");
+}
+
 pub fn create_mint(
     svm: &mut LiteSVM,
     payer: &Keypair,

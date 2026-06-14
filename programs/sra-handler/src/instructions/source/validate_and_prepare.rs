@@ -216,6 +216,7 @@ pub(crate) fn handler(
         params.action_idxs.len() <= MAX_ACTION_IDXS,
         SraError::TooManyActionIdxs
     );
+    require!(params.input_amount > 0, SraError::ZeroInputAmount);
     handler_data.validate()?;
     require!(
         ctx.accounts.sra_config.final_handler == crate::ID,
