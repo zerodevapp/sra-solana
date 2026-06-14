@@ -1131,11 +1131,13 @@ pub fn recover_stuck_custody_ix(
 /// 2-IX flow must execute under this — `compute_budget_ix` requests exactly this
 /// much, and `tests/source_cu_budget.rs` asserts consumption stays below it.
 /// Single source of truth so the requested limit and the regression gate can't
-/// drift (design doc §4 "Compute budget"; impl-plan Step S6).
-pub const SOURCE_CU_BUDGET: u64 = 400_000;
+/// drift. Typed `u32` to match the runtime's compute-unit-limit field (max
+/// 1.4M) — no narrowing cast at the call site; the gate widens losslessly to
+/// compare against `u64` CU.
+pub const SOURCE_CU_BUDGET: u32 = 400_000;
 
 pub fn compute_budget_ix() -> Instruction {
-    ComputeBudgetInstruction::set_compute_unit_limit(SOURCE_CU_BUDGET as u32)
+    ComputeBudgetInstruction::set_compute_unit_limit(SOURCE_CU_BUDGET)
 }
 
 pub fn invoke_execute_only(

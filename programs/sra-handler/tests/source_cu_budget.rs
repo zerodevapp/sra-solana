@@ -1,11 +1,9 @@
-//! Step S6 — source compute-unit regression assertions (reactivates the
-//! deferred Step 20).
+//! Source compute-unit regression assertions.
 //!
 //! The production source deposit is a single transaction shaped
 //! `[compute_budget, validate_and_prepare (IX 1), execute_deposit_across
-//! (IX 2)]` (design doc "DEPOSIT (single versioned tx: [compute_budget, IX 1,
-//! IX 2] via ALT)") and requests a 400k CU limit. These tests execute the full
-//! 2-IX flow through the mock SpokePool, read the real consumption from
+//! (IX 2)]` over an ALT, requesting a 400k CU limit. These tests execute the
+//! full 2-IX flow through the mock SpokePool, read the real consumption from
 //! LiteSVM's `TransactionMetadata`, log it with headroom, and assert it stays
 //! under that production budget — so an Anchor/dependency upgrade (or our own
 //! code) that silently doubles the CU cost fails here instead of on mainnet.
@@ -30,9 +28,9 @@
 //!   they soundly gate our-code/Anchor-upgrade regressions but understate the
 //!   real-Across ceiling. The real ceiling is exercised by the nightly Surfpool
 //!   E2E (`source_e2e_surfpool.rs`), which requests exactly `SOURCE_CU_BUDGET`
-//!   and so fails hard if real Across pushes the flow over it. Fast-follow:
-//!   have that E2E log+assert `compute_units_consumed` for real-Across headroom
-//!   visibility (deferred — unverifiable without a live Surfpool).
+//!   and so fails hard if real Across pushes the flow over it. A follow-up
+//!   could have that E2E log+assert `compute_units_consumed` for real-Across
+//!   headroom visibility (unverifiable without a live Surfpool).
 
 mod common;
 
@@ -96,13 +94,14 @@ fn measure_source_2ix_cu(
 
 /// Logs the actual against the budget (headroom visibility) and asserts under.
 fn assert_under_budget(consumed: u64, label: &str) {
-    let headroom = SOURCE_CU_BUDGET.saturating_sub(consumed);
-    println!(
-        "source 2-IX flow CU [{label}]: {consumed} / {SOURCE_CU_BUDGET} (headroom {headroom})"
-    );
+    // `SOURCE_CU_BUDGET` is a u32 (the runtime CU-limit type); widen losslessly
+    // to compare against the u64 `compute_units_consumed`.
+    let budget = u64::from(SOURCE_CU_BUDGET);
+    let headroom = budget.saturating_sub(consumed);
+    println!("source 2-IX flow CU [{label}]: {consumed} / {budget} (headroom {headroom})");
     assert!(
-        consumed < SOURCE_CU_BUDGET,
-        "source 2-IX flow consumed {consumed} CU [{label}], exceeds the {SOURCE_CU_BUDGET} CU \
+        consumed < budget,
+        "source 2-IX flow consumed {consumed} CU [{label}], exceeds the {budget} CU \
          production budget",
     );
 }
@@ -172,8 +171,7 @@ fn source_2ix_flow_with_fee_max_action_idxs_under_cu_budget() {
 
     // Heaviest production path: protocol fee ON adds a second token CPI
     // (vault -> fee-recipient `transfer_checked`) on top of the max-action_idxs
-    // payload. S6's plan text predates S9's fee collection; this pins the true
-    // production ceiling, not just the fee-disabled path.
+    // payload — the true production ceiling, not just the fee-disabled path.
     let mut params = max_action_idxs_params(fx.target_token);
     params.protocol_fee_amount = DEFAULT_FEE;
 
