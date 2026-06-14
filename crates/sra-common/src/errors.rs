@@ -105,4 +105,8 @@ pub enum SraError {
 
     #[msg("Fee recipient token account required when the fee is positive")]
     MissingFeeRecipientAccount,
+
+    // -- Source: mint/amount edge pins (S5, appended to keep prior codes stable) --
+    #[msg("Input amount must be greater than zero")]
+    ZeroInputAmount,
 }
