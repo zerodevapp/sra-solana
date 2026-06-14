@@ -179,11 +179,6 @@ fn initialize_sra_rejects_mismatched_sra_pda() {
 
 #[test]
 fn initialize_sra_zero_target_handler_rejected() {
-    // Install-path defense. A zero routing field would commit an SRA whose every
-    // deposit bridges to address(0) on the target chain (the routing tuple is
-    // committed into the SRA's PDA identity at install). `validate()` rejects it
-    // before the account is created. The validate() unit suite covers the full
-    // field matrix; this is the representative end-to-end install-path case.
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);

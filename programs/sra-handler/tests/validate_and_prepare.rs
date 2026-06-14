@@ -1378,12 +1378,6 @@ fn validate_and_prepare_rejection_preserves_nonce() {
 
 #[test]
 fn validate_and_prepare_rejects_legacy_zero_route() {
-    // Defense-in-depth: `validate()` also runs on the re-supplied handler_data at
-    // deposit time, *before* the committed-hash check. So even a hypothetical
-    // legacy SRA installed with a zero routing field is dead on arrival — the
-    // deposit is rejected with the route-field error rather than reaching the
-    // bridge. A valid SRA's re-supplied route is non-zero, so the happy path is
-    // unaffected.
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
     let mut zero_route = fx.handler_data.clone();
