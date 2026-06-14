@@ -1376,13 +1376,8 @@ fn validate_and_prepare_rejection_preserves_nonce() {
     assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 3);
 }
 
-// --- S5: source mint/amount edge pins ---
-
 #[test]
 fn validate_and_prepare_zero_input_amount_rejected() {
-    // Without the guard a zero-amount deposit no-ops the transfer, clears the
-    // slippage floor (0 >= 0), burns a nonce, and emits a phantom
-    // DepositPrepared. S5 rejects it before any state moves.
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
 
@@ -1406,7 +1401,6 @@ fn validate_and_prepare_zero_input_amount_rejected() {
             InstructionError::Custom(SraError::ZeroInputAmount.into()),
         )
     );
-    // The tx reverts atomically before any funds move or the nonce advances.
     assert_eq!(
         fetch_token_balance(&svm, &fx.owner_ata),
         OWNER_STARTING_BALANCE
@@ -1416,12 +1410,6 @@ fn validate_and_prepare_zero_input_amount_rejected() {
 
 #[test]
 fn validate_and_prepare_token_2022_mint_rejected() {
-    // Classic SPL is pinned by construction: `source_mint` is `Account<Mint>`
-    // (anchor_spl::token, classic-only) and `token_program` is `Program<Token>`.
-    // A Token-2022-owned mint fails Anchor's owner check during account
-    // validation, before the handler body runs — no code change is needed; this
-    // pins that a refactor to `Interface<TokenInterface>` can't silently admit
-    // Token-2022 source mints.
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
     restamp_mint_as_token_2022(&mut svm, &fx.source_mint);
@@ -1450,9 +1438,6 @@ fn validate_and_prepare_token_2022_mint_rejected() {
 
 #[test]
 fn validate_and_prepare_frozen_owner_ata_fails_cleanly() {
-    // An issuer freeze on the owner ATA surfaces as a typed SPL token error with
-    // no partial state: the owner->vault `transfer_checked` is the first CPI,
-    // well before the nonce increment, so atomicity leaves the nonce untouched.
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
     freeze_token_account(&mut svm, &fx.owner_ata);
@@ -1467,8 +1452,9 @@ fn validate_and_prepare_frozen_owner_ata_fails_cleanly() {
         err,
         TransactionError::InstructionError(
             0,
-            // SPL Token's TokenError::AccountFrozen (= Custom(17)).
-            InstructionError::Custom(17),
+            InstructionError::Custom(
+                litesvm_token::spl_token::error::TokenError::AccountFrozen as u32,
+            ),
         )
     );
     assert_eq!(

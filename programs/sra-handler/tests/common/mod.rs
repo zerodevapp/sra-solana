@@ -604,16 +604,9 @@ pub fn derive_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
     get_associated_token_address(owner, mint)
 }
 
-/// SPL Token-2022 program id. Source deposits accept classic SPL Token only;
-/// this is used by the S5 edge pins to fabricate a Token-2022-owned mint.
 pub const TOKEN_2022_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
-/// Re-stamps an existing classic mint account's owner as the Token-2022
-/// program, leaving the mint bytes intact. To Anchor's `Account<'info, Mint>`
-/// owner check (classic SPL only) this is indistinguishable from a real
-/// Token-2022 mint — it pins that such a mint is rejected by construction,
-/// so a future refactor to `Interface<TokenInterface>` can't silently admit it.
 pub fn restamp_mint_as_token_2022(svm: &mut LiteSVM, mint: &Pubkey) {
     let mut account = svm.get_account(mint).expect("mint account exists");
     account.owner = TOKEN_2022_PROGRAM_ID;
@@ -621,8 +614,6 @@ pub fn restamp_mint_as_token_2022(svm: &mut LiteSVM, mint: &Pubkey) {
         .expect("restamp mint owner should succeed");
 }
 
-/// Flips a token account into the Frozen state, as an issuer freeze would, so
-/// the next `transfer_checked` from it returns SPL Token's `AccountFrozen`.
 pub fn freeze_token_account(svm: &mut LiteSVM, ata: &Pubkey) {
     use litesvm_token::spl_token::state::AccountState;
     use solana_sdk::program_pack::Pack;

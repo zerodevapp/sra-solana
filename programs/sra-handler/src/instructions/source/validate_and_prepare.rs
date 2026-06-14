@@ -216,9 +216,6 @@ pub(crate) fn handler(
         params.action_idxs.len() <= MAX_ACTION_IDXS,
         SraError::TooManyActionIdxs
     );
-    // Reject zero-amount deposits up front: a zero `input_amount` would no-op the
-    // transfer, clear the slippage floor, burn a nonce, and emit a phantom
-    // DepositPrepared. Fail-closed before any hashing, attestation, or funds move.
     require!(params.input_amount > 0, SraError::ZeroInputAmount);
     handler_data.validate()?;
     require!(
