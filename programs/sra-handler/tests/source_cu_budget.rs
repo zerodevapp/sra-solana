@@ -88,7 +88,7 @@ fn assert_under_budget(consumed: u64, label: &str) {
 }
 
 /// Enables a global recipient + a default protocol fee for the fixture's
-/// committed app_id, and returns the canonical recipient fee ATA. 
+/// committed app_id, and returns the canonical recipient fee ATA.
 fn enable_protocol_fee(svm: &mut LiteSVM, fx: &ValidatePrepareFixture) -> Pubkey {
     let recipient = Pubkey::new_unique();
     send_instructions(
