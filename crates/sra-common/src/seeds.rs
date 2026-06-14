@@ -178,7 +178,7 @@ mod tests {
         expect_validate_error(&handler_data, "InvalidSlippage");
     }
 
-    // S2 — zero-value routing rejection. Every routing field that EVM eventually
+    // Zero-value routing rejection. Every routing field that EVM eventually
     // narrows to an address (or compares as a chain id) must be non-zero at the
     // commitment point; see `SourceHandlerData::validate`.
 

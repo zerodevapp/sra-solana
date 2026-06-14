@@ -106,7 +106,7 @@ pub enum SraError {
     #[msg("Fee recipient token account required when the fee is positive")]
     MissingFeeRecipientAccount,
 
-    // -- Source: install/route field validation (S2, appended to keep prior codes stable) --
+    // -- Source: install/route field validation (appended to keep prior codes stable) --
     #[msg("Routing field is zero or routes to the local Solana chain")]
     InvalidRouteField,
 }
