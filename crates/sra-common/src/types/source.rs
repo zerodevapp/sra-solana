@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::{
-    constants::{MAX_ADAPTERS, MAX_SLIPPAGE_BPS},
+    constants::{MAX_ADAPTERS, MAX_SLIPPAGE_BPS, SOLANA_CHAIN_ID},
     errors::SraError,
 };
 
@@ -38,6 +38,15 @@ impl SourceHandlerData {
         require!(
             self.allowed_slippage_bps <= MAX_SLIPPAGE_BPS,
             SraError::InvalidSlippage
+        );
+        require!(
+            self.target_handler != [0u8; 32]
+                && self.target_adapter != [0u8; 32]
+                && self.recipient != [0u8; 32]
+                && self.target_token != [0u8; 32]
+                && self.target_chain_id != 0
+                && self.target_chain_id != SOLANA_CHAIN_ID,
+            SraError::InvalidRouteField
         );
         Ok(())
     }
