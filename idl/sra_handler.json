@@ -2029,7 +2029,12 @@
               "the slippage check (floored from the GROSS input)",
               "and re-honored by the target-specific adapter flow."
             ],
-            "type": "u64"
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           },
           {
             "name": "target_chain_id",
@@ -2233,7 +2238,12 @@
           },
           {
             "name": "output_amount",
-            "type": "u64"
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           },
           {
             "name": "target_chain_id",

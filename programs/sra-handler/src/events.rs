@@ -99,7 +99,7 @@ pub struct DepositPrepared {
     /// Minimum output amount the destination must honor; enforced here via
     /// the slippage check (floored from the GROSS input)
     /// and re-honored by the target-specific adapter flow.
-    pub output_amount: u64,
+    pub output_amount: [u8; 32],
     /// Runtime target chain id from `PrepareParams`.
     pub target_chain_id: u64,
     /// Opaque 32-byte target handler identifier. EVM handlers are left-padded

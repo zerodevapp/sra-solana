@@ -43,7 +43,7 @@ fn validate_adapter_program(adapter_program: &AccountInfo) -> Result<()> {
 fn output_satisfies_slippage_floor(
     input_amount: u64,
     input_decimals: u8,
-    output_amount: u64,
+    output_amount: u128,
     output_decimals: u8,
     slippage_bps: u16,
 ) -> Result<bool> {
@@ -60,13 +60,13 @@ fn output_satisfies_slippage_floor(
     let (lhs, rhs) = if input_decimals >= output_decimals {
         let k = (input_decimals - output_decimals) as u32;
         (
-            (output_amount as u128).saturating_mul(10u128.saturating_pow(k)),
+            output_amount.saturating_mul(10u128.saturating_pow(k)),
             min_source,
         )
     } else {
         let k = (output_decimals - input_decimals) as u32;
         (
-            output_amount as u128,
+            output_amount,
             min_source.saturating_mul(10u128.saturating_pow(k)),
         )
     };
@@ -74,7 +74,7 @@ fn output_satisfies_slippage_floor(
     Ok(lhs >= rhs)
 }
 
-pub use sra_common::source_deposit::PrepareParams;
+pub use sra_common::source_deposit::{decode_output_amount, PrepareParams};
 
 /// Validates a source deposit, collects the protocol fee, moves the net into
 /// adapter custody, and emits the routing inputs consumed by the paired
@@ -348,7 +348,7 @@ pub(crate) fn handler(
         output_satisfies_slippage_floor(
             params.input_amount,
             ctx.accounts.source_mint.decimals,
-            params.output_amount,
+            decode_output_amount(params.output_amount)?,
             ctx.accounts.address_book_entry.target_decimals,
             handler_data.allowed_slippage_bps,
         )?,
@@ -496,7 +496,7 @@ mod tests {
         // Scale the minimum UP (output finer): the minimum normalized 40
         // decimals above the input dwarfs any u64 output, so it cannot clear —
         // the saturated minimum stays above `output`.
-        assert!(!output_satisfies_slippage_floor(1_000_000, 0, u64::MAX, 40, 50).unwrap());
+        assert!(!output_satisfies_slippage_floor(1_000_000, 0, u64::MAX as u128, 40, 50).unwrap());
 
         // A zero output never clears a positive minimum, even under saturation.
         assert!(!output_satisfies_slippage_floor(1, 0, 0, 40, 50).unwrap());

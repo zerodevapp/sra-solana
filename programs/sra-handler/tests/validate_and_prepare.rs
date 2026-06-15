@@ -118,7 +118,7 @@ fn validate_and_prepare_happy_path() {
     assert_eq!(ev.adapter_program, fx.adapter_program);
     assert_eq!(ev.nonce, 0, "event carries the pre-increment nonce");
     assert_eq!(ev.input_amount, INPUT);
-    assert_eq!(ev.output_amount, OUTPUT_WITHIN_SLIPPAGE);
+    assert_eq!(ev.output_amount, u256_from_u64(OUTPUT_WITHIN_SLIPPAGE));
     assert_eq!(ev.target_chain_id, params.target_chain_id);
     assert_eq!(ev.target_handler, params.target_handler);
     assert_eq!(ev.target_adapter, params.target_adapter);
@@ -167,10 +167,7 @@ fn execute_deposit_emits_across_deposit_executed() {
     assert_eq!(ev.across_state, fx.across_state);
     assert_eq!(ev.across_vault, fx.across_vault);
     assert_eq!(ev.input_amount, params.input_amount);
-    assert_eq!(
-        ev.output_amount,
-        sra_common::source_deposit::handler_output_amount_u256(params.output_amount)
-    );
+    assert_eq!(ev.output_amount, params.output_amount);
     assert_eq!(ev.target_token, params.target_token);
     assert_eq!(ev.action_idxs, params.action_idxs);
     assert_eq!(ev.exclusive_relayer, fx.payer.pubkey());
@@ -834,7 +831,7 @@ fn validate_and_prepare_slippage_exceeded_rejected() {
         .invoke(
             &mut svm,
             PrepareParams {
-                output_amount: 900_000,
+                output_amount: u256_from_u64(900_000),
                 ..default_prepare_params(&fx)
             },
         )
@@ -875,7 +872,7 @@ fn validate_and_prepare_slippage_uses_decimal_normalized_amounts() {
             &mut svm,
             PrepareParams {
                 input_amount: 1_000_000,
-                output_amount: 995_000_000_000_000_000,
+                output_amount: u256_from_u64(995_000_000_000_000_000),
                 ..default_prepare_params(&fx)
             },
         )
@@ -883,7 +880,7 @@ fn validate_and_prepare_slippage_uses_decimal_normalized_amounts() {
 
     let ev = extract_deposit_prepared(&meta.logs).expect("DepositPrepared event must be emitted");
     assert_eq!(ev.input_amount, 1_000_000);
-    assert_eq!(ev.output_amount, 995_000_000_000_000_000);
+    assert_eq!(ev.output_amount, u256_from_u64(995_000_000_000_000_000));
 }
 
 #[test]
@@ -906,7 +903,7 @@ fn validate_and_prepare_rejects_decimal_normalized_slippage_below_boundary() {
             &mut svm,
             PrepareParams {
                 input_amount: 1_000_000,
-                output_amount: 994_999_999_999_999_999,
+                output_amount: u256_from_u64(994_999_999_999_999_999),
                 ..default_prepare_params(&fx)
             },
         )
@@ -939,7 +936,7 @@ fn validate_and_prepare_handles_large_source_decimal_gap_without_overflow() {
         &mut svm,
         PrepareParams {
             input_amount: 1_000_000,
-            output_amount: 1,
+            output_amount: u256_from_u64(1),
             ..default_prepare_params(&fx)
         },
     )
@@ -963,7 +960,7 @@ fn validate_and_prepare_large_target_decimal_gap_rejects_as_slippage() {
             &mut svm,
             PrepareParams {
                 input_amount: 1,
-                output_amount: u64::MAX,
+                output_amount: u256_from_u64(u64::MAX),
                 ..default_prepare_params(&fx)
             },
         )
@@ -1022,7 +1019,7 @@ fn validate_and_prepare_insufficient_balance_rejected() {
             &mut svm,
             PrepareParams {
                 input_amount: over_balance,
-                output_amount: over_balance,
+                output_amount: u256_from_u64(over_balance),
                 ..default_prepare_params(&fx)
             },
         )
@@ -1048,7 +1045,7 @@ fn validate_and_prepare_sequential_nonce_increments() {
 
     let mut params = default_prepare_params(&fx);
     params.input_amount = 100_000;
-    params.output_amount = 99_500;
+    params.output_amount = u256_from_u64(99_500);
 
     for expected_pre_nonce in 0u64..3 {
         let meta = fx
@@ -1085,7 +1082,7 @@ fn validate_and_prepare_slippage_boundary_succeeds() {
     let fx = ValidatePrepareFixture::new(&mut svm);
     let min_acceptable = 995_000;
     let params = PrepareParams {
-        output_amount: min_acceptable,
+        output_amount: u256_from_u64(min_acceptable),
         ..default_prepare_params(&fx)
     };
 
@@ -1094,7 +1091,7 @@ fn validate_and_prepare_slippage_boundary_succeeds() {
         .expect("boundary slippage output must succeed");
 
     let ev = extract_deposit_prepared(&meta.logs).expect("DepositPrepared event");
-    assert_eq!(ev.output_amount, min_acceptable);
+    assert_eq!(ev.output_amount, u256_from_u64(min_acceptable));
     assert_eq!(ev.nonce, 0);
     assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 1);
 }
@@ -1386,7 +1383,7 @@ fn validate_and_prepare_zero_input_amount_rejected() {
             &mut svm,
             PrepareParams {
                 input_amount: 0,
-                output_amount: 0,
+                output_amount: u256_from_u64(0),
                 ..default_prepare_params(&fx)
             },
         )
@@ -1455,6 +1452,63 @@ fn validate_and_prepare_frozen_owner_ata_fails_cleanly() {
             InstructionError::Custom(
                 litesvm_token::spl_token::error::TokenError::AccountFrozen as u32,
             ),
+        )
+    );
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.owner_ata),
+        OWNER_STARTING_BALANCE
+    );
+    assert_eq!(current_nonce(&svm, &fx.accounts.mint_nonce), 0);
+}
+
+#[test]
+fn validate_and_prepare_accepts_output_above_u64_max() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+
+    let mut output_amount = [0u8; 32];
+    output_amount[16..].copy_from_slice(&(1u128 << 64).to_be_bytes());
+
+    let meta = fx
+        .invoke(
+            &mut svm,
+            PrepareParams {
+                output_amount,
+                ..default_prepare_params(&fx)
+            },
+        )
+        .expect("output_amount above u64::MAX must be accepted post-widening");
+
+    let ev = extract_deposit_prepared(&meta.logs).expect("DepositPrepared event");
+    assert_eq!(ev.output_amount, output_amount);
+    assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 1);
+}
+
+#[test]
+fn validate_and_prepare_output_amount_overflow_rejected() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+
+    let mut output_amount = [0u8; 32];
+    output_amount[15] = 1;
+
+    let err = fx
+        .invoke(
+            &mut svm,
+            PrepareParams {
+                output_amount,
+                ..default_prepare_params(&fx)
+            },
+        )
+        .expect_err("output_amount above the u128 max must reject")
+        .err
+        .clone();
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::OutputAmountOverflow.into()),
         )
     );
     assert_eq!(

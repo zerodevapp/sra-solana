@@ -111,4 +111,7 @@ pub enum SraError {
     // -- Source: install/route field validation (appended to keep prior codes stable) --
     #[msg("Routing field is zero or routes to the local Solana chain")]
     InvalidRouteField,
+
+    #[msg("output_amount exceeds the u128 maximum (upper 16 bytes must be zero)")]
+    OutputAmountOverflow,
 }

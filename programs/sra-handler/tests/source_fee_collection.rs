@@ -15,6 +15,7 @@ use litesvm::LiteSVM;
 use solana_sdk::{
     instruction::InstructionError, pubkey::Pubkey, signer::Signer, transaction::TransactionError,
 };
+use sra_common::abi::u256_from_u64;
 use sra_common::constants::NO_FEE_BPS_OVERRIDE;
 use sra_common::errors::SraError;
 use sra_common::source_deposit::PrepareParams;
@@ -148,7 +149,7 @@ fn fee_collected_happy_path() {
         ev.protocol_fee_amount, DEFAULT_FEE,
         "event carries the collected protocol fee",
     );
-    assert_eq!(ev.output_amount, OUTPUT_WITHIN_SLIPPAGE);
+    assert_eq!(ev.output_amount, u256_from_u64(OUTPUT_WITHIN_SLIPPAGE));
 }
 
 #[test]
@@ -449,7 +450,7 @@ fn slippage_floors_on_gross_with_fee() {
     // floor but NOT the gross floor. EVM [TOB-SRA-5] applies slippage to the
     // gross deposit, so this must reject.
     let mut params = fee_params(&fx, DEFAULT_FEE);
-    params.output_amount = 994_000;
+    params.output_amount = u256_from_u64(994_000);
 
     expect_custom_error(
         fx.invoke_with_fee_ata(&mut svm, params, Some(fee_ata)),

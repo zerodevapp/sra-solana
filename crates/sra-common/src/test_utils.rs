@@ -67,7 +67,7 @@ pub fn empty_instruction() -> Instruction {
 pub fn sample_prepare_params() -> PrepareParams {
     PrepareParams::new(
         123,
-        456,
+        crate::abi::u256_from_u64(456),
         42_161,
         evm_bytes32(0x11),
         evm_bytes32(0x22),

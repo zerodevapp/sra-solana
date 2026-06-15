@@ -19,6 +19,7 @@ use solana_sdk::{
     signature::{read_keypair_file, Keypair, Signature, Signer},
     transaction::{Transaction, VersionedTransaction},
 };
+use sra_common::abi::u256_from_u64;
 use sra_common::{
     constants::{ACROSS_SPOKE_POOL_ID, USDC_MINT},
     source_deposit::{AcrossDepositParams, PrepareParams},
@@ -51,7 +52,7 @@ fn surfpool_log(message: impl AsRef<str>) {
 fn default_prepare_params_rpc(fx: &SurfpoolSourceFixture) -> PrepareParams {
     let mut params = sample_prepare_params(fx.target_token);
     params.input_amount = INPUT_AMOUNT;
-    params.output_amount = OUTPUT_WITHIN_SLIPPAGE;
+    params.output_amount = u256_from_u64(OUTPUT_WITHIN_SLIPPAGE);
     params
 }
 
@@ -429,7 +430,7 @@ impl SurfpoolSourceFixture {
     fn invoke_source_flow(&self, params: PrepareParams) -> TestResult<Vec<String>> {
         let current_nonce = self.current_nonce()?;
         surfpool_log(format!(
-            "invoke_source_flow: starting for target_chain_id={} input_amount={} output_amount={} current_nonce={}",
+            "invoke_source_flow: starting for target_chain_id={} input_amount={} output_amount={:?} current_nonce={}",
             params.target_chain_id,
             params.input_amount,
             params.output_amount,
