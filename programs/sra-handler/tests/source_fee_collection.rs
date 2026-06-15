@@ -1,11 +1,11 @@
-//! Step S9 — source protocol fee collection through `validate_and_prepare`.
+//! Source protocol fee collection through `validate_and_prepare`.
 //!
 //! The fee is resolved from the COMMITTED `handler_data.app_id` plus live
 //! admin fee state, equality-checked against the attested
 //! `params.protocol_fee_amount` (`FeeMismatch`), collected from the SRA vault
 //! into the canonical recipient ATA, and the NET (input - fee) is forwarded
 //! into adapter custody and bridged. Slippage keeps flooring on the GROSS
-//! input ([TOB-SRA-5] EVM parity).
+//! input (EVM parity).
 
 mod common;
 
@@ -447,7 +447,7 @@ fn slippage_floors_on_gross_with_fee() {
 
     // Gross floor at 50 bps slippage = 995_000. Net (997_000) would floor at
     // 992_015 — an output of 994_000 discriminates: it clears the net-derived
-    // floor but NOT the gross floor. EVM [TOB-SRA-5] applies slippage to the
+    // floor but NOT the gross floor. EVM applies slippage to the
     // gross deposit, so this must reject.
     let mut params = fee_params(&fx, DEFAULT_FEE);
     params.output_amount = u256_from_u64(994_000);
