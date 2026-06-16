@@ -1,6 +1,5 @@
 use anchor_lang::prelude::*;
 
-use crate::abi::u256_from_u64;
 use crate::errors::SraError;
 use crate::types::SourceHandlerData;
 
@@ -8,7 +7,7 @@ use crate::types::SourceHandlerData;
 pub struct PrepareParams {
     /// Gross deposit; the protocol fee is deducted from this on the source.
     pub input_amount: u64,
-    pub output_amount: u64,
+    pub output_amount: [u8; 32],
     pub target_chain_id: u64,
     pub target_handler: [u8; 32],
     pub target_adapter: [u8; 32],
@@ -54,7 +53,7 @@ impl PrepareParams {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_amount: u64,
-        output_amount: u64,
+        output_amount: [u8; 32],
         target_chain_id: u64,
         target_handler: [u8; 32],
         target_adapter: [u8; 32],
@@ -100,7 +99,7 @@ impl AcrossDepositParams {
     ) -> Result<Self> {
         Ok(Self {
             input_amount: prepare.net_input_amount()?,
-            output_amount: handler_output_amount_u256(prepare.output_amount),
+            output_amount: prepare.output_amount,
             target_chain_id: prepare.target_chain_id,
             target_handler: prepare.target_handler,
             target_adapter: prepare.target_adapter,
@@ -115,8 +114,12 @@ impl AcrossDepositParams {
     }
 }
 
-pub fn handler_output_amount_u256(output_amount: u64) -> [u8; 32] {
-    u256_from_u64(output_amount)
+pub fn decode_output_amount(output_amount: [u8; 32]) -> Result<u128> {
+    require!(
+        output_amount[..16] == [0u8; 16],
+        SraError::OutputAmountOverflow
+    );
+    Ok(u128::from_be_bytes(output_amount[16..].try_into().unwrap()))
 }
 
 /// Bound user-supplied Across timing: a too-short `fill_deadline_offset` forces
@@ -141,17 +144,47 @@ pub fn validate_across_timing(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::abi::u256_from_u64;
     use crate::constants::NO_FEE_BPS_OVERRIDE;
 
     #[test]
-    fn handler_output_is_promoted_to_u256() {
-        assert_eq!(handler_output_amount_u256(0x1234)[30..], [0x12, 0x34]);
+    fn decode_output_amount_accepts_u64_max() {
+        assert_eq!(
+            decode_output_amount(u256_from_u64(u64::MAX)).unwrap(),
+            u64::MAX as u128
+        );
+    }
+
+    #[test]
+    fn decode_output_amount_accepts_above_u64_max() {
+        let mut wire = [0u8; 32];
+        wire[16..].copy_from_slice(&(1u128 << 64).to_be_bytes());
+        assert_eq!(decode_output_amount(wire).unwrap(), 1u128 << 64);
+    }
+
+    #[test]
+    fn decode_output_amount_accepts_u128_max() {
+        let mut wire = [0u8; 32];
+        wire[16..].copy_from_slice(&u128::MAX.to_be_bytes());
+        assert_eq!(decode_output_amount(wire).unwrap(), u128::MAX);
+    }
+
+    #[test]
+    fn decode_output_amount_rejects_upper_bytes() {
+        let mut wire = [0u8; 32];
+        wire[15] = 1;
+        match decode_output_amount(wire).expect_err("upper bytes must reject") {
+            anchor_lang::error::Error::AnchorError(e) => {
+                assert_eq!(e.error_name, "OutputAmountOverflow")
+            }
+            other => panic!("expected OutputAmountOverflow, got {other:?}"),
+        }
     }
 
     fn fee_prepare(input_amount: u64, protocol_fee_amount: u64) -> PrepareParams {
         PrepareParams::new(
             input_amount,
-            456,
+            u256_from_u64(456),
             42_161,
             [0x11u8; 32],
             [0x22u8; 32],

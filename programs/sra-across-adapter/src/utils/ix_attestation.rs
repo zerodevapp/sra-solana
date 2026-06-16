@@ -155,9 +155,7 @@ mod tests {
     }
 
     fn mutate_wrong_output_amount(_ix: &mut Instruction, deposit: &mut AcrossDepositParams) {
-        deposit.output_amount = sra_common::source_deposit::handler_output_amount_u256(
-            sample_prepare_params().output_amount + 1,
-        );
+        deposit.output_amount[31] = deposit.output_amount[31].wrapping_add(1);
     }
 
     fn mutate_malformed_data(ix: &mut Instruction, _deposit: &mut AcrossDepositParams) {

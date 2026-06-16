@@ -99,7 +99,7 @@ pub enum SraError {
     #[msg("Pending admin must be non-default")]
     InvalidPendingAdmin,
 
-    // -- Source: protocol fee collection (S9, appended to keep prior codes stable) --
+    // -- Source: protocol fee collection (appended to keep prior codes stable) --
     #[msg("Attested protocol fee does not match the resolved fee")]
     FeeMismatch,
 
@@ -111,4 +111,7 @@ pub enum SraError {
     // -- Source: install/route field validation (appended to keep prior codes stable) --
     #[msg("Routing field is zero or routes to the local Solana chain")]
     InvalidRouteField,
+
+    #[msg("output_amount exceeds the u128 maximum (upper 16 bytes must be zero)")]
+    OutputAmountOverflow,
 }

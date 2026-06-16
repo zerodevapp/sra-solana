@@ -41,7 +41,7 @@ mod tests {
     fn decode_rejects_wrong_discriminator() {
         let params = PrepareParams {
             input_amount: 1,
-            output_amount: 2,
+            output_amount: crate::abi::u256_from_u64(2),
             target_chain_id: 42_161,
             target_handler: [4u8; 32],
             target_adapter: [5u8; 32],

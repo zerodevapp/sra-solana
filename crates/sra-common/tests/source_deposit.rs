@@ -12,7 +12,7 @@ fn evm_bytes32(byte: u8) -> [u8; 32] {
 fn sample_prepare_params() -> PrepareParams {
     PrepareParams::new(
         7,
-        9,
+        sra_common::abi::u256_from_u64(9),
         42_161,
         evm_bytes32(0x11),
         evm_bytes32(0x22),
