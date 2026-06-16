@@ -4,10 +4,10 @@
 //! # Why hand-rolled
 //!
 //! The EVM `SRAHandler.onFill` decodes the cross-chain payload via
-//! `abi.decode(message, (address, address, uint256, Message))`. Any divergence
+//! `abi.decode(message, (address, uint256, uint256, Message))`. Any divergence
 //! between Solana and Solidity encoding would make EVM destinations reject
 //! the message — stranding funds. This module produces output that matches
-//! `abi.encode(adapter, handler, sourceChainId, message)` byte-for-byte.
+//! `abi.encode(adapter, sourceChainId, nonce, message)` byte-for-byte.
 //!
 //!
 //! # Reference Solidity types
@@ -18,7 +18,7 @@
 //!                       TokenParam targetParam; bytes extra; }
 //! struct Message      { bytes32 account; bytes initCode; DepositInfo depositInfo;
 //!                       uint256[] actionIdxs; bytes32 appId; }
-//! // Top level: abi.encode(address adapter, address handler, uint256 sourceChainId, Message)
+//! // Top level: abi.encode(address adapter, uint256 sourceChainId, uint256 nonce, Message)
 //! ```
 
 use anchor_lang::prelude::Pubkey;
@@ -189,15 +189,18 @@ fn encode_message(msg: &Message) -> Vec<u8> {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Canonical `abi.encode(address adapter, address handler, uint256 sourceChainId, Message message)`.
+/// Canonical `abi.encode(address adapter, uint256 sourceChainId, uint256 nonce, Message message)`.
 ///
-/// Top-level head is `(adapter, handler, sourceChainId, offset_to_message)`
-/// — the first three are static, `Message` is dynamic so its offset points at
-/// the start of the tail (always `4 * 32 = 128`).
+/// Top-level head is `(adapter, sourceChainId, nonce, offset_to_message)` — the
+/// first three are static, `Message` is dynamic so its offset points at the
+/// start of the tail (always `4 * 32 = 128`). Each adapter is bound to a single
+/// SRA handler at construction time, so the handler is not carried in the
+/// envelope; the nonce lives here rather than inside `Message` so the
+/// cross-chain `Message` ABI stays stable across replay-scheme changes.
 pub fn abi_encode_sra_message(
     adapter: &[u8; 20],
-    handler: &[u8; 20],
     source_chain_id: &[u8; 32],
+    nonce: u64,
     message: &Message,
 ) -> Vec<u8> {
     const HEAD_WORDS: usize = 4;
@@ -206,62 +209,58 @@ pub fn abi_encode_sra_message(
     let message_enc = encode_message(message);
     let mut out = Vec::with_capacity(head_size + message_enc.len());
     out.extend_from_slice(&address_word(adapter));
-    out.extend_from_slice(&address_word(handler));
     out.extend_from_slice(source_chain_id);
+    out.extend_from_slice(&u256_from_u64(nonce));
     out.extend_from_slice(&u256_from_usize(head_size));
     out.extend(message_enc);
     out
 }
 
-/// Encodes the replay pre-image `abi.encode(uint256 sourceChainId, Message message)`.
+/// Encodes the replay pre-image `abi.encode(uint256 sourceChainId, uint256 nonce, Message message)`.
 ///
 /// `SRAHandler._triggerTargetAction` computes
-/// `keccak256(abi.encode(sourceChainId, message))` and stores it in
-/// `processedMessages[]` (SRAHandler.sol:185) for replay protection. This is
-/// a *different* encoding shape from `abi_encode_sra_message` — no
-/// `adapter`/`handler` prefix — so a caller that wants the replay key must
-/// use this function, not the top-level encoder.
+/// `keccak256(abi.encode(sourceChainId, nonce, message))` and stores it in
+/// `processedMessages[]` for replay protection. This is a *different* encoding
+/// shape from `abi_encode_sra_message` — no `adapter` prefix — so a caller that
+/// wants the replay key must use this function, not the top-level encoder. The
+/// nonce is envelope-level (not part of `Message`), so it is included here
+/// explicitly.
 ///
-/// Top-level head is `(sourceChainId, offset_to_message)` — one static word
-/// plus the dynamic `Message` offset (always `2 * 32 = 64`).
-pub fn abi_encode_for_replay(source_chain_id: &[u8; 32], message: &Message) -> Vec<u8> {
-    const HEAD_WORDS: usize = 2;
+/// Top-level head is `(sourceChainId, nonce, offset_to_message)` — two static
+/// words plus the dynamic `Message` offset (always `3 * 32 = 96`).
+pub fn abi_encode_for_replay(source_chain_id: &[u8; 32], nonce: u64, message: &Message) -> Vec<u8> {
+    const HEAD_WORDS: usize = 3;
     let head_size = HEAD_WORDS * WORD;
 
     let message_enc = encode_message(message);
     let mut out = Vec::with_capacity(head_size + message_enc.len());
     out.extend_from_slice(source_chain_id);
+    out.extend_from_slice(&u256_from_u64(nonce));
     out.extend_from_slice(&u256_from_usize(head_size));
     out.extend(message_enc);
     out
 }
 
-/// Convenience: `keccak256(abi_encode_for_replay(source_chain_id, message))`.
+/// Convenience: `keccak256(abi_encode_for_replay(source_chain_id, nonce, message))`.
 /// Returns the 32-byte replay key EVM destinations index on.
-pub fn replay_hash(source_chain_id: &[u8; 32], message: &Message) -> [u8; 32] {
-    let pre_image = abi_encode_for_replay(source_chain_id, message);
+pub fn replay_hash(source_chain_id: &[u8; 32], nonce: u64, message: &Message) -> [u8; 32] {
+    let pre_image = abi_encode_for_replay(source_chain_id, nonce, message);
     keccak_hash(&pre_image).to_bytes()
 }
 
-/// Builds the SRA v1 extra envelope: `abi.encode(target_adapter, abi.encode(nonce, bytes("")))`.
+/// Builds the SRA extra envelope: `abi.encode(target_adapter, adapterData)`.
 ///
-/// The outer tuple has one static element (address) and one dynamic element
-/// (bytes), giving head = 2 words. The inner tuple is `abi.encode(uint256 nonce, bytes(""))`
-/// which has head = 2 words (nonce + offset-to-empty-bytes) and a 1-word tail
-/// (length 0) — 96 bytes total.
-pub fn build_extra_envelope(target_adapter: &[u8; 20], nonce: u64) -> Vec<u8> {
-    // Inner abi.encode(nonce, bytes(""))
-    let mut inner = Vec::with_capacity(3 * WORD);
-    inner.extend_from_slice(&u256_from_u64(nonce));
-    inner.extend_from_slice(&u256_from_usize(2 * WORD)); // offset to empty bytes
-    inner.extend_from_slice(&[0u8; WORD]); // empty bytes length
-
-    // Outer abi.encode(address, bytes)
-    let bytes_tail = encode_bytes_dynamic(&inner);
-    let mut out = Vec::with_capacity(2 * WORD + bytes_tail.len());
+/// Mirrors `DepositInfo.extra` in EVM `SRAHandler.trigger`
+/// (`abi.encode(sourceAdapter, adapterData)`). The Across path carries empty
+/// `adapterData` (the destination never reads `extra`), so this is
+/// `abi.encode(address, bytes(""))`: one static address word + an offset word
+/// (`0x40`) + a one-word empty-`bytes` tail (length 0) — 96 bytes total.
+pub fn build_extra_envelope(target_adapter: &[u8; 20]) -> Vec<u8> {
+    let tail = encode_bytes_dynamic(&[]);
+    let mut out = Vec::with_capacity(2 * WORD + tail.len());
     out.extend_from_slice(&address_word(target_adapter));
-    out.extend_from_slice(&u256_from_usize(2 * WORD)); // offset to bytes
-    out.extend(bytes_tail);
+    out.extend_from_slice(&u256_from_usize(2 * WORD)); // offset to (empty) adapterData
+    out.extend(tail);
     out
 }
 
@@ -411,23 +410,29 @@ mod tests {
         let mut source_chain_id = [0u8; 32];
         source_chain_id[31] = 1;
 
+        // source_chain_mainnet uses a byte-spanning nonce so a wrong placement
+        // of the nonce word is caught.
+        let nonce: u64 = 0x0102_0304_0506_0708;
+
         // From golden-vectors/source_chain_mainnet.json `replayHash` field.
         let expected: [u8; 32] = [
-            0xe7, 0x91, 0xc6, 0x02, 0x1a, 0x8f, 0xb3, 0xa5, 0x1e, 0x9f, 0xc1, 0x54, 0x66, 0xeb,
-            0xfc, 0xb8, 0x77, 0xa2, 0x13, 0x81, 0xf6, 0xb3, 0xaa, 0xcc, 0x07, 0xd9, 0x67, 0x4c,
-            0xae, 0xaf, 0xd0, 0x86,
+            0xf7, 0x88, 0x05, 0x5e, 0x5a, 0x78, 0x00, 0x2d, 0x28, 0x39, 0x83, 0x46, 0xbc, 0xe9,
+            0xee, 0xdb, 0x40, 0x8b, 0xc8, 0x2d, 0x87, 0x76, 0xd5, 0xc5, 0x04, 0x3b, 0xe8, 0x10,
+            0xb6, 0x6c, 0xf2, 0x1f,
         ];
 
-        assert_eq!(replay_hash(&source_chain_id, &msg), expected);
+        assert_eq!(replay_hash(&source_chain_id, nonce, &msg), expected);
 
-        // Also sanity-check that the replay pre-image differs from the
-        // top-level encoding (no adapter/handler prefix).
-        let pre_image = abi_encode_for_replay(&source_chain_id, &msg);
-        // First word = sourceChainId = 1 -> byte 31 is 0x01, rest zero.
+        // Also sanity-check the replay pre-image layout (no adapter prefix).
+        let pre_image = abi_encode_for_replay(&source_chain_id, nonce, &msg);
+        // Word 0 = sourceChainId = 1 -> byte 31 is 0x01, rest zero.
         assert_eq!(&pre_image[..31], &[0u8; 31]);
         assert_eq!(pre_image[31], 1);
-        // Second word = offset to Message = 0x40 (64).
-        assert_eq!(&pre_image[32..63], &[0u8; 31]);
-        assert_eq!(pre_image[63], 0x40);
+        // Word 1 = nonce in the low 8 bytes, upper 24 zero.
+        assert_eq!(&pre_image[32..56], &[0u8; 24]);
+        assert_eq!(&pre_image[56..64], &nonce.to_be_bytes());
+        // Word 2 = offset to Message = 0x60 (96).
+        assert_eq!(&pre_image[64..95], &[0u8; 31]);
+        assert_eq!(pre_image[95], 0x60);
     }
 }

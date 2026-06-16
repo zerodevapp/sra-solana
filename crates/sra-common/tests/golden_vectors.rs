@@ -2,7 +2,7 @@
 //!
 //! Loads the committed fixtures from `tests/fixtures/golden-vectors/` and
 //! asserts `sra_common::abi::abi_encode_sra_message(...)` produces bytes
-//! byte-identical to Solidity's `abi.encode(adapter, handler, sourceChainId, message)`.
+//! byte-identical to Solidity's `abi.encode(adapter, sourceChainId, nonce, message)`.
 //!
 //! The vectors are the contract: if Rust ever diverges from Solidity, EVM
 //! destinations will fail to `abi.decode` the cross-chain message and funds
@@ -103,6 +103,15 @@ fn u256_from_u64(x: u64) -> [u8; 32] {
     r
 }
 
+/// Parses a `nonce` field (decimal string) into the `u64` the encoder takes.
+fn parse_nonce(v: &Value) -> u64 {
+    v["nonce"]
+        .as_str()
+        .expect("nonce must be a decimal string")
+        .parse()
+        .expect("nonce must fit in u64")
+}
+
 fn message_from_json(v: &Value) -> Message {
     let action_idxs: Vec<[u8; 32]> = v["actionIdxs"]
         .as_array()
@@ -150,12 +159,12 @@ fn every_vector_matches_solidity_abi_encode() {
     for name in load_index() {
         let v = load_vector(&name);
         let adapter = parse_hex_20(v["adapter"].as_str().unwrap());
-        let handler = parse_hex_20(v["handler"].as_str().unwrap());
         let source_chain_id = dec_to_u256_be(v["sourceChainId"].as_str().unwrap());
+        let nonce = parse_nonce(&v);
         let msg = message_from_json(&v);
         let expected = parse_hex(v["encoded"].as_str().unwrap());
 
-        let got = abi_encode_sra_message(&adapter, &handler, &source_chain_id, &msg);
+        let got = abi_encode_sra_message(&adapter, &source_chain_id, nonce, &msg);
         assert_eq!(
             got.len(),
             expected.len(),
@@ -180,10 +189,11 @@ fn every_vector_matches_solidity_abi_encode_for_replay() {
     for name in load_index() {
         let v = load_vector(&name);
         let source_chain_id = dec_to_u256_be(v["sourceChainId"].as_str().unwrap());
+        let nonce = parse_nonce(&v);
         let msg = message_from_json(&v);
         let expected = parse_hex(v["encodedForReplay"].as_str().unwrap());
 
-        let got = abi_encode_for_replay(&source_chain_id, &msg);
+        let got = abi_encode_for_replay(&source_chain_id, nonce, &msg);
         assert_eq!(
             got.len(),
             expected.len(),
@@ -208,10 +218,11 @@ fn every_vector_matches_solidity_replay_hash() {
     for name in load_index() {
         let v = load_vector(&name);
         let source_chain_id = dec_to_u256_be(v["sourceChainId"].as_str().unwrap());
+        let nonce = parse_nonce(&v);
         let msg = message_from_json(&v);
         let expected = parse_hex_32(v["replayHash"].as_str().unwrap());
 
-        let got = replay_hash(&source_chain_id, &msg);
+        let got = replay_hash(&source_chain_id, nonce, &msg);
         if got != expected {
             panic!(
                 "vector '{}' replayHash: mismatch\n  expected: 0x{}\n       got: 0x{}",
@@ -225,9 +236,8 @@ fn every_vector_matches_solidity_replay_hash() {
 
 #[test]
 fn build_extra_envelope_matches_standard_across_extra_vector() {
-    // The `standard_across_extra` vector uses:
-    //   targetAdapterEvm = 0x3333...3333, nonce = 42
-    // and the extra field is exactly abi.encode(adapter, abi.encode(nonce, bytes(""))).
+    // The `standard_across_extra` vector's extra is exactly
+    // abi.encode(targetAdapterEvm = 0x3333...3333, bytes("")) — empty adapterData.
     let v = load_vector("standard_across_extra");
     let expected_extra = parse_hex(v["extra"].as_str().unwrap());
     assert!(
@@ -236,7 +246,7 @@ fn build_extra_envelope_matches_standard_across_extra_vector() {
     );
 
     let target_adapter: [u8; 20] = [0x33; 20];
-    let got = build_extra_envelope(&target_adapter, 42);
+    let got = build_extra_envelope(&target_adapter);
     assert_eq!(
         got, expected_extra,
         "build_extra_envelope output differs from golden extra bytes"
