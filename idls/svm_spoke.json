@@ -4,29 +4,37 @@
     "name": "svm_spoke",
     "version": "0.1.0",
     "spec": "0.1.0",
-    "description": "Minimal Across SVM Spoke IDL surface for deposit_now CPI"
+    "description": "Across SVM Spoke IDL \u2014 destination surface (deposit_now, fill_relay, FillStatusAccount), trimmed verbatim from the deployed program IDL"
   },
   "instructions": [
     {
-      "name": "deposit_now",
-      "discriminator": [
-        75,
-        228,
-        135,
-        221,
-        200,
-        25,
-        148,
-        26
-      ],
       "accounts": [
         {
           "name": "signer",
-          "writable": true,
-          "signer": true
+          "signer": true,
+          "writable": true
         },
         {
           "name": "state",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "account": "State",
+                "kind": "account",
+                "path": "state.seed"
+              }
+            ]
+          },
           "writable": true
         },
         {
@@ -34,10 +42,116 @@
         },
         {
           "name": "depositor_token_account",
+          "pda": {
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            },
+            "seeds": [
+              {
+                "kind": "arg",
+                "path": "depositor"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          },
           "writable": true
         },
         {
           "name": "vault",
+          "pda": {
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            },
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "state"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          },
           "writable": true
         },
         {
@@ -47,13 +161,41 @@
           "name": "token_program"
         },
         {
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
           "name": "associated_token_program"
         },
         {
+          "address": "11111111111111111111111111111111",
           "name": "system_program"
         },
         {
-          "name": "event_authority"
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "program"
@@ -102,16 +244,639 @@
           "type": "u32"
         },
         {
-          "name": "exclusivity_period",
+          "name": "exclusivity_parameter",
           "type": "u32"
         },
         {
           "name": "message",
+          "type": "bytes"
+        }
+      ],
+      "discriminator": [
+        75,
+        228,
+        135,
+        221,
+        200,
+        25,
+        148,
+        26
+      ],
+      "docs": [
+        "Equivalent to deposit except quote_timestamp is set to the current time.",
+        "The deposit `fill_deadline` is calculated as the current time plus `fill_deadline_offset`."
+      ],
+      "name": "deposit_now"
+    },
+    {
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true,
+          "writable": true
+        },
+        {
+          "name": "instruction_params",
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  110,
+                  115,
+                  116,
+                  114,
+                  117,
+                  99,
+                  116,
+                  105,
+                  111,
+                  110,
+                  95,
+                  112,
+                  97,
+                  114,
+                  97,
+                  109,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "signer"
+              }
+            ]
+          },
+          "writable": true
+        },
+        {
+          "name": "state",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "account": "State",
+                "kind": "account",
+                "path": "state.seed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "delegate"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "relayer_token_account",
+          "writable": true
+        },
+        {
+          "name": "recipient_token_account",
+          "pda": {
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            },
+            "seeds": [
+              {
+                "kind": "arg",
+                "path": "relay_data"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          },
+          "writable": true
+        },
+        {
+          "name": "fill_status",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  105,
+                  108,
+                  108,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "relay_hash"
+              }
+            ]
+          },
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+          "name": "associated_token_program"
+        },
+        {
+          "address": "11111111111111111111111111111111",
+          "name": "system_program"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "relay_hash",
           "type": {
-            "vec": "u8"
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "relay_data",
+          "type": {
+            "option": {
+              "defined": {
+                "name": "RelayData"
+              }
+            }
+          }
+        },
+        {
+          "name": "repayment_chain_id",
+          "type": {
+            "option": "u64"
+          }
+        },
+        {
+          "name": "repayment_address",
+          "type": {
+            "option": "pubkey"
           }
         }
-      ]
+      ],
+      "discriminator": [
+        100,
+        84,
+        222,
+        90,
+        106,
+        209,
+        58,
+        222
+      ],
+      "docs": [
+        "Fulfill request to bridge cross chain by sending specified output tokens to recipient.",
+        "",
+        "Relayer & system fee is captured in the spread between input and output amounts. This fee accounts for tx costs,",
+        "relayer's capital opportunity cost, and a system fee. The relay_data hash uniquely identifies the deposit to",
+        "fill, ensuring relayers are refunded only for deposits matching the original hash from the origin SpokePool.",
+        "This hash includes all parameters from deposit() and must match the destination_chain_id. Note the relayer",
+        "creates an ATA in calling this method to store the fill_status. This should be closed once the deposit has",
+        "expired to let the relayer re-claim their rent. Cannot fill more than once. Partial fills are not supported.",
+        "",
+        "### Required Accounts:",
+        "- signer (Signer): The account that authorizes the fill (filler). No permission requirements.",
+        "- instruction_params (Account): Optional account to load instruction parameters when they are not passed in the",
+        "instruction data due to message size constraints. Pass this program ID to represent None. When Some, this must",
+        "be derived from the signer's public key with seed [\"instruction_params\",signer].",
+        "- state (Writable): Spoke state PDA. Seed: [\"state\",state.seed] where seed is 0 on mainnet.",
+        "- mint (Account): The mint of the output token, sent from the relayer to the recipient.",
+        "- relayer_token_account (Writable): The relayer's ATA for the input token.",
+        "- recipient_token_account (Writable): The recipient's ATA for the output token.",
+        "- fill_status (Writable): The fill status PDA, created on this function call to track the fill status to prevent",
+        "re-entrancy & double fills. Also used to track requested slow fills. Seed: [\"fills\",relay_hash].",
+        "- token_program (Interface): The token program.",
+        "- associated_token_program (Interface): The associated token program.",
+        "- system_program (Interface): The system program.",
+        "- delegate (Account): The account used to delegate the output amount of the output token.",
+        "",
+        "### Parameters:",
+        "- relay_hash: The hash identifying the deposit to be filled. Caller must pass this in. Computed as hash of",
+        "the flattened relay_data & destination_chain_id.",
+        "- relay_data: Struct containing all the data needed to identify the deposit to be filled. Should match",
+        "all the same-named parameters emitted in the origin chain FundsDeposited event.",
+        "- depositor: The account credited with the deposit.",
+        "- recipient: The account receiving funds on this chain.",
+        "- input_token: The token pulled from the caller's account to initiate the deposit. The equivalent of this",
+        "token on the repayment chain will be sent as a refund to the caller.",
+        "- output_token: The token that the caller will send to the recipient on this chain.",
+        "- input_amount: This amount, less a system fee, will be sent to the caller on their repayment chain.",
+        "This is big-endian encoded as a 32-byte array to match its underlying byte representation on EVM side",
+        "- output_amount: The amount of output tokens that the caller will send to the recipient.",
+        "- origin_chain_id: The origin chain identifier.",
+        "- exclusive_relayer: The relayer that will be exclusively allowed to fill this deposit before the",
+        "exclusivity deadline timestamp.",
+        "- fill_deadline: The deadline for the caller to fill the deposit. After this timestamp, the deposit will be",
+        "cancelled and the depositor will be refunded on the origin chain.",
+        "- exclusivity_deadline: The deadline for the exclusive relayer to fill the deposit. After this timestamp,",
+        "anyone can fill this deposit.",
+        "- message: The message to send to the recipient if the recipient is a contract that implements a",
+        "handle_across_message() public function.",
+        "- repayment_chain_id: Chain of SpokePool where relayer wants to be refunded after the challenge window has",
+        "passed. Will receive input_amount of the equivalent token to input_token on the repayment chain.",
+        "- repayment_address: The address of the recipient on the repayment chain that they want to be refunded to.",
+        "Note: relay_data, repayment_chain_id, and repayment_address are optional parameters. If None for any of these",
+        "is passed, the caller must load them via the instruction_params account."
+      ],
+      "name": "fill_relay"
+    }
+  ],
+  "accounts": [
+    {
+      "discriminator": [
+        50,
+        243,
+        51,
+        185,
+        89,
+        60,
+        43,
+        202
+      ],
+      "name": "FillRelayParams"
+    },
+    {
+      "discriminator": [
+        105,
+        89,
+        88,
+        35,
+        24,
+        147,
+        178,
+        137
+      ],
+      "name": "FillStatusAccount"
+    }
+  ],
+  "events": [
+    {
+      "discriminator": [
+        25,
+        58,
+        182,
+        0,
+        50,
+        99,
+        160,
+        117
+      ],
+      "name": "FilledRelay"
+    }
+  ],
+  "types": [
+    {
+      "name": "FillRelayParams",
+      "type": {
+        "fields": [
+          {
+            "name": "relay_data",
+            "type": {
+              "defined": {
+                "name": "RelayData"
+              }
+            }
+          },
+          {
+            "name": "repayment_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "repayment_address",
+            "type": "pubkey"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "FillStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Unfilled"
+          },
+          {
+            "name": "RequestedSlowFill"
+          },
+          {
+            "name": "Filled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FillStatusAccount",
+      "type": {
+        "fields": [
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "FillStatus"
+              }
+            }
+          },
+          {
+            "name": "relayer",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_deadline",
+            "type": "u32"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "FillType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "FastFill"
+          },
+          {
+            "name": "ReplacedSlowFill"
+          },
+          {
+            "name": "SlowFill"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FilledRelay",
+      "type": {
+        "fields": [
+          {
+            "name": "input_token",
+            "type": "pubkey"
+          },
+          {
+            "name": "output_token",
+            "type": "pubkey"
+          },
+          {
+            "name": "input_amount",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "output_amount",
+            "type": "u64"
+          },
+          {
+            "name": "repayment_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "origin_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "deposit_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "fill_deadline",
+            "type": "u32"
+          },
+          {
+            "name": "exclusivity_deadline",
+            "type": "u32"
+          },
+          {
+            "name": "exclusive_relayer",
+            "type": "pubkey"
+          },
+          {
+            "name": "relayer",
+            "type": "pubkey"
+          },
+          {
+            "name": "depositor",
+            "type": "pubkey"
+          },
+          {
+            "name": "recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "message_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "relay_execution_info",
+            "type": {
+              "defined": {
+                "name": "RelayExecutionEventInfo"
+              }
+            }
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "RelayData",
+      "type": {
+        "fields": [
+          {
+            "name": "depositor",
+            "type": "pubkey"
+          },
+          {
+            "name": "recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "exclusive_relayer",
+            "type": "pubkey"
+          },
+          {
+            "name": "input_token",
+            "type": "pubkey"
+          },
+          {
+            "name": "output_token",
+            "type": "pubkey"
+          },
+          {
+            "name": "input_amount",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "output_amount",
+            "type": "u64"
+          },
+          {
+            "name": "origin_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "deposit_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "fill_deadline",
+            "type": "u32"
+          },
+          {
+            "name": "exclusivity_deadline",
+            "type": "u32"
+          },
+          {
+            "name": "message",
+            "type": "bytes"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "RelayExecutionEventInfo",
+      "type": {
+        "fields": [
+          {
+            "name": "updated_recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "updated_message_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "updated_output_amount",
+            "type": "u64"
+          },
+          {
+            "name": "fill_type",
+            "type": {
+              "defined": {
+                "name": "FillType"
+              }
+            }
+          }
+        ],
+        "kind": "struct"
+      }
     }
   ]
 }
