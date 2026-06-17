@@ -6,7 +6,7 @@ use anchor_lang::prelude::*;
 /// legitimate bridge fill — this account is the trust boundary that does.
 ///
 /// The post-discriminator field layout is a cross-program ABI contract with
-/// `sra_common::VerifiedFillData`. The handler reads this account as raw bytes
+/// `sra_common::types::VerifiedFillData`. The handler reads this account as raw bytes
 /// (it must accept fills from multiple adapter programs, each with its own
 /// program id, so it cannot import this type) and deserializes via that plain
 /// struct, requiring an exact layout match. Any field reorder, addition, or
