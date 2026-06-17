@@ -213,6 +213,87 @@ pub fn derive_real_across_event_authority_pda() -> (Pubkey, u8) {
     Pubkey::find_program_address(&[b"__event_authority"], &ACROSS_SPOKE_POOL_ID)
 }
 
+// --- Mock Across SpokePool: destination fill-status helpers ---
+//
+// The mock is loaded at the real Across program ID, so a `fill_status` PDA it
+// creates is owned by `ACROSS_SPOKE_POOL_ID` and seeded exactly like the real
+// program. Destination-fill tests use this to stand up `FillStatusAccount`s the
+// adapter can read without a live Across deployment.
+
+pub fn derive_fill_status_pda(relay_hash: &[u8; 32]) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[mock_spoke_pool::FILL_SEED_PREFIX, relay_hash],
+        &ACROSS_SPOKE_POOL_ID,
+    )
+}
+
+/// Realistic relayer fill: moves `output_amount` to the recipient and writes a
+/// `Filled` `FillStatusAccount` at `["fills", relay_hash]`.
+pub fn mock_fill_relay_ix(
+    relayer: &Pubkey,
+    mint: &Pubkey,
+    relayer_token_account: &Pubkey,
+    recipient_token_account: &Pubkey,
+    relay_hash: [u8; 32],
+    output_amount: u64,
+    fill_deadline: u32,
+) -> Instruction {
+    let (fill_status, _) = derive_fill_status_pda(&relay_hash);
+    Instruction {
+        program_id: ACROSS_SPOKE_POOL_ID,
+        accounts: mock_spoke_pool::accounts::FillRelay {
+            signer: *relayer,
+            mint: *mint,
+            relayer_token_account: *relayer_token_account,
+            recipient_token_account: *recipient_token_account,
+            fill_status,
+            token_program: TOKEN_PROGRAM_ID,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: mock_spoke_pool::instruction::FillRelay {
+            relay_hash,
+            output_amount,
+            fill_deadline,
+        }
+        .data(),
+    }
+}
+
+/// Test backdoor: plant a `FillStatusAccount` with an arbitrary status (e.g.
+/// `Unfilled`) so the adapter's reject paths can be exercised.
+pub fn mock_fill_ix(
+    relayer: &Pubkey,
+    relay_hash: [u8; 32],
+    status: mock_spoke_pool::FillStatus,
+) -> Instruction {
+    let (fill_status, _) = derive_fill_status_pda(&relay_hash);
+    Instruction {
+        program_id: ACROSS_SPOKE_POOL_ID,
+        accounts: mock_spoke_pool::accounts::MockFill {
+            signer: *relayer,
+            fill_status,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: mock_spoke_pool::instruction::MockFill { relay_hash, status }.data(),
+    }
+}
+
+/// Test backdoor: the relayer reclaims a `FillStatusAccount`'s rent (the
+/// closure race the adapter must survive).
+pub fn close_fill_pda_ix(relayer: &Pubkey, fill_status: &Pubkey) -> Instruction {
+    Instruction {
+        program_id: ACROSS_SPOKE_POOL_ID,
+        accounts: mock_spoke_pool::accounts::CloseFillPda {
+            signer: *relayer,
+            fill_status: *fill_status,
+        }
+        .to_account_metas(None),
+        data: mock_spoke_pool::instruction::CloseFillPda {}.data(),
+    }
+}
+
 pub fn initialize_address_book_root_ix(
     payer: &Pubkey,
     owner: &Pubkey,

@@ -6557,6 +6557,7 @@ dependencies = [
  "bincode",
  "litesvm",
  "litesvm-token",
+ "mock-spoke-pool",
  "reqwest",
  "serde_json",
  "solana-client",
