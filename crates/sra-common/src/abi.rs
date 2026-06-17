@@ -3,10 +3,10 @@
 //!
 //! # Why hand-rolled
 //!
-//! The EVM `SRAHandler.onFill` decodes the cross-chain payload via
+//! The destination decodes the cross-chain payload via
 //! `abi.decode(message, (address, uint256, uint256, Message))`. Any divergence
-//! between Solana and Solidity encoding would make EVM destinations reject
-//! the message — stranding funds. This module produces output that matches
+//! in the encoding would make the destination reject the message — stranding
+//! funds. This module produces output that matches
 //! `abi.encode(adapter, sourceChainId, nonce, message)` byte-for-byte.
 //!
 //!
@@ -218,13 +218,11 @@ pub fn abi_encode_sra_message(
 
 /// Encodes the replay pre-image `abi.encode(uint256 sourceChainId, uint256 nonce, Message message)`.
 ///
-/// `SRAHandler._triggerTargetAction` computes
-/// `keccak256(abi.encode(sourceChainId, nonce, message))` and stores it in
-/// `processedMessages[]` for replay protection. This is a *different* encoding
-/// shape from `abi_encode_sra_message` — no `adapter` prefix — so a caller that
-/// wants the replay key must use this function, not the top-level encoder. The
-/// nonce is envelope-level (not part of `Message`), so it is included here
-/// explicitly.
+/// The destination computes `keccak256(abi.encode(sourceChainId, nonce, message))`
+/// for replay protection. This is a *different* encoding shape from
+/// `abi_encode_sra_message` — no `adapter` prefix — so a caller that wants the
+/// replay key must use this function, not the top-level encoder. The nonce is
+/// envelope-level (not part of `Message`), so it is included here explicitly.
 ///
 /// Top-level head is `(sourceChainId, nonce, offset_to_message)` — two static
 /// words plus the dynamic `Message` offset (always `3 * 32 = 96`).
@@ -248,16 +246,14 @@ pub fn replay_hash(source_chain_id: &[u8; 32], nonce: u64, message: &Message) ->
     keccak_hash(&pre_image).to_bytes()
 }
 
-/// Builds the SRA extra envelope: `abi.encode(target_adapter, adapterData)`.
+/// Builds the SRA `extra` envelope: `abi.encode(target_adapter, adapterData)`.
 ///
-/// Same shape as EVM `DepositInfo.extra` — `abi.encode(address, bytes)`. The
-/// address word here is the `target_adapter` (the golden vectors model it as
-/// `targetAdapterEvm`); EVM's own source path stores its source-side adapter in
-/// that slot instead, but the destination never reads `extra`, so only the
-/// shape is load-bearing for byte parity. The Across path carries empty
-/// `adapterData`, so this is `abi.encode(address, bytes(""))`: one static
-/// address word + an offset word (`0x40`) + a one-word empty-`bytes` tail
-/// (length 0) — 96 bytes total.
+/// The Across path carries empty `adapterData`, so this is
+/// `abi.encode(address, bytes(""))`: one static address word (the
+/// `target_adapter`) + an offset word (`0x40`) + a one-word empty-`bytes` tail
+/// (length 0) — 96 bytes total. The destination never reads `extra`, so only
+/// this shape is load-bearing for byte parity (see the `standard_across_extra`
+/// golden vector).
 pub fn build_extra_envelope(target_adapter: &[u8; 20]) -> Vec<u8> {
     let tail = encode_bytes_dynamic(&[]);
     let mut out = Vec::with_capacity(2 * WORD + tail.len());
