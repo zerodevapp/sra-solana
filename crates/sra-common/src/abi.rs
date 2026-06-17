@@ -250,11 +250,14 @@ pub fn replay_hash(source_chain_id: &[u8; 32], nonce: u64, message: &Message) ->
 
 /// Builds the SRA extra envelope: `abi.encode(target_adapter, adapterData)`.
 ///
-/// Mirrors `DepositInfo.extra` in EVM `SRAHandler.trigger`
-/// (`abi.encode(sourceAdapter, adapterData)`). The Across path carries empty
-/// `adapterData` (the destination never reads `extra`), so this is
-/// `abi.encode(address, bytes(""))`: one static address word + an offset word
-/// (`0x40`) + a one-word empty-`bytes` tail (length 0) — 96 bytes total.
+/// Same shape as EVM `DepositInfo.extra` — `abi.encode(address, bytes)`. The
+/// address word here is the `target_adapter` (the golden vectors model it as
+/// `targetAdapterEvm`); EVM's own source path stores its source-side adapter in
+/// that slot instead, but the destination never reads `extra`, so only the
+/// shape is load-bearing for byte parity. The Across path carries empty
+/// `adapterData`, so this is `abi.encode(address, bytes(""))`: one static
+/// address word + an offset word (`0x40`) + a one-word empty-`bytes` tail
+/// (length 0) — 96 bytes total.
 pub fn build_extra_envelope(target_adapter: &[u8; 20]) -> Vec<u8> {
     let tail = encode_bytes_dynamic(&[]);
     let mut out = Vec::with_capacity(2 * WORD + tail.len());
