@@ -114,4 +114,11 @@ pub enum SraError {
 
     #[msg("output_amount exceeds the u128 maximum (upper 16 bytes must be zero)")]
     OutputAmountOverflow,
+
+    // -- Destination: route creation (appended to keep prior codes stable) --
+    #[msg("Supplied route_config_hash does not match the recomputed route config")]
+    InvalidRouteConfig,
+
+    #[msg("SplTransfer amount_bps sum exceeds 100% of the vault")]
+    ActionBpsSumExceeded,
 }

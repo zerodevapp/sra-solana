@@ -28,14 +28,15 @@ use sra_common::{
     constants::ACROSS_SPOKE_POOL_ID,
     instruction_data::encode_anchor_instruction_data,
     seeds::{
-        SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_ASSET_FEE_TIER, SEED_FEE_CONFIG,
-        SEED_MINT_NONCE, SEED_PROTOCOL_FEE, SEED_SRA,
+        action_config_hash, route_config_hash, SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK,
+        SEED_ASSET_FEE_TIER, SEED_EXECUTION, SEED_FEE_CONFIG, SEED_MINT_NONCE, SEED_PROTOCOL_FEE,
+        SEED_SRA, SEED_SRA_ROUTE,
     },
     source_deposit::{AcrossDepositParams, PrepareParams},
     test_utils::DEFAULT_ACTION_IDXS,
     types::{
-        AddressBookEntry, AddressBookRoot, AssetFeeTier, FeeConfig, MintNonce, ProtocolFeeConfig,
-        SourceHandlerData, SraConfig,
+        AddressBookEntry, AddressBookRoot, AssetFeeTier, CreateRouteParams, FeeConfig, MintNonce,
+        ProtocolFeeConfig, SolanaAction, SolanaSraRoute, SourceHandlerData, SraConfig,
     },
 };
 use std::{fs, path::PathBuf};
@@ -1300,4 +1301,111 @@ where
 
 pub fn extract_deposit_prepared(logs: &[String]) -> Option<sra_handler::events::DepositPrepared> {
     extract_anchor_event(logs)
+}
+
+// --- Destination route admin (create_route) ---
+
+pub fn derive_route_pda(
+    owner: &Pubkey,
+    route_config_hash: &[u8; 32],
+    salt: &[u8; 32],
+) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[SEED_SRA_ROUTE, owner.as_ref(), route_config_hash, salt],
+        &PROGRAM_ID,
+    )
+}
+
+pub fn derive_execution_authority_pda(route: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[SEED_EXECUTION, route.as_ref()], &PROGRAM_ID)
+}
+
+/// Recompute the route's config hash off-chain (mirrors the on-chain seed).
+pub fn route_config_hash_for(owner: &Pubkey, params: &CreateRouteParams) -> [u8; 32] {
+    route_config_hash(
+        owner,
+        params.source_chain_id,
+        &params.expected_mint,
+        &params.app_id,
+        &params.action_config,
+    )
+    .expect("route_config_hash should not exceed the action bound")
+}
+
+pub fn action_config_hash_for(params: &CreateRouteParams) -> [u8; 32] {
+    action_config_hash(&params.action_config).expect("action_config_hash within bound")
+}
+
+/// Build a `create_route` instruction. `route_config_hash` is supplied explicitly
+/// so negative tests can pass a tampered hash; `adapter_accounts` are appended as
+/// `remaining_accounts` (the program loader-owned-executable-checks each).
+pub fn create_route_ix_with_hash(
+    payer: &Pubkey,
+    owner: &Pubkey,
+    route_config_hash: [u8; 32],
+    params: CreateRouteParams,
+    adapter_accounts: &[Pubkey],
+) -> Instruction {
+    let (route, _) = derive_route_pda(owner, &route_config_hash, &params.salt);
+    let (execution_authority, _) = derive_execution_authority_pda(&route);
+    let route_vault = derive_ata(&route, &params.expected_mint);
+    let execution_vault = derive_ata(&execution_authority, &params.expected_mint);
+
+    let mut accounts = sra_handler::accounts::CreateRoute {
+        payer: *payer,
+        owner: *owner,
+        route,
+        expected_mint: params.expected_mint,
+        route_vault,
+        execution_authority,
+        execution_vault,
+        token_program: TOKEN_PROGRAM_ID,
+        associated_token_program: ATA_PROGRAM_ID,
+        system_program: system_program::ID,
+    }
+    .to_account_metas(None);
+    for adapter in adapter_accounts {
+        accounts.push(AccountMeta::new_readonly(*adapter, false));
+    }
+
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts,
+        data: sra_handler::instruction::CreateRoute {
+            route_config_hash,
+            params,
+        }
+        .data(),
+    }
+}
+
+/// Build a `create_route` instruction with the correctly-derived config hash.
+pub fn create_route_ix(
+    payer: &Pubkey,
+    owner: &Pubkey,
+    params: CreateRouteParams,
+    adapter_accounts: &[Pubkey],
+) -> Instruction {
+    let hash = route_config_hash_for(owner, &params);
+    create_route_ix_with_hash(payer, owner, hash, params, adapter_accounts)
+}
+
+pub fn fetch_route(svm: &LiteSVM, pda: &Pubkey) -> SolanaSraRoute {
+    let acct = svm.get_account(pda).expect("route account exists");
+    SolanaSraRoute::try_deserialize(&mut acct.data.as_slice()).expect("valid SolanaSraRoute")
+}
+
+/// A minimal valid route: one SplTransfer of 100% and the real adapter program.
+pub fn sample_create_route_params(expected_mint: Pubkey, salt: [u8; 32]) -> CreateRouteParams {
+    CreateRouteParams {
+        source_chain_id: 42_161,
+        expected_mint,
+        app_id: [0x44u8; 32],
+        action_config: vec![SolanaAction::SplTransfer {
+            recipient: Pubkey::new_unique(),
+            amount_bps: 10_000,
+        }],
+        salt,
+        allowed_adapters: vec![ADAPTER_PROGRAM_ID],
+    }
 }
