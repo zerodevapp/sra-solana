@@ -11,6 +11,14 @@ pub const MAX_ADAPTERS: usize = 8;
 /// EVM has no equivalent limit.
 pub const MAX_ACTION_IDXS: usize = 4;
 
+/// Max account slots in a `VerifiedCpi` action's committed account template.
+/// Bounds the per-action template (and thus the route's committed action config)
+/// for both `InitSpace` and DoS. Sized to cover the heaviest planned target — a
+/// Jupiter shared-accounts swap route (~13 named accounts) plus its
+/// relayer-supplied routing slots; confirm against the real inner-CPI account
+/// count before committing a new dynamic-CPI template.
+pub const MAX_TEMPLATE_SLOTS: usize = 32;
+
 /// Basis points denominator (100% = 10,000 bps).
 /// Matches EVM `BPS_DENOMINATOR` in Constants.sol.
 pub const BPS_DENOMINATOR: u16 = 10_000;

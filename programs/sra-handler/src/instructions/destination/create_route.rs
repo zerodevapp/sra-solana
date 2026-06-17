@@ -4,13 +4,13 @@ use anchor_spl::{
     token::{Mint, Token, TokenAccount},
 };
 use sra_common::{
-    constants::{BPS_DENOMINATOR, MAX_ACTION_IDXS, MAX_ADAPTERS},
+    constants::MAX_ADAPTERS,
     errors::SraError,
     seeds::{
         action_config_hash as compute_action_config_hash,
         route_config_hash as compute_route_config_hash, SEED_EXECUTION, SEED_SRA_ROUTE,
     },
-    types::{CreateRouteParams, SolanaAction, SolanaSraRoute},
+    types::{validate_action_config, CreateRouteParams, SolanaSraRoute},
 };
 
 use crate::events::RouteCreated;
@@ -61,31 +61,13 @@ pub(crate) fn handler(
     route_config_hash: [u8; 32],
     params: CreateRouteParams,
 ) -> Result<()> {
-    // Fail-fast bounds before any hashing or adapter I/O.
-    require!(
-        params.action_config.len() <= MAX_ACTION_IDXS,
-        SraError::TooManyActionIdxs
-    );
+    // Fail-fast validation before any hashing or adapter I/O: action-config
+    // bounds + per-variant checks (length, Σ SplTransfer bps, non-zero keys,
+    // VerifiedCpi template pinning), then the adapter-list bound.
+    validate_action_config(&params.action_config)?;
     require!(
         params.allowed_adapters.len() <= MAX_ADAPTERS,
         SraError::TooManyAdapters
-    );
-
-    // Σ SplTransfer.amount_bps must not exceed 100% of the vault.
-    let mut spl_transfer_bps: u32 = 0;
-    for action in &params.action_config {
-        match action {
-            SolanaAction::SplTransfer { amount_bps, .. } => {
-                // belt-and-suspenders: 4 * u16::MAX can't overflow u32.
-                spl_transfer_bps = spl_transfer_bps
-                    .checked_add(*amount_bps as u32)
-                    .ok_or(SraError::ArithmeticOverflow)?;
-            }
-        }
-    }
-    require!(
-        spl_transfer_bps <= BPS_DENOMINATOR as u32,
-        SraError::ActionBpsSumExceeded
     );
 
     // Each allowlisted adapter must be loader-owned-executable at create time so a
