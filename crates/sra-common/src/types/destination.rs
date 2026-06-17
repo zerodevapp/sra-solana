@@ -96,8 +96,7 @@ mod tests {
     #[test]
     fn solana_sra_route_stores_action_config_hash_not_inline_actions() {
         // Commit-by-hash: the route carries a 32-byte digest of the action list,
-        // never the Vec<SolanaAction> itself (avoids reserving 4x the fat
-        // VerifiedCpi variant on every route).
+        // never the Vec<SolanaAction> itself.
         let route = SolanaSraRoute {
             owner: Pubkey::new_unique(),
             source_chain_id: 1,
