@@ -16,6 +16,7 @@ describe("sra-handler", () => {
   it("Exposes the expected generated client instruction surface", async () => {
     const expectedInstructionNames = [
       "acceptAdmin",
+      "createRoute",
       "initializeAddressBookRoot",
       "initializeFeeConfig",
       "initializeSra",

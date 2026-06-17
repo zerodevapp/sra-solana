@@ -3,7 +3,6 @@ use anchor_spl::{
     associated_token::AssociatedToken,
     token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked},
 };
-use solana_sdk_ids::{bpf_loader, bpf_loader_deprecated, bpf_loader_upgradeable, loader_v4};
 use sra_common::{
     constants::{BPS_DENOMINATOR, MAX_ACTION_IDXS},
     errors::SraError,
@@ -19,26 +18,8 @@ use sra_common::{
 };
 
 use crate::events::DepositPrepared;
+use crate::utils::adapter::validate_adapter_program;
 use crate::utils::ix_attestation::verify_next_adapter_ix;
-
-fn is_program_owner(owner: &Pubkey) -> bool {
-    bpf_loader::check_id(owner)
-        || bpf_loader_deprecated::check_id(owner)
-        || bpf_loader_upgradeable::check_id(owner)
-        || loader_v4::check_id(owner)
-}
-
-fn validate_adapter_program(adapter_program: &AccountInfo) -> Result<()> {
-    require!(
-        !adapter_program.data_is_empty() && adapter_program.executable,
-        SraError::InvalidAdapterProgram
-    );
-    require!(
-        is_program_owner(adapter_program.owner),
-        SraError::InvalidAdapterProgram
-    );
-    Ok(())
-}
 
 fn output_satisfies_slippage_floor(
     input_amount: u64,
@@ -396,51 +377,6 @@ pub(crate) fn handler(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    struct TestAccount {
-        key: Pubkey,
-        owner: Pubkey,
-        lamports: u64,
-        data: Vec<u8>,
-        executable: bool,
-    }
-
-    impl TestAccount {
-        fn account_info(&mut self) -> AccountInfo<'_> {
-            AccountInfo::new(
-                &self.key,
-                false,
-                self.executable,
-                &mut self.lamports,
-                &mut self.data,
-                &self.owner,
-                self.executable,
-                0,
-            )
-        }
-    }
-
-    #[test]
-    fn validate_adapter_program_accepts_supported_loader_owners() {
-        let cases = [
-            ("legacy", bpf_loader::ID),
-            ("upgradeable", bpf_loader_upgradeable::ID),
-            ("loader_v4", loader_v4::ID),
-        ];
-
-        for (name, owner) in cases {
-            let mut program = TestAccount {
-                key: Pubkey::new_unique(),
-                owner,
-                lamports: 0,
-                data: vec![1],
-                executable: true,
-            };
-
-            validate_adapter_program(&program.account_info())
-                .unwrap_or_else(|_| panic!("{name} loader-owned program should be accepted"));
-        }
-    }
 
     //  The slippage minimum must round UP at every step
 
