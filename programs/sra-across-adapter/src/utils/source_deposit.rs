@@ -35,7 +35,6 @@ pub fn build_deposit_now_bundle(
     deposit: &AcrossDepositParams,
     prepared_nonce: u64,
 ) -> Result<DepositNowBuild> {
-    let target_handler = narrow_evm_address(&prepare.target_handler)?;
     let target_adapter = narrow_evm_address(&prepare.target_adapter)?;
     let target_token = narrow_evm_address(&prepare.target_token)?;
     let bridged_amount = prepare.net_input_amount()?;
@@ -53,7 +52,7 @@ pub fn build_deposit_now_bundle(
                 token: target_token,
                 amount: prepare.output_amount,
             },
-            extra: build_extra_envelope(&target_adapter, prepared_nonce),
+            extra: build_extra_envelope(&target_adapter),
         },
         action_idxs: prepare
             .action_idxs
@@ -65,12 +64,12 @@ pub fn build_deposit_now_bundle(
     };
     let canonical_message = abi_encode_sra_message(
         &target_adapter,
-        &target_handler,
         &u256_from_u64(SOLANA_CHAIN_ID),
+        prepared_nonce,
         &message,
     );
     #[cfg(any(test, feature = "test-utils"))]
-    let replay_hash = replay_hash(&u256_from_u64(SOLANA_CHAIN_ID), &message);
+    let replay_hash = replay_hash(&u256_from_u64(SOLANA_CHAIN_ID), prepared_nonce, &message);
 
     let params = DepositNowParams {
         depositor: *adapter_authority,
@@ -232,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn build_deposit_now_bundle_distinct_nonces_produce_distinct_messages_and_replay_hashes() {
+    fn build_deposit_now_bundle_nonce_distinguishes_envelope_and_replay_not_inner_message() {
         let adapter_authority = Pubkey::new_unique();
         let input_mint = Pubkey::new_unique();
         let prepare = PrepareParams::new(
@@ -272,11 +271,11 @@ mod tests {
         )
         .unwrap();
 
+        // The nonce lives in the envelope, not the inner Message — so distinct
+        // nonces produce distinct canonical envelopes and replay keys, while the
+        // inner Message (including `extra`) stays byte-identical (EVM parity).
         assert_ne!(build_0.params.message, build_1.params.message);
         assert_ne!(build_0.replay_hash, build_1.replay_hash);
-        assert_ne!(
-            build_0.message.deposit_info.extra,
-            build_1.message.deposit_info.extra,
-        );
+        assert_eq!(build_0.message, build_1.message);
     }
 }
