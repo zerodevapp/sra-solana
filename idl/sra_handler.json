@@ -499,6 +499,42 @@
       ]
     },
     {
+      "name": "manage_route",
+      "discriminator": [
+        211,
+        127,
+        254,
+        242,
+        26,
+        106,
+        251,
+        10
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "route"
+          ]
+        },
+        {
+          "name": "route",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "ManageRouteParams"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "remove_asset_fee_tier",
       "discriminator": [
         60,
@@ -2012,6 +2048,19 @@
       ]
     },
     {
+      "name": "RouteManaged",
+      "discriminator": [
+        144,
+        194,
+        86,
+        83,
+        27,
+        109,
+        3,
+        181
+      ]
+    },
+    {
       "name": "SraInitialized",
       "discriminator": [
         95,
@@ -2535,6 +2584,41 @@
       }
     },
     {
+      "name": "ManageRouteParams",
+      "docs": [
+        "Inputs to `manage_route`. Only the route's mutable policy can change here —",
+        "`pause` toggles the route, and the adapter allowlist is edited via `add`/",
+        "`remove`. Identity fields (owner, mint, chain, app_id, actions, salt) are in",
+        "`route_config_hash` and are structurally immutable."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pause",
+            "docs": [
+              "`Some(true)` pauses, `Some(false)` unpauses, `None` leaves it unchanged."
+            ],
+            "type": {
+              "option": "bool"
+            }
+          },
+          {
+            "name": "add_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "remove_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "MintNonce",
       "docs": [
         "Persistent nonce per `(sra_config, source_mint)`. The owner-signed deposit",
@@ -2803,6 +2887,36 @@
                 32
               ]
             }
+          },
+          {
+            "name": "allowed_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RouteManaged",
+      "docs": [
+        "Emitted by `manage_route`. Carries the full post-write binding tuple (adapter",
+        "list + paused) so any adapter-allowlist redirect is loudly observable."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "route",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
           },
           {
             "name": "allowed_adapters",

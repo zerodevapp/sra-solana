@@ -50,6 +50,18 @@ pub struct CreateRouteParams {
     pub allowed_adapters: Vec<Pubkey>,
 }
 
+/// Inputs to `manage_route`. Only the route's mutable policy can change here —
+/// `pause` toggles the route, and the adapter allowlist is edited via `add`/
+/// `remove`. Identity fields (owner, mint, chain, app_id, actions, salt) are in
+/// `route_config_hash` and are structurally immutable.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
+pub struct ManageRouteParams {
+    /// `Some(true)` pauses, `Some(false)` unpauses, `None` leaves it unchanged.
+    pub pause: Option<bool>,
+    pub add_adapters: Vec<Pubkey>,
+    pub remove_adapters: Vec<Pubkey>,
+}
+
 /// Execution status state machine for fill lifecycle.
 /// Borsh-serialized as a single u8 discriminant (no variant data). Size = 1 byte.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Debug, InitSpace)]

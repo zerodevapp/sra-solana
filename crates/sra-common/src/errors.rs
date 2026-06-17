@@ -121,4 +121,7 @@ pub enum SraError {
 
     #[msg("SplTransfer amount_bps sum exceeds 100% of the vault")]
     ActionBpsSumExceeded,
+
+    #[msg("Adapter already present in the allowlist")]
+    DuplicateAdapter,
 }

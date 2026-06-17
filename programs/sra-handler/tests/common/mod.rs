@@ -29,14 +29,15 @@ use sra_common::{
     instruction_data::encode_anchor_instruction_data,
     seeds::{
         action_config_hash, route_config_hash, SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK,
-        SEED_ASSET_FEE_TIER, SEED_EXECUTION, SEED_FEE_CONFIG, SEED_MINT_NONCE, SEED_PROTOCOL_FEE,
-        SEED_SRA, SEED_SRA_ROUTE,
+        SEED_ASSET_FEE_TIER, SEED_EXECUTION, SEED_FEE_CONFIG, SEED_FILL_RECEIPT, SEED_MINT_NONCE,
+        SEED_PROTOCOL_FEE, SEED_SRA, SEED_SRA_ROUTE,
     },
     source_deposit::{AcrossDepositParams, PrepareParams},
     test_utils::DEFAULT_ACTION_IDXS,
     types::{
-        AddressBookEntry, AddressBookRoot, AssetFeeTier, CreateRouteParams, FeeConfig, MintNonce,
-        ProtocolFeeConfig, SolanaAction, SolanaSraRoute, SourceHandlerData, SraConfig,
+        AddressBookEntry, AddressBookRoot, AssetFeeTier, CreateRouteParams, ExecutionStatus,
+        FeeConfig, FillReceipt, ManageRouteParams, MintNonce, ProtocolFeeConfig, SolanaAction,
+        SolanaSraRoute, SourceHandlerData, SraConfig,
     },
 };
 use std::{fs, path::PathBuf};
@@ -1408,4 +1409,97 @@ pub fn sample_create_route_params(expected_mint: Pubkey, salt: [u8; 32]) -> Crea
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
     }
+}
+
+/// Create the sample route (one allowed adapter, not paused) and return its PDA.
+pub fn create_sample_route(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    owner: &Keypair,
+    mint: Pubkey,
+    salt: [u8; 32],
+) -> Pubkey {
+    let params = sample_create_route_params(mint, salt);
+    let hash = route_config_hash_for(&owner.pubkey(), &params);
+    let (route_pda, _) = derive_route_pda(&owner.pubkey(), &hash, &params.salt);
+    let ix = create_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    send_ix(svm, ix, payer, &[owner]).expect("create_route should succeed");
+    route_pda
+}
+
+/// Deploy a second loader-owned-executable program (reusing the adapter binary)
+/// at a fresh id — a *distinct* valid adapter for `manage_route` add tests.
+pub fn deploy_extra_adapter(svm: &mut LiteSVM) -> Pubkey {
+    let id = Pubkey::new_unique();
+    let so = fs::read(adapter_program_so_path()).expect("adapter .so readable");
+    svm.add_program(id, so.as_slice())
+        .expect("deploy extra adapter program");
+    id
+}
+
+/// Build a `manage_route` instruction. Adapter program accounts for `add_adapters`
+/// ride in `remaining_accounts`, one per entry in the same order, so the program
+/// can loader-owned-executable-check each.
+pub fn manage_route_ix(
+    owner: &Pubkey,
+    route: &Pubkey,
+    params: ManageRouteParams,
+    add_adapter_accounts: &[Pubkey],
+) -> Instruction {
+    let mut accounts = sra_handler::accounts::ManageRoute {
+        owner: *owner,
+        route: *route,
+    }
+    .to_account_metas(None);
+    for adapter in add_adapter_accounts {
+        accounts.push(AccountMeta::new_readonly(*adapter, false));
+    }
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts,
+        data: sra_handler::instruction::ManageRoute { params }.data(),
+    }
+}
+
+pub fn derive_fill_receipt_pda(route: &Pubkey, fill_id: &[u8; 32]) -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[SEED_FILL_RECEIPT, route.as_ref(), fill_id], &PROGRAM_ID)
+}
+
+/// Plant a finalized `FillReceipt` directly (via `set_account`) so tests can
+/// assert other instructions never touch it. Used until `finalize_fill` exists
+/// to mint one for real — mirrors `seed_mint_nonce_account`.
+pub fn seed_fill_receipt_account(
+    svm: &mut LiteSVM,
+    route: &Pubkey,
+    fill_id: [u8; 32],
+    amount: u64,
+    bump: u8,
+) -> Pubkey {
+    let (pda, _) = derive_fill_receipt_pda(route, &fill_id);
+    let receipt = FillReceipt {
+        route: *route,
+        fill_id,
+        amount,
+        expected_amount: amount,
+        execution_status: ExecutionStatus::Finalized,
+        finalized_at: 0,
+        bump,
+    };
+    let mut data = <FillReceipt as Discriminator>::DISCRIMINATOR.to_vec();
+    receipt.serialize(&mut data).unwrap();
+
+    let account = solana_sdk::account::Account {
+        lamports: svm.minimum_balance_for_rent_exemption(data.len()),
+        data,
+        owner: PROGRAM_ID,
+        executable: false,
+        rent_epoch: 0,
+    };
+    svm.set_account(pda, account).unwrap();
+    pda
 }
