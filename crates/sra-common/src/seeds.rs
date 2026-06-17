@@ -94,13 +94,9 @@ pub fn route_config_hash(
     Ok(keccak_hash(&data).to_bytes())
 }
 
-/// Commitment digest for a route's action list, stored as
-/// `SolanaSraRoute.action_config_hash`. `keccak256(borsh(action_config))` over the
-/// action list ALONE (no route identity) so `execute_actions`/`retry_actions` can
-/// re-supply `action_config` as instruction data and verify it against the stored
-/// digest without reconstructing the full route tuple — the destination analog of
-/// `handler_data_hash`. Pure (only the length bound, no semantic `validate()`):
-/// the caller checks bounds and action validity explicitly before this runs.
+/// `keccak256(borsh(action_config))` for `SolanaSraRoute.action_config_hash` — the
+/// action list alone, so later instructions re-supply it as ix data and verify it
+/// without reconstructing the route tuple. Pure (length bound only, no `validate()`).
 pub fn action_config_hash(action_config: &[SolanaAction]) -> Result<[u8; 32]> {
     require!(
         action_config.len() <= crate::constants::MAX_ACTION_IDXS,

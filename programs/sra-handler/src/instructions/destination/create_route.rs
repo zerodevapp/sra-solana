@@ -30,9 +30,8 @@ pub struct CreateRoute<'info> {
         bump,
     )]
     pub route: Box<Account<'info, SolanaSraRoute>>,
-    // The committed mint binds the route identity (it is inside route_config_hash)
-    // AND both vault ATAs to exactly one asset, so one route authorizes exactly
-    // one mint. Decimals are read live at fill time, so there is no snapshot to drift.
+    // Binds the route to one asset (mint is in route_config_hash + both vaults).
+    // Decimals are read live at fill time, never snapshotted.
     #[account(address = params.expected_mint)]
     pub expected_mint: Box<Account<'info, Mint>>,
     #[account(
@@ -42,8 +41,7 @@ pub struct CreateRoute<'info> {
         associated_token::authority = route,
     )]
     pub route_vault: Box<Account<'info, TokenAccount>>,
-    /// CHECK: PDA ["execution", route] — the execution-vault authority. Holds no
-    /// data; validated by seeds and signs later via invoke_signed.
+    /// CHECK: PDA ["execution", route] — execution-vault authority; validated by seeds.
     #[account(seeds = [SEED_EXECUTION, route.key().as_ref()], bump)]
     pub execution_authority: UncheckedAccount<'info>,
     #[account(
@@ -63,7 +61,7 @@ pub(crate) fn handler(
     route_config_hash: [u8; 32],
     params: CreateRouteParams,
 ) -> Result<()> {
-    // Fail-fast bounds first — cheapest checks, before any hashing or adapter I/O.
+    // Fail-fast bounds before any hashing or adapter I/O.
     require!(
         params.action_config.len() <= MAX_ACTION_IDXS,
         SraError::TooManyActionIdxs
@@ -73,14 +71,12 @@ pub(crate) fn handler(
         SraError::TooManyAdapters
     );
 
-    // Σ SplTransfer.amount_bps may not exceed 100% of the vault. VerifiedCpi
-    // entries are bounded by their own input_bps and validated per-variant.
+    // Σ SplTransfer.amount_bps must not exceed 100% of the vault.
     let mut spl_transfer_bps: u32 = 0;
     for action in &params.action_config {
         match action {
             SolanaAction::SplTransfer { amount_bps, .. } => {
-                // checked_add is belt-and-suspenders: with the length bound above
-                // the sum is at most 4 * u16::MAX, which cannot overflow a u32.
+                // belt-and-suspenders: 4 * u16::MAX can't overflow u32.
                 spl_transfer_bps = spl_transfer_bps
                     .checked_add(*amount_bps as u32)
                     .ok_or(SraError::ArithmeticOverflow)?;
@@ -92,10 +88,9 @@ pub(crate) fn handler(
         SraError::ActionBpsSumExceeded
     );
 
-    // Every allowlisted adapter must be a deployed, loader-owned, executable
-    // program *at creation time* — a mistyped pubkey must not become a trusted
-    // fill attester. The adapter accounts ride in remaining_accounts, one per
-    // entry, in the same order.
+    // Each allowlisted adapter must be loader-owned-executable at create time so a
+    // mistyped pubkey can't become a trusted fill attester. Adapter accounts ride
+    // in remaining_accounts, one per entry, same order.
     require!(
         ctx.remaining_accounts.len() == params.allowed_adapters.len(),
         SraError::InvalidAdapterProgram
@@ -109,9 +104,8 @@ pub(crate) fn handler(
         validate_adapter_program(account)?;
     }
 
-    // Bind the supplied seed hash to the params: explicit-arg + in-body recheck,
-    // because Anchor cannot express a method-call seed. route_config_hash stays a
-    // pure helper, so an invalid action list fails here, never inside try_accounts.
+    // Explicit seed arg + in-body recheck (Anchor can't express a method-call
+    // seed); the pure helper means a bad action list fails here, not in try_accounts.
     let expected_route_config_hash = compute_route_config_hash(
         &ctx.accounts.owner.key(),
         params.source_chain_id,

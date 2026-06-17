@@ -25,14 +25,9 @@ pub struct SolanaSraRoute {
     pub source_chain_id: u64,
     pub expected_mint: Pubkey,
     pub app_id: [u8; 32],
-    /// keccak256(borsh(action_config)). The action list itself is never stored
-    /// inline; it is committed two ways — folded into the route's `config_hash`
-    /// (the PDA address) and hashed alone into this digest — so
-    /// `execute_actions`/`retry_actions` re-supply the full `Vec<SolanaAction>`
-    /// as instruction data and verify it against this digest (the source-side
-    /// `handler_data_hash` commit-vs-input pattern). Storing the list inline
-    /// would make Anchor reserve `4 x` the largest action variant on every
-    /// route; storing only the digest keeps the account small.
+    /// keccak256(borsh(action_config)). The action list is also folded into the
+    /// route's config_hash, but stored only as this digest; callers re-supply the
+    /// list as ix data and verify it against this hash, keeping the account small.
     pub action_config_hash: [u8; 32],
     // Immutable (NOT in config_hash)
     pub salt: [u8; 32],
@@ -43,11 +38,8 @@ pub struct SolanaSraRoute {
     pub bump: u8,
 }
 
-/// Inputs to `create_route`. The first five fields are folded into
-/// `route_config_hash` (the route PDA address); `salt` is committed but not
-/// hashed into identity beyond the seed; `allowed_adapters` is the only mutable
-/// policy (managed later via `manage_route`). `action_config` is hashed and
-/// passed-as-data — never stored inline on the route (see `SolanaSraRoute`).
+/// Inputs to `create_route`. Identity fields are folded into `route_config_hash`
+/// (the route PDA); `allowed_adapters` is the only later-mutable policy.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct CreateRouteParams {
     pub source_chain_id: u64,

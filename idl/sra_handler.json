@@ -174,9 +174,6 @@
         },
         {
           "name": "execution_authority",
-          "docs": [
-            "data; validated by seeds and signs later via invoke_signed."
-          ],
           "pda": {
             "seeds": [
               {
@@ -2266,11 +2263,8 @@
     {
       "name": "CreateRouteParams",
       "docs": [
-        "Inputs to `create_route`. The first five fields are folded into",
-        "`route_config_hash` (the route PDA address); `salt` is committed but not",
-        "hashed into identity beyond the seed; `allowed_adapters` is the only mutable",
-        "policy (managed later via `manage_route`). `action_config` is hashed and",
-        "passed-as-data — never stored inline on the route (see `SolanaSraRoute`)."
+        "Inputs to `create_route`. Identity fields are folded into `route_config_hash`",
+        "(the route PDA); `allowed_adapters` is the only later-mutable policy."
       ],
       "type": {
         "kind": "struct",
@@ -2759,9 +2753,7 @@
     {
       "name": "RouteCreated",
       "docs": [
-        "Emitted by `create_route` after the destination route PDA + vaults are",
-        "created. Carries the full identifying tuple (post-write state, not an input",
-        "echo) so indexers can reconstruct and audit per-mint route authorizations."
+        "Emitted by `create_route`. Carries the full route identity (post-write) for indexers."
       ],
       "type": {
         "kind": "struct",
@@ -2794,8 +2786,7 @@
           {
             "name": "action_config_hash",
             "docs": [
-              "keccak256(borsh(action_config)) — the action list is committed by hash,",
-              "not stored inline."
+              "keccak256(borsh(action_config)) — committed by hash, not stored inline."
             ],
             "type": {
               "array": [
@@ -2888,14 +2879,9 @@
           {
             "name": "action_config_hash",
             "docs": [
-              "keccak256(borsh(action_config)). The action list itself is never stored",
-              "inline; it is committed two ways — folded into the route's `config_hash`",
-              "(the PDA address) and hashed alone into this digest — so",
-              "`execute_actions`/`retry_actions` re-supply the full `Vec<SolanaAction>`",
-              "as instruction data and verify it against this digest (the source-side",
-              "`handler_data_hash` commit-vs-input pattern). Storing the list inline",
-              "would make Anchor reserve `4 x` the largest action variant on every",
-              "route; storing only the digest keeps the account small."
+              "keccak256(borsh(action_config)). The action list is also folded into the",
+              "route's config_hash, but stored only as this digest; callers re-supply the",
+              "list as ix data and verify it against this hash, keeping the account small."
             ],
             "type": {
               "array": [

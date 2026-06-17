@@ -9,10 +9,8 @@ fn is_program_owner(owner: &Pubkey) -> bool {
         || loader_v4::check_id(owner)
 }
 
-/// A trusted adapter must be a deployed, loader-owned, executable program
-/// account. Rejecting a mistyped pubkey here (before it can become custody owner
-/// or a trusted fill attester) is cheaper than discovering it at fill time, so
-/// both the source deposit path and destination route admin run this check.
+/// A trusted adapter must be a deployed, loader-owned, executable program account.
+/// Used by both the source deposit path and destination route creation.
 pub(crate) fn validate_adapter_program(adapter_program: &AccountInfo) -> Result<()> {
     require!(
         !adapter_program.data_is_empty() && adapter_program.executable,
