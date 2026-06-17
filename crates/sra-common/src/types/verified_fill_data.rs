@@ -60,3 +60,74 @@ impl VerifiedFillData {
         Ok(result)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::errors::SraError;
+
+    fn sample() -> VerifiedFillData {
+        VerifiedFillData {
+            adapter: Pubkey::new_from_array([1u8; 32]),
+            route: Pubkey::new_from_array([2u8; 32]),
+            fill_id: [3u8; 32],
+            mint: Pubkey::new_from_array([4u8; 32]),
+            amount: 1_000_000,
+            expected_amount: 999_999,
+            source_chain_id: 42,
+            created_at: 1_700_000_000,
+            bump: 254,
+        }
+    }
+
+    /// Exactly the on-chain layout: 8-byte discriminator + Borsh body, no slack.
+    fn valid_account_bytes() -> Vec<u8> {
+        let mut buf = VERIFIED_FILL_DISCRIMINATOR.to_vec();
+        sample().serialize(&mut buf).unwrap();
+        buf
+    }
+
+    #[test]
+    fn deserialize_from_account_accepts_exact_layout() {
+        let decoded = VerifiedFillData::deserialize_from_account(&valid_account_bytes()).unwrap();
+        assert_eq!(decoded.fill_id, sample().fill_id);
+        assert_eq!(decoded.amount, sample().amount);
+        assert_eq!(decoded.bump, sample().bump);
+    }
+
+    #[test]
+    fn deserialize_from_account_rejects_too_short() {
+        let err = VerifiedFillData::deserialize_from_account(&[0u8; 4])
+            .expect_err("data shorter than the discriminator must reject");
+        assert_eq!(err, error!(SraError::InvalidFill));
+    }
+
+    #[test]
+    fn deserialize_from_account_rejects_wrong_discriminator() {
+        let mut bytes = valid_account_bytes();
+        bytes[0] ^= 0xff;
+        let err = VerifiedFillData::deserialize_from_account(&bytes)
+            .expect_err("a non-VerifiedFill discriminator must reject (type-confusion defense)");
+        assert_eq!(err, error!(SraError::InvalidFill));
+    }
+
+    #[test]
+    fn deserialize_from_account_rejects_truncated_body() {
+        // Valid discriminator, but the Borsh body is cut short of the layout.
+        let bytes = valid_account_bytes();
+        let err = VerifiedFillData::deserialize_from_account(&bytes[..bytes.len() - 1])
+            .expect_err("a body shorter than the layout must reject");
+        assert_eq!(err, error!(SraError::InvalidFill));
+    }
+
+    #[test]
+    fn deserialize_from_account_rejects_trailing_bytes() {
+        // A larger adapter-owned account whose prefix happens to match must not pass —
+        // trailing bytes surface handler/adapter schema drift as a hard failure.
+        let mut bytes = valid_account_bytes();
+        bytes.push(0);
+        let err = VerifiedFillData::deserialize_from_account(&bytes)
+            .expect_err("trailing bytes past the exact layout must reject");
+        assert_eq!(err, error!(SraError::InvalidFill));
+    }
+}
