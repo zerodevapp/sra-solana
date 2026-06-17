@@ -54,6 +54,276 @@
       "args": []
     },
     {
+      "name": "create_route",
+      "discriminator": [
+        195,
+        0,
+        51,
+        188,
+        181,
+        114,
+        84,
+        177
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "route",
+          "writable": true
+        },
+        {
+          "name": "expected_mint"
+        },
+        {
+          "name": "route_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "route"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "expected_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "execution_authority",
+          "docs": [
+            "data; validated by seeds and signs later via invoke_signed."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  101,
+                  99,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "route"
+              }
+            ]
+          }
+        },
+        {
+          "name": "execution_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "execution_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "expected_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "route_config_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "CreateRouteParams"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "initialize_address_book_root",
       "discriminator": [
         165,
@@ -1561,6 +1831,19 @@
       ]
     },
     {
+      "name": "SolanaSraRoute",
+      "discriminator": [
+        134,
+        92,
+        176,
+        20,
+        31,
+        152,
+        16,
+        120
+      ]
+    },
+    {
       "name": "SraConfig",
       "discriminator": [
         218,
@@ -1716,6 +1999,19 @@
         69,
         69,
         105
+      ]
+    },
+    {
+      "name": "RouteCreated",
+      "discriminator": [
+        125,
+        1,
+        229,
+        56,
+        204,
+        188,
+        8,
+        245
       ]
     },
     {
@@ -1963,6 +2259,63 @@
           {
             "name": "above_or_equal_bps",
             "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateRouteParams",
+      "docs": [
+        "Inputs to `create_route`. The first five fields are folded into",
+        "`route_config_hash` (the route PDA address); `salt` is committed but not",
+        "hashed into identity beyond the seed; `allowed_adapters` is the only mutable",
+        "policy (managed later via `manage_route`). `action_config` is hashed and",
+        "passed-as-data — never stored inline on the route (see `SolanaSraRoute`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "source_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "expected_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "action_config",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "SolanaAction"
+                }
+              }
+            }
+          },
+          {
+            "name": "salt",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "allowed_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
           }
         ]
       }
@@ -2399,6 +2752,180 @@
           {
             "name": "allow_override",
             "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RouteCreated",
+      "docs": [
+        "Emitted by `create_route` after the destination route PDA + vaults are",
+        "created. Carries the full identifying tuple (post-write state, not an input",
+        "echo) so indexers can reconstruct and audit per-mint route authorizations."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "route",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "source_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "expected_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "action_config_hash",
+            "docs": [
+              "keccak256(borsh(action_config)) — the action list is committed by hash,",
+              "not stored inline."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "salt",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "allowed_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SolanaAction",
+      "docs": [
+        "A pre-registered action to execute on the destination chain after fill finalization.",
+        "v1: only SplTransfer is implemented."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "SplTransfer",
+            "fields": [
+              {
+                "name": "recipient",
+                "type": "pubkey"
+              },
+              {
+                "name": "amount_bps",
+                "docs": [
+                  "Basis points of the execution vault balance to transfer (e.g., 10000 = 100%)."
+                ],
+                "type": "u16"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "SolanaSraRoute",
+      "docs": [
+        "Deterministic destination address for EVM->Solana fills.",
+        "PDA seeds: [\"sra_route\", owner, config_hash, salt]",
+        "config_hash = keccak256(borsh(owner, source_chain_id, expected_mint, app_id, action_config))"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "source_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "expected_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "action_config_hash",
+            "docs": [
+              "keccak256(borsh(action_config)). The action list itself is never stored",
+              "inline; it is committed two ways — folded into the route's `config_hash`",
+              "(the PDA address) and hashed alone into this digest — so",
+              "`execute_actions`/`retry_actions` re-supply the full `Vec<SolanaAction>`",
+              "as instruction data and verify it against this digest (the source-side",
+              "`handler_data_hash` commit-vs-input pattern). Storing the list inline",
+              "would make Anchor reserve `4 x` the largest action variant on every",
+              "route; storing only the digest keeps the account small."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "salt",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "allowed_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }

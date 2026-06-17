@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::constants::{MAX_ACTION_IDXS, MAX_ADAPTERS};
+use crate::constants::MAX_ADAPTERS;
 
 /// A pre-registered action to execute on the destination chain after fill finalization.
 /// v1: only SplTransfer is implemented.
@@ -25,8 +25,15 @@ pub struct SolanaSraRoute {
     pub source_chain_id: u64,
     pub expected_mint: Pubkey,
     pub app_id: [u8; 32],
-    #[max_len(MAX_ACTION_IDXS)]
-    pub action_config: Vec<SolanaAction>,
+    /// keccak256(borsh(action_config)). The action list itself is never stored
+    /// inline; it is committed two ways — folded into the route's `config_hash`
+    /// (the PDA address) and hashed alone into this digest — so
+    /// `execute_actions`/`retry_actions` re-supply the full `Vec<SolanaAction>`
+    /// as instruction data and verify it against this digest (the source-side
+    /// `handler_data_hash` commit-vs-input pattern). Storing the list inline
+    /// would make Anchor reserve `4 x` the largest action variant on every
+    /// route; storing only the digest keeps the account small.
+    pub action_config_hash: [u8; 32],
     // Immutable (NOT in config_hash)
     pub salt: [u8; 32],
     // Mutable
@@ -34,6 +41,21 @@ pub struct SolanaSraRoute {
     pub allowed_adapters: Vec<Pubkey>,
     pub paused: bool,
     pub bump: u8,
+}
+
+/// Inputs to `create_route`. The first five fields are folded into
+/// `route_config_hash` (the route PDA address); `salt` is committed but not
+/// hashed into identity beyond the seed; `allowed_adapters` is the only mutable
+/// policy (managed later via `manage_route`). `action_config` is hashed and
+/// passed-as-data — never stored inline on the route (see `SolanaSraRoute`).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
+pub struct CreateRouteParams {
+    pub source_chain_id: u64,
+    pub expected_mint: Pubkey,
+    pub app_id: [u8; 32],
+    pub action_config: Vec<SolanaAction>,
+    pub salt: [u8; 32],
+    pub allowed_adapters: Vec<Pubkey>,
 }
 
 /// Execution status state machine for fill lifecycle.
@@ -73,10 +95,29 @@ mod tests {
     #[test]
     fn solana_sra_route_init_space() {
         // 32 owner + 8 source_chain_id + 32 expected_mint + 32 app_id
-        // + 4 + (35 * 4) action_config + 32 salt
+        // + 32 action_config_hash + 32 salt
         // + 4 + (32 * 8) allowed_adapters + 1 paused + 1 bump
-        // = 32 + 8 + 32 + 32 + 144 + 32 + 260 + 1 + 1 = 542
-        assert_eq!(SolanaSraRoute::INIT_SPACE, 542);
+        // = 32 + 8 + 32 + 32 + 32 + 32 + 260 + 1 + 1 = 430
+        assert_eq!(SolanaSraRoute::INIT_SPACE, 430);
+    }
+
+    #[test]
+    fn solana_sra_route_stores_action_config_hash_not_inline_actions() {
+        // Commit-by-hash: the route carries a 32-byte digest of the action list,
+        // never the Vec<SolanaAction> itself (avoids reserving 4x the fat
+        // VerifiedCpi variant on every route).
+        let route = SolanaSraRoute {
+            owner: Pubkey::new_unique(),
+            source_chain_id: 1,
+            expected_mint: Pubkey::new_unique(),
+            app_id: [0u8; 32],
+            action_config_hash: [7u8; 32],
+            salt: [0u8; 32],
+            allowed_adapters: vec![],
+            paused: false,
+            bump: 255,
+        };
+        assert_eq!(route.action_config_hash, [7u8; 32]);
     }
 
     #[test]

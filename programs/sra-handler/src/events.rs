@@ -76,6 +76,24 @@ pub struct AdminTransferred {
     pub new_admin: Pubkey,
 }
 
+/// Emitted by `create_route` after the destination route PDA + vaults are
+/// created. Carries the full identifying tuple (post-write state, not an input
+/// echo) so indexers can reconstruct and audit per-mint route authorizations.
+#[event]
+pub struct RouteCreated {
+    pub route: Pubkey,
+    pub owner: Pubkey,
+    pub source_chain_id: u64,
+    pub expected_mint: Pubkey,
+    pub app_id: [u8; 32],
+    /// keccak256(borsh(action_config)) — the action list is committed by hash,
+    /// not stored inline.
+    pub action_config_hash: [u8; 32],
+    pub salt: [u8; 32],
+    pub allowed_adapters: Vec<Pubkey>,
+    pub paused: bool,
+}
+
 /// Emitted by `validate_and_prepare` after funds reach adapter custody. Carries
 /// the routing inputs needed to build the target-specific bridge message.
 #[event]
