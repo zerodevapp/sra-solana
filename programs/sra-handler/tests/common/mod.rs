@@ -1713,3 +1713,42 @@ pub fn fabricate_verified_fill(
     .unwrap();
     pda
 }
+
+// --- Destination action execution (execute_actions) ---
+
+/// Build an `execute_actions` instruction. `recipient_atas` are appended as
+/// writable, non-signer `remaining_accounts` (one per `SplTransfer`, in action
+/// order) — negative tests can pass wrong pubkeys or flip writability on the
+/// returned instruction.
+pub fn execute_actions_ix(
+    route: &Pubkey,
+    fill_id: [u8; 32],
+    action_config: Vec<SolanaAction>,
+    mint: &Pubkey,
+    recipient_atas: &[Pubkey],
+) -> Instruction {
+    let (execution_authority, _) = derive_execution_authority_pda(route);
+    let execution_vault = derive_ata(&execution_authority, mint);
+    let (fill_receipt, _) = derive_fill_receipt_pda(route, &fill_id);
+    let mut accounts = sra_handler::accounts::ExecuteActions {
+        route: *route,
+        fill_receipt,
+        expected_mint: *mint,
+        execution_authority,
+        execution_vault,
+        token_program: TOKEN_PROGRAM_ID,
+    }
+    .to_account_metas(None);
+    for ata in recipient_atas {
+        accounts.push(AccountMeta::new(*ata, false));
+    }
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts,
+        data: sra_handler::instruction::ExecuteActions {
+            fill_id,
+            action_config,
+        }
+        .data(),
+    }
+}

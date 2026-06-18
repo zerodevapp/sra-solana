@@ -134,4 +134,14 @@ pub enum SraError {
     // -- Destination: fill finalization (appended to keep prior codes stable) --
     #[msg("Route is paused")]
     RoutePaused,
+
+    // -- Destination: action execution (appended to keep prior codes stable) --
+    #[msg("Supplied action config does not match the route's committed action config hash")]
+    ActionConfigHashMismatch,
+
+    #[msg("Action's supplied accounts do not match its required accounts")]
+    ActionAccountMismatch,
+
+    #[msg("Action variant is not executable by this program")]
+    UnsupportedAction,
 }

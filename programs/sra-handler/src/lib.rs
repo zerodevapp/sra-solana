@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use sra_common::{
     source_deposit::PrepareParams,
-    types::{CreateRouteParams, ManageRouteParams, SourceHandlerData},
+    types::{CreateRouteParams, ManageRouteParams, SolanaAction, SourceHandlerData},
 };
 
 pub mod events;
@@ -77,6 +77,14 @@ pub mod sra_handler {
         route_config_hash: [u8; 32],
     ) -> Result<()> {
         instructions::destination::finalize_fill::handler(ctx, fill_id, route_config_hash)
+    }
+
+    pub fn execute_actions<'info>(
+        ctx: Context<'_, '_, '_, 'info, ExecuteActions<'info>>,
+        fill_id: [u8; 32],
+        action_config: Vec<SolanaAction>,
+    ) -> Result<()> {
+        instructions::destination::execute_actions::handler(ctx, fill_id, action_config)
     }
 
     pub fn initialize_fee_config(
