@@ -7,7 +7,7 @@ use solana_sdk::{
 use sra_common::{
     constants::{MAX_ACTION_IDXS, MAX_ADAPTERS},
     errors::SraError,
-    types::SolanaAction,
+    types::{AccountTemplate, FixedRole, MinOut, SlotRole, SolanaAction},
 };
 
 fn custom_error(err: SraError) -> TransactionError {
@@ -374,4 +374,81 @@ fn create_route_duplicate_rejected() {
         result.is_err(),
         "second create_route at the same PDA must fail"
     );
+}
+
+// --------------------------------------------------------------------------
+// VerifiedCpi (dynamic action) validated end-to-end through create_route
+// --------------------------------------------------------------------------
+
+fn verified_cpi_action(slots: Vec<SlotRole>) -> SolanaAction {
+    SolanaAction::VerifiedCpi {
+        program_id: Pubkey::new_unique(),
+        input_mint: Pubkey::new_unique(),
+        input_bps: 10_000,
+        account_template: AccountTemplate { slots },
+        output_mint: Pubkey::new_unique(),
+        min_out: MinOut::SignedQuote {
+            quoter: Pubkey::new_unique(),
+        },
+        allow_permissioned_output: false,
+    }
+}
+
+#[test]
+fn create_route_verified_cpi_happy_path() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+
+    let mut params = sample_create_route_params(mint, [13u8; 32]);
+    params.action_config = vec![verified_cpi_action(vec![
+        SlotRole::Fixed(FixedRole::SigningAuthority),
+        SlotRole::Fixed(FixedRole::Source),
+        SlotRole::Fixed(FixedRole::Destination),
+        SlotRole::Free,
+    ])];
+    let hash = route_config_hash_for(&owner.pubkey(), &params);
+    let (route_pda, _) = derive_route_pda(&owner.pubkey(), &hash, &params.salt);
+
+    let ix = create_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        params.clone(),
+        &[ADAPTER_PROGRAM_ID],
+    );
+    send_ix(&mut svm, ix, &payer, &[&owner]).expect("a well-formed VerifiedCpi route is created");
+
+    assert_eq!(
+        fetch_route(&svm, &route_pda).action_config_hash,
+        action_config_hash_for(&params)
+    );
+}
+
+#[test]
+fn create_route_verified_cpi_unpinned_template_rejected() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+
+    // Template omits the Source pin — the relayer could redirect the input —
+    // so create_route must reject it before committing the route identity.
+    let mut params = sample_create_route_params(mint, [14u8; 32]);
+    params.action_config = vec![verified_cpi_action(vec![
+        SlotRole::Fixed(FixedRole::SigningAuthority),
+        SlotRole::Fixed(FixedRole::Destination),
+        SlotRole::Free,
+    ])];
+
+    let ix = create_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    let err = send_ix(&mut svm, ix, &payer, &[&owner])
+        .expect_err("a VerifiedCpi template missing a pinned value slot must be rejected")
+        .err;
+    assert_eq!(err, custom_error(SraError::InvalidActionConfig));
 }
