@@ -100,6 +100,22 @@ pub struct RouteManaged {
     pub paused: bool,
 }
 
+/// Emitted by `finalize_fill` once the verified amount is staged in the
+/// execution vault and the replay-marker receipt is written. Carries the
+/// post-write fill lifecycle state for indexers. There are no fees on the
+/// destination (collected on the source), so none appear here.
+#[event]
+pub struct FillFinalized {
+    pub route: Pubkey,
+    pub fill_id: [u8; 32],
+    /// Amount moved route_vault -> execution_vault (the full verified amount).
+    pub amount: u64,
+    /// Source-committed minimum the fill had to satisfy.
+    pub expected_amount: u64,
+    pub execution_status: sra_common::types::ExecutionStatus,
+    pub finalized_at: i64,
+}
+
 /// Emitted by `validate_and_prepare` after funds reach adapter custody. Carries
 /// the routing inputs needed to build the target-specific bridge message.
 #[event]
