@@ -20,6 +20,7 @@ describe("sra-handler", () => {
       "initializeAddressBookRoot",
       "initializeFeeConfig",
       "initializeSra",
+      "manageRoute",
       "removeAssetFeeTier",
       "removeProtocolFee",
       "setAddressBookEntry",

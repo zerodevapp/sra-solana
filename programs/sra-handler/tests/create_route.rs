@@ -206,6 +206,28 @@ fn create_route_too_many_adapters_rejected() {
 }
 
 #[test]
+fn create_route_duplicate_adapter_rejected() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+
+    let mut params = sample_create_route_params(mint, [13u8; 32]);
+    params.allowed_adapters = vec![ADAPTER_PROGRAM_ID, ADAPTER_PROGRAM_ID];
+
+    let ix = create_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        params,
+        &[ADAPTER_PROGRAM_ID, ADAPTER_PROGRAM_ID],
+    );
+    let err = send_ix(&mut svm, ix, &payer, &[&owner])
+        .expect_err("duplicate allowed_adapters must be rejected")
+        .err;
+    assert_eq!(err, custom_error(SraError::DuplicateAdapter));
+}
+
+#[test]
 fn create_route_action_bps_sum_over_10000_rejected() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
@@ -272,7 +294,8 @@ fn create_route_non_executable_adapter_rejected() {
     let owner = funded_keypair(&mut svm, SOL);
     let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
 
-    let bogus_adapter = Pubkey::new_unique();
+    // A real account that exists but is not a program (mistyped pubkey).
+    let bogus_adapter = plant_non_executable_account(&mut svm);
     let mut params = sample_create_route_params(mint, [10u8; 32]);
     params.allowed_adapters = vec![bogus_adapter];
 

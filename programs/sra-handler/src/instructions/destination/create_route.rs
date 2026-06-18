@@ -14,7 +14,7 @@ use sra_common::{
 };
 
 use crate::events::RouteCreated;
-use crate::utils::adapter::validate_adapter_program;
+use crate::utils::adapter::{require_distinct_adapters, validate_adapter_accounts};
 
 #[derive(Accounts)]
 #[instruction(route_config_hash: [u8; 32], params: CreateRouteParams)]
@@ -69,22 +69,9 @@ pub(crate) fn handler(
         params.allowed_adapters.len() <= MAX_ADAPTERS,
         SraError::TooManyAdapters
     );
+    require_distinct_adapters(&params.allowed_adapters)?;
 
-    // Each allowlisted adapter must be loader-owned-executable at create time so a
-    // mistyped pubkey can't become a trusted fill attester. Adapter accounts ride
-    // in remaining_accounts, one per entry, same order.
-    require!(
-        ctx.remaining_accounts.len() == params.allowed_adapters.len(),
-        SraError::InvalidAdapterProgram
-    );
-    for (adapter, account) in params
-        .allowed_adapters
-        .iter()
-        .zip(ctx.remaining_accounts.iter())
-    {
-        require_keys_eq!(account.key(), *adapter, SraError::InvalidAdapterProgram);
-        validate_adapter_program(account)?;
-    }
+    validate_adapter_accounts(&params.allowed_adapters, ctx.remaining_accounts)?;
 
     // Explicit seed arg + in-body recheck (Anchor can't express a method-call
     // seed); the pure helper means a bad action list fails here, not in try_accounts.
