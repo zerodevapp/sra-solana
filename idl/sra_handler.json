@@ -499,6 +499,42 @@
       ]
     },
     {
+      "name": "manage_route",
+      "discriminator": [
+        211,
+        127,
+        254,
+        242,
+        26,
+        106,
+        251,
+        10
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "route"
+          ]
+        },
+        {
+          "name": "route",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "ManageRouteParams"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "remove_asset_fee_tier",
       "discriminator": [
         60,
@@ -2012,6 +2048,19 @@
       ]
     },
     {
+      "name": "RouteManaged",
+      "discriminator": [
+        144,
+        194,
+        86,
+        83,
+        27,
+        109,
+        3,
+        181
+      ]
+    },
+    {
       "name": "SraInitialized",
       "discriminator": [
         95,
@@ -2583,6 +2632,40 @@
       }
     },
     {
+      "name": "ManageRouteParams",
+      "docs": [
+        "Inputs to `manage_route` — the route's only mutable policy (identity fields",
+        "are immutable, baked into `route_config_hash`). Each field is independently",
+        "optional: `None` leaves that policy unchanged."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pause",
+            "docs": [
+              "`Some(true)` pauses, `Some(false)` unpauses, `None` leaves it unchanged."
+            ],
+            "type": {
+              "option": "bool"
+            }
+          },
+          {
+            "name": "adapters",
+            "docs": [
+              "`Some` replaces the whole adapter allowlist (EVM `_installAdapters`",
+              "parity); `Some(vec![])` clears it; `None` leaves it unchanged."
+            ],
+            "type": {
+              "option": {
+                "vec": "pubkey"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "MinOut",
       "docs": [
         "Minimum-output reference for a `VerifiedCpi`'s post-fee balance-diff gate."
@@ -2884,6 +2967,35 @@
                 32
               ]
             }
+          },
+          {
+            "name": "allowed_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RouteManaged",
+      "docs": [
+        "Emitted by `manage_route` with the post-write adapter list and paused flag."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "route",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
           },
           {
             "name": "allowed_adapters",

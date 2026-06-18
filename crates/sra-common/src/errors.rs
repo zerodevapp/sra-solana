@@ -127,4 +127,7 @@ pub enum SraError {
 
     #[msg("VerifiedCpi account template exceeds the maximum slot count")]
     TooManyTemplateSlots,
+
+    #[msg("Adapter already present in the allowlist")]
+    DuplicateAdapter,
 }

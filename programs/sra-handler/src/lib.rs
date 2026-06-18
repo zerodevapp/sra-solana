@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use sra_common::{
     source_deposit::PrepareParams,
-    types::{CreateRouteParams, SourceHandlerData},
+    types::{CreateRouteParams, ManageRouteParams, SourceHandlerData},
 };
 
 pub mod events;
@@ -65,6 +65,10 @@ pub mod sra_handler {
         params: CreateRouteParams,
     ) -> Result<()> {
         instructions::destination::create_route::handler(ctx, route_config_hash, params)
+    }
+
+    pub fn manage_route(ctx: Context<ManageRoute>, params: ManageRouteParams) -> Result<()> {
+        instructions::destination::manage_route::handler(ctx, params)
     }
 
     pub fn initialize_fee_config(

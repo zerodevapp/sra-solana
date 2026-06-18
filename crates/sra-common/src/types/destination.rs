@@ -70,6 +70,18 @@ pub struct CreateRouteParams {
     pub allowed_adapters: Vec<Pubkey>,
 }
 
+/// Inputs to `manage_route` — the route's only mutable policy (identity fields
+/// are immutable, baked into `route_config_hash`). Each field is independently
+/// optional: `None` leaves that policy unchanged.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
+pub struct ManageRouteParams {
+    /// `Some(true)` pauses, `Some(false)` unpauses, `None` leaves it unchanged.
+    pub pause: Option<bool>,
+    /// `Some` replaces the whole adapter allowlist (EVM `_installAdapters`
+    /// parity); `Some(vec![])` clears it; `None` leaves it unchanged.
+    pub adapters: Option<Vec<Pubkey>>,
+}
+
 /// Execution status state machine for fill lifecycle.
 /// Borsh-serialized as a single u8 discriminant (no variant data). Size = 1 byte.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Debug, InitSpace)]

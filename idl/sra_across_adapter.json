@@ -726,6 +726,16 @@
       "code": 6003,
       "name": "NothingToRecover",
       "msg": "No tokens in adapter custody to recover"
+    },
+    {
+      "code": 6004,
+      "name": "RelayHashSerializationFailed",
+      "msg": "Failed to serialize relay data for the relay hash"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidFillStatus",
+      "msg": "Across fill status account has an invalid layout"
     }
   ],
   "types": [
