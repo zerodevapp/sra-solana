@@ -126,6 +126,53 @@ impl Finalizable {
     fn receipt_pda(&self) -> Pubkey {
         derive_fill_receipt_pda(&self.route, &self.fill_id).0
     }
+
+    /// Run finalize_fill from the (permissionless) payer.
+    fn finalize(
+        &self,
+        svm: &mut litesvm::LiteSVM,
+    ) -> Result<(), Box<litesvm::types::FailedTransactionMetadata>> {
+        send_ix(svm, self.finalize_ix(), &self.payer, &[])
+    }
+
+    /// Run finalize_fill and return the rejection error.
+    fn finalize_err(&self, svm: &mut litesvm::LiteSVM, msg: &str) -> TransactionError {
+        send_ix_expect_err(svm, self.finalize_ix(), &self.payer, &[], msg)
+    }
+
+    /// Owner-gated pause toggle via manage_route.
+    fn set_paused(&self, svm: &mut litesvm::LiteSVM, paused: bool) {
+        self.manage(
+            svm,
+            ManageRouteParams {
+                pause: Some(paused),
+                adapters: None,
+            },
+            &[],
+        );
+    }
+
+    /// Owner-gated allowlist replace via manage_route (remaining accounts mirror the set).
+    fn set_adapters(&self, svm: &mut litesvm::LiteSVM, adapters: &[Pubkey]) {
+        self.manage(
+            svm,
+            ManageRouteParams {
+                pause: None,
+                adapters: Some(adapters.to_vec()),
+            },
+            adapters,
+        );
+    }
+
+    fn manage(&self, svm: &mut litesvm::LiteSVM, params: ManageRouteParams, adapters: &[Pubkey]) {
+        send_ix(
+            svm,
+            manage_route_ix(&self.owner.pubkey(), &self.route, params, adapters),
+            &self.payer,
+            &[&self.owner],
+        )
+        .expect("manage_route should succeed");
+    }
 }
 
 // --------------------------------------------------------------------------
@@ -137,7 +184,7 @@ fn finalize_fill_happy_path() {
     let mut svm = setup_svm();
     let f = setup_finalizable_fill(&mut svm);
 
-    send_ix(&mut svm, f.finalize_ix(), &f.payer, &[]).expect("finalize_fill should succeed");
+    f.finalize(&mut svm).expect("finalize_fill should succeed");
 
     // The full verified amount moved route_vault -> execution_vault (no fees).
     assert_eq!(fetch_token_balance(&svm, &f.route_vault), 0);
@@ -175,7 +222,7 @@ fn finalize_fill_forwards_full_amount() {
     assert_eq!(route_before, AMOUNT);
     assert_eq!(exec_before, 0);
 
-    send_ix(&mut svm, f.finalize_ix(), &f.payer, &[]).expect("finalize_fill should succeed");
+    f.finalize(&mut svm).expect("finalize_fill should succeed");
 
     assert_eq!(
         fetch_token_balance(&svm, &f.execution_vault) - exec_before,
@@ -213,30 +260,10 @@ fn finalize_fill_route_paused_rejected() {
     let mut svm = setup_svm();
     let f = setup_finalizable_fill(&mut svm);
 
-    send_ix(
-        &mut svm,
-        manage_route_ix(
-            &f.owner.pubkey(),
-            &f.route,
-            ManageRouteParams {
-                pause: Some(true),
-                adapters: None,
-            },
-            &[],
-        ),
-        &f.payer,
-        &[&f.owner],
-    )
-    .expect("pause should succeed");
+    f.set_paused(&mut svm, true);
 
     assert_eq!(
-        send_ix_expect_err(
-            &mut svm,
-            f.finalize_ix(),
-            &f.payer,
-            &[],
-            "paused must reject"
-        ),
+        f.finalize_err(&mut svm, "paused must reject"),
         custom_error(SraError::RoutePaused)
     );
     // The fill is untouched: no receipt, no fund movement.
@@ -250,41 +277,13 @@ fn finalize_fill_after_unpause_succeeds() {
     let mut svm = setup_svm();
     let f = setup_finalizable_fill(&mut svm);
 
-    send_ix(
-        &mut svm,
-        manage_route_ix(
-            &f.owner.pubkey(),
-            &f.route,
-            ManageRouteParams {
-                pause: Some(true),
-                adapters: None,
-            },
-            &[],
-        ),
-        &f.payer,
-        &[&f.owner],
-    )
-    .expect("pause should succeed");
-    send_ix(&mut svm, f.finalize_ix(), &f.payer, &[]).expect_err("paused must reject");
+    f.set_paused(&mut svm, true);
+    f.finalize(&mut svm).expect_err("paused must reject");
 
-    send_ix(
-        &mut svm,
-        manage_route_ix(
-            &f.owner.pubkey(),
-            &f.route,
-            ManageRouteParams {
-                pause: Some(false),
-                adapters: None,
-            },
-            &[],
-        ),
-        &f.payer,
-        &[&f.owner],
-    )
-    .expect("unpause should succeed");
+    f.set_paused(&mut svm, false);
 
     // The same fill (never consumed while paused) finalizes cleanly after unpause.
-    send_ix(&mut svm, f.finalize_ix(), &f.payer, &[])
+    f.finalize(&mut svm)
         .expect("finalize after unpause should succeed");
     assert_eq!(fetch_token_balance(&svm, &f.execution_vault), AMOUNT);
     assert_eq!(
@@ -304,30 +303,10 @@ fn finalize_fill_unregistered_adapter_rejected() {
 
     // Drop the adapter that wrote the evidence from the allowlist.
     let extra = deploy_extra_adapter(&mut svm);
-    send_ix(
-        &mut svm,
-        manage_route_ix(
-            &f.owner.pubkey(),
-            &f.route,
-            ManageRouteParams {
-                pause: None,
-                adapters: Some(vec![extra]),
-            },
-            &[extra],
-        ),
-        &f.payer,
-        &[&f.owner],
-    )
-    .expect("replace adapters should succeed");
+    f.set_adapters(&mut svm, &[extra]);
 
     assert_eq!(
-        send_ix_expect_err(
-            &mut svm,
-            f.finalize_ix(),
-            &f.payer,
-            &[],
-            "evidence from a de-listed adapter must reject"
-        ),
+        f.finalize_err(&mut svm, "evidence from a de-listed adapter must reject"),
         custom_error(SraError::AdapterNotAllowed)
     );
     assert!(svm.get_account(&f.receipt_pda()).is_none());
@@ -340,40 +319,12 @@ fn finalize_fill_after_readding_adapter_succeeds() {
     let f = setup_finalizable_fill(&mut svm);
 
     let extra = deploy_extra_adapter(&mut svm);
-    send_ix(
-        &mut svm,
-        manage_route_ix(
-            &f.owner.pubkey(),
-            &f.route,
-            ManageRouteParams {
-                pause: None,
-                adapters: Some(vec![extra]),
-            },
-            &[extra],
-        ),
-        &f.payer,
-        &[&f.owner],
-    )
-    .expect("replace adapters should succeed");
-    send_ix(&mut svm, f.finalize_ix(), &f.payer, &[]).expect_err("de-listed adapter must reject");
+    f.set_adapters(&mut svm, &[extra]);
+    f.finalize(&mut svm)
+        .expect_err("de-listed adapter must reject");
 
-    send_ix(
-        &mut svm,
-        manage_route_ix(
-            &f.owner.pubkey(),
-            &f.route,
-            ManageRouteParams {
-                pause: None,
-                adapters: Some(vec![ADAPTER_PROGRAM_ID]),
-            },
-            &[ADAPTER_PROGRAM_ID],
-        ),
-        &f.payer,
-        &[&f.owner],
-    )
-    .expect("re-add adapter should succeed");
-
-    send_ix(&mut svm, f.finalize_ix(), &f.payer, &[])
+    f.set_adapters(&mut svm, &[ADAPTER_PROGRAM_ID]);
+    f.finalize(&mut svm)
         .expect("finalize after re-adding the adapter should succeed");
     assert_eq!(fetch_token_balance(&svm, &f.execution_vault), AMOUNT);
 }
@@ -387,8 +338,8 @@ fn finalize_fill_replay_rejected() {
     let mut svm = setup_svm();
     let f = setup_finalizable_fill(&mut svm);
 
-    send_ix(&mut svm, f.finalize_ix(), &f.payer, &[]).expect("first finalize should succeed");
-    send_ix(&mut svm, f.finalize_ix(), &f.payer, &[])
+    f.finalize(&mut svm).expect("first finalize should succeed");
+    f.finalize(&mut svm)
         .expect_err("second finalize of the same fill must fail (FillReceipt already exists)");
 
     // The original receipt is intact and the amount was not moved twice.
