@@ -78,13 +78,10 @@ pub(crate) fn handler(
     fill_id: [u8; 32],
     route_config_hash: [u8; 32],
 ) -> Result<()> {
-    // 1. The route must be active. Pause gates fund movement (not the upstream
-    //    evidence-recording in the adapter), so a fill recorded while paused
-    //    becomes finalizable again once the owner unpauses.
+    // 1. The route must be active — pausing blocks finalize, not the upstream evidence-recording, so a paused fill stays finalizable after unpause.
     require!(!ctx.accounts.route.paused, SraError::RoutePaused);
 
-    // 2. The evidence must be written by a currently-allowlisted adapter program
-    //    (its program-owner ∈ the route allowlist).
+    // 2. The evidence must come from a currently-allowlisted adapter (its program-owner ∈ the route allowlist).
     let verified_fill_owner = *ctx.accounts.verified_fill.owner;
     require!(
         ctx.accounts
@@ -94,17 +91,13 @@ pub(crate) fn handler(
         SraError::AdapterNotAllowed
     );
 
-    // 3. Deserialize the `VerifiedFill` with discriminator + exact-layout checks
-    //    (type-confusion / schema-drift defense across the program boundary).
+    // 3. Decode the `VerifiedFill` with discriminator + exact-layout checks (type-confusion / schema-drift defense across the program boundary).
     let verified = {
         let data = ctx.accounts.verified_fill.try_borrow_data()?;
         VerifiedFillData::deserialize_from_account(&data)?
     };
 
-    // 4-8. Cross-check every committed field against the route. The adapter
-    //       already checked the mint, but re-checking here defends the
-    //       adapter -> handler trust boundary: evidence valid across multiple
-    //       mints/routes would be a privilege-expansion bug.
+    // 4-8. Re-check every committed field against the route — defense-in-depth across the adapter -> handler boundary (evidence valid across mints/routes would be privilege expansion).
     let route_key = ctx.accounts.route.key();
     require!(fill_id == verified.fill_id, SraError::InvalidFill);
     require!(verified.route == route_key, SraError::InvalidFill);
@@ -121,17 +114,13 @@ pub(crate) fn handler(
         SraError::FillAmountTooLow
     );
 
-    // 9. The route vault must hold at least the verified amount. Across fills
-    //    deliver an exact amount, so a short vault is an anomaly: reject and
-    //    leave the funds recoverable rather than forward a partial amount.
+    // 9. The route vault must cover the verified amount — Across fills are exact, so a short vault is rejected (funds stay recoverable, not forwarded partially).
     require!(
         ctx.accounts.route_vault.amount >= verified.amount,
         SraError::InsufficientVaultBalance
     );
 
-    // 10. Move the full verified amount route_vault -> execution_vault with no
-    //     fee deducted (fees were collected on the source). The route PDA owns
-    //     the route vault and signs the transfer.
+    // 10. Move the full verified amount route_vault -> execution_vault, no fee (collected on the source); the route PDA owns the vault and signs.
     let owner_bytes = ctx.accounts.route.owner.to_bytes();
     let salt = ctx.accounts.route.salt;
     let bump_arr = [ctx.accounts.route.bump];
@@ -158,8 +147,7 @@ pub(crate) fn handler(
         ctx.accounts.expected_mint.decimals,
     )?;
 
-    // Write the replay marker + lifecycle state. `init` already guaranteed this
-    // is the first finalization of `fill_id` for this route.
+    // Write the replay marker + lifecycle state (`init` already guaranteed this is the first finalization of this `fill_id`).
     let finalized_at = Clock::get()?.unix_timestamp;
     ctx.accounts.fill_receipt.set_inner(FillReceipt {
         route: route_key,
