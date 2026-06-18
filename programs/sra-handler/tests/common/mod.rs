@@ -1505,8 +1505,10 @@ pub fn derive_fill_receipt_pda(route: &Pubkey, fill_id: &[u8; 32]) -> (Pubkey, u
     Pubkey::find_program_address(&[SEED_FILL_RECEIPT, route.as_ref(), fill_id], &PROGRAM_ID)
 }
 
-/// Plant a `FillReceipt` in the given lifecycle state via `set_account` — lets
-/// tests reach states no instruction produces yet. Mirrors `seed_mint_nonce_account`.
+/// Plant a `FillReceipt` in the given lifecycle state via `set_account` to reach
+/// states no instruction produces yet. Not a layout-exact replica of a
+/// `finalize_fill` receipt — `finalized_at` is 0 and `expected_amount == amount`.
+/// Mirrors `seed_mint_nonce_account`.
 pub fn seed_fill_receipt_with_status(
     svm: &mut LiteSVM,
     route: &Pubkey,
