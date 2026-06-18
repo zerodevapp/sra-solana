@@ -198,9 +198,7 @@ fn manage_route_too_many_adapters_rejected() {
     let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
     let route = create_sample_route(&mut svm, &payer, &owner, mint, [6u8; 32]);
 
-    // Route already holds one adapter; adding MAX_ADAPTERS *distinct* executable
-    // adapters overflows the bound (1 + 8 = 9 > 8). Distinct, so the failure is
-    // the length bound, not the dedup or executable checks.
+    // 1 existing + 8 distinct adapters = 9 > MAX_ADAPTERS (distinct, so length is what bites).
     let adds: Vec<_> = (0..MAX_ADAPTERS)
         .map(|_| deploy_extra_adapter(&mut svm))
         .collect();
@@ -229,7 +227,6 @@ fn manage_route_add_already_present_adapter_rejected() {
     let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
     let route = create_sample_route(&mut svm, &payer, &owner, mint, [10u8; 32]);
 
-    // The allowlist is a set: re-adding an adapter already present is rejected.
     let ix = manage_route_ix(
         &owner.pubkey(),
         &route,
@@ -255,7 +252,6 @@ fn manage_route_intra_batch_duplicate_adapter_rejected() {
     let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
     let route = create_sample_route(&mut svm, &payer, &owner, mint, [11u8; 32]);
 
-    // The same new adapter listed twice in one call is rejected.
     let extra = deploy_extra_adapter(&mut svm);
     let ix = manage_route_ix(
         &owner.pubkey(),
@@ -344,8 +340,7 @@ fn manage_route_does_not_affect_finalized_receipts() {
     let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
     let route = create_sample_route(&mut svm, &payer, &owner, mint, [9u8; 32]);
 
-    // A finalized fill exists for this route (planted directly — finalize_fill
-    // is a later step). manage_route must not touch the FillReceipt state machine.
+    // Planted directly (finalize_fill is a later step); manage_route must not touch it.
     let fill_receipt = seed_fill_receipt_account(&mut svm, &route, [0xCDu8; 32], 5_000, 254);
     let before = svm
         .get_account(&fill_receipt)

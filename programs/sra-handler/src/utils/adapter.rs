@@ -23,10 +23,9 @@ pub(crate) fn validate_adapter_program(adapter_program: &AccountInfo) -> Result<
     Ok(())
 }
 
-/// Validate that `remaining_accounts` carries exactly the program accounts for
-/// the adapters being added, in matching order, each loader-owned-executable.
-/// Both `create_route` (whole list) and `manage_route` (the added delta) use this
-/// — a mistyped pubkey must not become a trusted fill attester.
+/// Each added adapter must be a loader-owned-executable program, passed in
+/// `remaining_accounts` one-per-entry in order — else a mistyped pubkey could
+/// become a trusted fill attester.
 pub(crate) fn validate_adapter_accounts(
     adapters: &[Pubkey],
     remaining_accounts: &[AccountInfo],
@@ -42,9 +41,7 @@ pub(crate) fn validate_adapter_accounts(
     Ok(())
 }
 
-/// The adapter allowlist is a set: reject any pubkey that appears more than once.
-/// Enforced wherever the list is written (`create_route`, `manage_route`) so a
-/// duplicate can never waste a slot against `MAX_ADAPTERS` or bloat the event.
+/// Reject duplicate adapters — the allowlist is a set.
 pub(crate) fn require_distinct_adapters(adapters: &[Pubkey]) -> Result<()> {
     for (i, adapter) in adapters.iter().enumerate() {
         require!(

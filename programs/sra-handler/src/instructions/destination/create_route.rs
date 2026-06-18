@@ -89,9 +89,6 @@ pub(crate) fn handler(
         SraError::ActionBpsSumExceeded
     );
 
-    // Each allowlisted adapter must be loader-owned-executable at create time so
-    // a mistyped pubkey can't become a trusted fill attester. Adapter accounts
-    // ride in remaining_accounts, one per entry, same order.
     validate_adapter_accounts(&params.allowed_adapters, ctx.remaining_accounts)?;
 
     // Explicit seed arg + in-body recheck (Anchor can't express a method-call

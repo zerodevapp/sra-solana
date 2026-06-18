@@ -91,8 +91,7 @@ pub struct RouteCreated {
     pub paused: bool,
 }
 
-/// Emitted by `manage_route`. Carries the full post-write binding tuple (adapter
-/// list + paused) so any adapter-allowlist redirect is loudly observable.
+/// Emitted by `manage_route` with the post-write adapter list and paused flag.
 #[event]
 pub struct RouteManaged {
     pub route: Pubkey,

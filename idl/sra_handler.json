@@ -2586,10 +2586,8 @@
     {
       "name": "ManageRouteParams",
       "docs": [
-        "Inputs to `manage_route`. Only the route's mutable policy can change here —",
-        "`pause` toggles the route, and the adapter allowlist is edited via `add`/",
-        "`remove`. Identity fields (owner, mint, chain, app_id, actions, salt) are in",
-        "`route_config_hash` and are structurally immutable."
+        "Inputs to `manage_route` — the route's only mutable policy (identity fields",
+        "are immutable, baked into `route_config_hash`)."
       ],
       "type": {
         "kind": "struct",
@@ -2904,8 +2902,7 @@
     {
       "name": "RouteManaged",
       "docs": [
-        "Emitted by `manage_route`. Carries the full post-write binding tuple (adapter",
-        "list + paused) so any adapter-allowlist redirect is loudly observable."
+        "Emitted by `manage_route` with the post-write adapter list and paused flag."
       ],
       "type": {
         "kind": "struct",
