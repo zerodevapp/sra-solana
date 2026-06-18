@@ -294,7 +294,8 @@ fn create_route_non_executable_adapter_rejected() {
     let owner = funded_keypair(&mut svm, SOL);
     let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
 
-    let bogus_adapter = Pubkey::new_unique();
+    // A real account that exists but is not a program (mistyped pubkey).
+    let bogus_adapter = plant_non_executable_account(&mut svm);
     let mut params = sample_create_route_params(mint, [10u8; 32]);
     params.allowed_adapters = vec![bogus_adapter];
 

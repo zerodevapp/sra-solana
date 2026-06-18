@@ -1442,6 +1442,22 @@ pub fn deploy_extra_adapter(svm: &mut LiteSVM) -> Pubkey {
     id
 }
 
+/// Plant a real, non-executable account — a stand-in for a mistyped pubkey
+/// pointing at a data account rather than a program — so adapter-validation
+/// reject paths are representative (the account exists but is not a program).
+pub fn plant_non_executable_account(svm: &mut LiteSVM) -> Pubkey {
+    let key = Pubkey::new_unique();
+    let account = solana_sdk::account::Account {
+        lamports: svm.minimum_balance_for_rent_exemption(8),
+        data: vec![0u8; 8],
+        owner: system_program::ID,
+        executable: false,
+        rent_epoch: 0,
+    };
+    svm.set_account(key, account).unwrap();
+    key
+}
+
 /// Build a `manage_route` instruction. When `params.adapters` is `Some`, its
 /// program accounts ride in `remaining_accounts`, one per entry in the same
 /// order, so the program can loader-owned-executable-check each.
@@ -1478,9 +1494,8 @@ pub fn seed_fill_receipt_account(
     route: &Pubkey,
     fill_id: [u8; 32],
     amount: u64,
-    bump: u8,
 ) -> Pubkey {
-    let (pda, _) = derive_fill_receipt_pda(route, &fill_id);
+    let (pda, bump) = derive_fill_receipt_pda(route, &fill_id);
     let receipt = FillReceipt {
         route: *route,
         fill_id,

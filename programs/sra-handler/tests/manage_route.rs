@@ -194,8 +194,8 @@ fn manage_route_non_executable_adapter_rejected() {
     let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
     let route = create_sample_route(&mut svm, &payer, &owner, mint, [6u8; 32]);
 
-    // A pubkey with no deployed program → empty account → not executable.
-    let bogus = Pubkey::new_unique();
+    // A real account that exists but is not a program (mistyped pubkey).
+    let bogus = plant_non_executable_account(&mut svm);
     let ix = manage_route_ix(
         &owner.pubkey(),
         &route,
@@ -338,7 +338,7 @@ fn manage_route_does_not_affect_finalized_receipts() {
     let route = create_sample_route(&mut svm, &payer, &owner, mint, [11u8; 32]);
 
     // Planted directly (finalize_fill is a later step); manage_route must not touch it.
-    let fill_receipt = seed_fill_receipt_account(&mut svm, &route, [0xCDu8; 32], 5_000, 254);
+    let fill_receipt = seed_fill_receipt_account(&mut svm, &route, [0xCDu8; 32], 5_000);
     let before = svm
         .get_account(&fill_receipt)
         .expect("planted receipt exists")
