@@ -15,6 +15,15 @@ This is a fund-custody cross-chain bridge: two Anchor (Solana/Rust) programs —
   alone (needs a file not shown, the on-chain counterpart, or author intent),
   say so and ask a direct question — don't assume it's fine and don't assume
   it's broken. Label these "Unverified — needs author confirmation."
+- Calibrate noise to severity: for security/fund-safety, raise a concern even
+  when you can't fully confirm it (mark it "Unverified") — a missed exploit
+  costs more than a false alarm. For non-security findings, comment only when
+  you're confident a real issue exists; if it's a "maybe," stay silent. Noise
+  erodes trust in the review.
+- Favor consistency with this repo: prefer existing helpers/patterns over new
+  one-offs, flag logic placed in the wrong layer, and use the PR description for
+  intent — call out changes unrelated to its stated purpose (scope creep) or a
+  behavior/interface change the description doesn't mention.
 - `idl/` and `idls/` are generated/vendored — don't nitpick their formatting.
 
 ## Security — Solana/Anchor program safety (highest priority)
@@ -100,3 +109,13 @@ This is a fund-custody cross-chain bridge: two Anchor (Solana/Rust) programs —
 - If a change modifies the public interface (instruction args/accounts, account structs, events, or types) in `sra-handler` or
   `sra-across-adapter`, the committed `idl/*.json` must be regenerated in the
   same PR; flag such a change with no matching IDL update.
+
+## Don't flag (avoid noise)
+- CI already runs `cargo fmt`, `cargo clippy -D warnings`, the build, and the
+  full test suite — don't report formatting, lint-level, compile, or
+  "missing test" issues those gates already catch.
+- Don't leave comments that just restate what the code plainly does, or
+  pedantic naming/wording nits.
+- Don't propose refactors, extra logging, or doc tweaks unless they fix a real
+  bug or enforce a convention stated here.
+- Prefer one high-value comment over several minor ones.
