@@ -80,8 +80,10 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
             SolanaAction::VerifiedCpi {
                 program_id,
                 input_mint,
-                output_mint,
+                input_bps,
                 account_template,
+                output_mint,
+                min_out,
                 ..
             } => {
                 require!(
@@ -90,6 +92,14 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
                         && *output_mint != Pubkey::default(),
                     SraError::InvalidActionConfig
                 );
+                // input_bps is a fraction of the vault; > 100% is a dead route.
+                require!(*input_bps <= BPS_DENOMINATOR, SraError::InvalidActionConfig);
+                // Bound the committed template so create/fill hashing + slot
+                // resolution stay cheap (#[max_len] only sizes InitSpace).
+                require!(
+                    account_template.slots.len() <= MAX_TEMPLATE_SLOTS,
+                    SraError::TooManyTemplateSlots
+                );
                 // Pin the value-bearing slots so a relayer can't redirect funds.
                 require!(
                     account_template.pins(FixedRole::Source)
@@ -97,6 +107,22 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
                         && account_template.pins(FixedRole::SigningAuthority),
                     SraError::InvalidActionConfig
                 );
+                // The min-out reference must name a real signer/feed.
+                match min_out {
+                    MinOut::SignedQuote { quoter } => {
+                        require!(*quoter != Pubkey::default(), SraError::InvalidActionConfig);
+                    }
+                    MinOut::Oracle {
+                        feed,
+                        max_slippage_bps,
+                    } => {
+                        require!(*feed != Pubkey::default(), SraError::InvalidActionConfig);
+                        require!(
+                            *max_slippage_bps <= BPS_DENOMINATOR,
+                            SraError::InvalidActionConfig
+                        );
+                    }
+                }
             }
         }
     }
@@ -290,6 +316,108 @@ mod tests {
             SlotRole::Fixed(FixedRole::Destination),
             SlotRole::Free,
         ]);
+    }
+
+    #[test]
+    fn validate_action_config_verified_cpi_input_bps_over_10000_rejected() {
+        let mut action = valid_verified_cpi();
+        if let SolanaAction::VerifiedCpi { input_bps, .. } = &mut action {
+            *input_bps = 10_001;
+        }
+        assert_eq!(
+            validate_action_config(&[action]).unwrap_err(),
+            SraError::InvalidActionConfig.into()
+        );
+    }
+
+    #[test]
+    fn validate_action_config_verified_cpi_input_bps_max_boundary_accepted() {
+        let mut action = valid_verified_cpi();
+        if let SolanaAction::VerifiedCpi { input_bps, .. } = &mut action {
+            *input_bps = 10_000;
+        }
+        assert!(validate_action_config(&[action]).is_ok());
+    }
+
+    fn pinned_slots_plus_free(free: usize) -> Vec<SlotRole> {
+        let mut slots = vec![
+            SlotRole::Fixed(FixedRole::Source),
+            SlotRole::Fixed(FixedRole::Destination),
+            SlotRole::Fixed(FixedRole::SigningAuthority),
+        ];
+        slots.extend(vec![SlotRole::Free; free]);
+        slots
+    }
+
+    fn verified_cpi_with_template(slots: Vec<SlotRole>) -> SolanaAction {
+        let mut action = valid_verified_cpi();
+        if let SolanaAction::VerifiedCpi {
+            account_template, ..
+        } = &mut action
+        {
+            account_template.slots = slots;
+        }
+        action
+    }
+
+    #[test]
+    fn validate_action_config_verified_cpi_oversized_template_rejected() {
+        // 3 pins + (MAX - 2) free = MAX + 1 slots (still pins all three).
+        let action = verified_cpi_with_template(pinned_slots_plus_free(MAX_TEMPLATE_SLOTS - 2));
+        assert_eq!(
+            validate_action_config(&[action]).unwrap_err(),
+            SraError::TooManyTemplateSlots.into()
+        );
+    }
+
+    #[test]
+    fn validate_action_config_verified_cpi_template_at_max_accepted() {
+        let action = verified_cpi_with_template(pinned_slots_plus_free(MAX_TEMPLATE_SLOTS - 3));
+        assert!(validate_action_config(&[action]).is_ok());
+    }
+
+    #[test]
+    fn validate_action_config_verified_cpi_zero_quoter_rejected() {
+        let mut action = valid_verified_cpi();
+        if let SolanaAction::VerifiedCpi { min_out, .. } = &mut action {
+            *min_out = MinOut::SignedQuote {
+                quoter: Pubkey::default(),
+            };
+        }
+        assert_eq!(
+            validate_action_config(&[action]).unwrap_err(),
+            SraError::InvalidActionConfig.into()
+        );
+    }
+
+    #[test]
+    fn validate_action_config_verified_cpi_zero_oracle_feed_rejected() {
+        let mut action = valid_verified_cpi();
+        if let SolanaAction::VerifiedCpi { min_out, .. } = &mut action {
+            *min_out = MinOut::Oracle {
+                feed: Pubkey::default(),
+                max_slippage_bps: 50,
+            };
+        }
+        assert_eq!(
+            validate_action_config(&[action]).unwrap_err(),
+            SraError::InvalidActionConfig.into()
+        );
+    }
+
+    #[test]
+    fn validate_action_config_verified_cpi_oracle_slippage_over_10000_rejected() {
+        let mut action = valid_verified_cpi();
+        if let SolanaAction::VerifiedCpi { min_out, .. } = &mut action {
+            *min_out = MinOut::Oracle {
+                feed: Pubkey::new_unique(),
+                max_slippage_bps: 10_001,
+            };
+        }
+        assert_eq!(
+            validate_action_config(&[action]).unwrap_err(),
+            SraError::InvalidActionConfig.into()
+        );
     }
 
     fn assert_template_rejected(slots: &[SlotRole]) {

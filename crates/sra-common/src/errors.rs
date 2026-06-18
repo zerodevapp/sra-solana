@@ -122,6 +122,9 @@ pub enum SraError {
     #[msg("SplTransfer amount_bps sum exceeds 100% of the vault")]
     ActionBpsSumExceeded,
 
-    #[msg("Action config field is invalid (zero key or template missing a required fixed slot)")]
+    #[msg("Action config field is invalid (zero key, bps over 100%, or template missing a required fixed slot)")]
     InvalidActionConfig,
+
+    #[msg("VerifiedCpi account template exceeds the maximum slot count")]
+    TooManyTemplateSlots,
 }
