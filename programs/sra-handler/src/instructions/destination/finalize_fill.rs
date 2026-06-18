@@ -27,10 +27,9 @@ pub struct FinalizeFill<'info> {
     /// Permissionless caller (relayer / cranker). Pays the receipt rent.
     #[account(mut)]
     pub payer: Signer<'info>,
-    // `route_config_hash` is not stored on the route (only the action-config
-    // digest is), so it is passed as an argument and bound here: the seeds
-    // reproduce the route PDA, which both validates the argument and yields the
-    // signer seeds the route needs to authorize the vault transfer below.
+    // `route_config_hash` is not stored on the route, so it is passed as an
+    // argument; binding it in the seeds both validates it and yields the signer
+    // seeds for the vault transfer below.
     #[account(
         seeds = [SEED_SRA_ROUTE, route.owner.as_ref(), &route_config_hash, &route.salt],
         bump = route.bump,
