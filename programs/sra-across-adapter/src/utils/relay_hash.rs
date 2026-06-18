@@ -42,7 +42,14 @@ pub fn compute_relay_hash(relay_data: &RelayData, chain_id: u64) -> Result<[u8; 
     let mut input = relay_data
         .try_to_vec()
         .map_err(|_| error!(AcrossAdapterError::RelayHashSerializationFailed))?;
-    input.truncate(input.len() - BORSH_LEN_PREFIX - relay_data.message.len());
+    // Fail closed rather than underflow (debug panic) or wrap into a no-op
+    // truncate + wrong hash (release) if the serialized layout ever stops ending
+    // with the `message` field — on-chain code must never silently mis-hash.
+    let prefix_len = input
+        .len()
+        .checked_sub(BORSH_LEN_PREFIX + relay_data.message.len())
+        .ok_or_else(|| error!(AcrossAdapterError::RelayHashSerializationFailed))?;
+    input.truncate(prefix_len);
     input.extend_from_slice(&hash_non_empty_message(&relay_data.message));
     input.extend_from_slice(&chain_id.to_le_bytes());
     Ok(keccak_hash(&input).to_bytes())
