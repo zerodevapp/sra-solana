@@ -1505,12 +1505,8 @@ pub fn derive_fill_receipt_pda(route: &Pubkey, fill_id: &[u8; 32]) -> (Pubkey, u
     Pubkey::find_program_address(&[SEED_FILL_RECEIPT, route.as_ref(), fill_id], &PROGRAM_ID)
 }
 
-/// Plant a `FillReceipt` directly (via `set_account`) in the given lifecycle
-/// state, byte-identical to one `finalize_fill` writes (same discriminator,
-/// Borsh body, and PDA bump). Lets recovery/retry tests reach the
-/// `{ActionsFailed, ActionsSucceeded, Recovered}` states that have no producing
-/// instruction yet, and assert other instructions never touch a planted
-/// receipt — mirrors `seed_mint_nonce_account`.
+/// Plant a `FillReceipt` in the given lifecycle state via `set_account` — lets
+/// tests reach states no instruction produces yet. Mirrors `seed_mint_nonce_account`.
 pub fn seed_fill_receipt_with_status(
     svm: &mut LiteSVM,
     route: &Pubkey,
@@ -1662,9 +1658,8 @@ pub fn fetch_fill_receipt(svm: &LiteSVM, pda: &Pubkey) -> FillReceipt {
     FillReceipt::try_deserialize(&mut acct.data.as_slice()).expect("valid FillReceipt")
 }
 
-/// Build a `recover_funds` instruction. `owner_token_account` is passed
-/// explicitly (not derived) so non-canonical-payout tests can supply a
-/// non-ATA target; happy paths pass the owner's canonical ATA.
+/// Build a `recover_funds` instruction. `owner_token_account` is explicit (not
+/// derived) so payout-pinning tests can supply a non-canonical target.
 pub fn recover_funds_ix(
     owner: &Pubkey,
     route: &Pubkey,

@@ -861,7 +861,7 @@
         {
           "name": "owner",
           "docs": [
-            "Route owner = recovery authority; must sign and equal `route.owner`."
+            "Recovery authority (route owner)."
           ],
           "signer": true,
           "relations": [
@@ -877,15 +877,14 @@
         {
           "name": "fill_receipt",
           "docs": [
-            "Fill lifecycle marker, bound to this route. Never closed — recovery only",
-            "advances its status, preserving replay protection."
+            "The fill lifecycle marker."
           ],
           "writable": true
         },
         {
           "name": "expected_mint",
           "docs": [
-            "Bound to the route's committed mint; decimals read live for transfer_checked."
+            "Decimals read live for transfer_checked."
           ]
         },
         {
@@ -1006,8 +1005,7 @@
         {
           "name": "owner_token_account",
           "docs": [
-            "Payout target pinned to the owner's canonical ATA (authority + mint), so",
-            "recovered funds can only reach the pre-configured owner account."
+            "Payout target: the owner's canonical ATA."
           ],
           "writable": true,
           "pda": {
@@ -3369,8 +3367,7 @@
     {
       "name": "FundsRecovered",
       "docs": [
-        "Emitted by `recover_funds` once the execution vault is drained to the route",
-        "owner's ATA and the receipt advances to the terminal `Recovered` state."
+        "Emitted by `recover_funds` when the execution vault is drained to the owner."
       ],
       "type": {
         "kind": "struct",
@@ -3395,7 +3392,7 @@
           {
             "name": "amount",
             "docs": [
-              "Full balance moved execution_vault -> owner ATA."
+              "Amount drained to the owner."
             ],
             "type": "u64"
           }

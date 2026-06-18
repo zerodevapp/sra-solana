@@ -116,14 +116,13 @@ pub struct FillFinalized {
     pub finalized_at: i64,
 }
 
-/// Emitted by `recover_funds` once the execution vault is drained to the route
-/// owner's ATA and the receipt advances to the terminal `Recovered` state.
+/// Emitted by `recover_funds` when the execution vault is drained to the owner.
 #[event]
 pub struct FundsRecovered {
     pub route: Pubkey,
     pub owner: Pubkey,
     pub fill_id: [u8; 32],
-    /// Full balance moved execution_vault -> owner ATA.
+    /// Amount drained to the owner.
     pub amount: u64,
 }
 

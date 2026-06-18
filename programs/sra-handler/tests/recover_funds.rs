@@ -1,20 +1,10 @@
 //! Owner-gated destination fund recovery (`recover_funds`).
 //!
-//! Drains the per-route execution vault back to the route owner's canonical ATA
-//! when a fill's actions cannot complete, advancing the receipt lifecycle to the
-//! terminal `Recovered` state. This is the destination sibling of the adapter's
-//! stranded-custody recovery, with an `ExecutionStatus` gate that stateless
-//! custody recovery does not need.
-//!
-//! Tests stage the receipt and vault via fixtures (a planted receipt plus a
-//! direct mint into the execution vault) rather than running the full fill
-//! flow. The planted receipt matches one `finalize_fill` writes in every field
-//! `recover_funds` reads, so a `(Finalized, AMOUNT)` fixture reproduces the
-//! post-finalize state recovery acts on; the
-//! `ActionsFailed` / `ActionsSucceeded` / `Recovered` states have no producing
-//! instruction yet (action execution and retry are not implemented), and only
-//! this approach can reach them. The genuine finalize → `Finalized` →
-//! funded-vault path is covered end-to-end in `finalize_fill.rs`.
+//! Tests stage the receipt + vault via fixtures (a planted receipt + a direct
+//! mint) rather than the full fill flow — the only way to reach the
+//! `ActionsFailed` / `ActionsSucceeded` / `Recovered` states, which no
+//! instruction produces yet. The genuine finalize path is covered in
+//! `finalize_fill.rs`.
 
 mod common;
 
@@ -37,8 +27,7 @@ fn anchor_error(code: ErrorCode) -> TransactionError {
     TransactionError::InstructionError(0, InstructionError::Custom(code as u32))
 }
 
-/// A route with a planted receipt and a (possibly funded) execution vault, ready
-/// for a recovery attempt.
+/// A route with a planted receipt and a (possibly funded) execution vault.
 struct Recoverable {
     owner: Keypair,
     mint: Pubkey,
@@ -49,9 +38,8 @@ struct Recoverable {
     owner_ata: Pubkey,
 }
 
-/// Create a route owned by a fresh keypair, fund its execution vault with
-/// `vault_amount`, plant a `FillReceipt` in `status`, and create the owner's
-/// receiving ATA.
+/// Route + a receipt planted in `status` + the execution vault funded to
+/// `vault_amount` + the owner's receiving ATA.
 fn setup_recoverable(
     svm: &mut litesvm::LiteSVM,
     status: ExecutionStatus,
@@ -93,7 +81,7 @@ impl Recoverable {
         )
     }
 
-    /// Run recover_funds, signed + paid by the route owner.
+    /// Run recover_funds (owner signs and pays).
     fn recover(
         &self,
         svm: &mut litesvm::LiteSVM,
@@ -159,8 +147,7 @@ fn recover_from_actions_succeeded_rejected() {
 
 #[test]
 fn recover_from_recovered_rejected() {
-    // Replay of recovery: a second recover on an already-Recovered receipt is
-    // rejected by the same gate (and the vault, already drained, is untouched).
+    // Recovery replay: an already-Recovered receipt is rejected by the same gate.
     let mut svm = setup_svm();
     let r = setup_recoverable(&mut svm, ExecutionStatus::Recovered, 0);
 
@@ -180,7 +167,7 @@ fn recover_non_owner_rejected() {
     let mut svm = setup_svm();
     let r = setup_recoverable(&mut svm, ExecutionStatus::Finalized, AMOUNT);
 
-    // A funded impostor with their own receiving ATA, signing in the owner slot.
+    // An impostor signing in the owner slot, with their own ATA.
     let attacker = funded_keypair(&mut svm, SOL);
     let attacker_ata = create_ata(&mut svm, &attacker, &attacker.pubkey(), &r.mint);
     let ix = recover_funds_ix(
@@ -204,9 +191,7 @@ fn recover_to_non_canonical_ata_rejected() {
     let mut svm = setup_svm();
     let r = setup_recoverable(&mut svm, ExecutionStatus::Finalized, AMOUNT);
 
-    // Right mint, wrong authority: a token account owned by a different
-    // authority. The `associated_token::authority = owner` constraint rejects it
-    // on the token-owner dimension before the canonical-address check.
+    // Right mint, wrong authority — rejected on the token-owner dimension.
     let stranger_ata = create_ata(&mut svm, &r.owner, &Pubkey::new_unique(), &r.mint);
     let ix = recover_funds_ix(
         &r.owner.pubkey(),
@@ -235,10 +220,7 @@ fn recover_to_wrong_mint_account_rejected() {
     let mut svm = setup_svm();
     let r = setup_recoverable(&mut svm, ExecutionStatus::Finalized, AMOUNT);
 
-    // The owner's ATA, but for a different mint than the route's. The payout is
-    // pinned in the mint dimension too: the owner matches, but this is not the
-    // canonical ATA for (owner, route mint), so the associated-address check
-    // rejects it — the asset is named in the authorization, not just the authority.
+    // Owner's ATA but for the wrong mint — rejected on the canonical-address dimension.
     let other_mint = create_mint(&mut svm, &r.owner, &r.owner.pubkey(), 6);
     let owner_other_ata = create_ata(&mut svm, &r.owner, &r.owner.pubkey(), &other_mint);
     let ix = recover_funds_ix(
@@ -269,8 +251,7 @@ fn recover_to_wrong_mint_account_rejected() {
 
 #[test]
 fn recover_empty_vault_rejected() {
-    // Recoverable status, but the vault holds nothing — there is no zero-amount
-    // transfer + spurious state advance.
+    // Recoverable status, but an empty vault.
     let mut svm = setup_svm();
     let r = setup_recoverable(&mut svm, ExecutionStatus::Finalized, 0);
 
@@ -287,8 +268,7 @@ fn recover_empty_vault_rejected() {
 
 #[test]
 fn recover_does_not_close_fill_receipt() {
-    // Recovery advances the lifecycle but never closes the receipt — the replay
-    // marker must outlive recovery so a finalized fill can never be re-finalized.
+    // The receipt must survive recovery — it is the replay marker.
     let mut svm = setup_svm();
     let r = setup_recoverable(&mut svm, ExecutionStatus::Finalized, AMOUNT);
 
