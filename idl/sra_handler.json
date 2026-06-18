@@ -2076,6 +2076,29 @@
   ],
   "types": [
     {
+      "name": "AccountTemplate",
+      "docs": [
+        "Ordered account-slot policy for a `VerifiedCpi`'s inner instruction. Slot",
+        "order matches the inner CPI's account list; each slot is pinned by the",
+        "handler (`Fixed`) or supplied by the relayer as routing (`Free`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "slots",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "SlotRole"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "AddressBookEntry",
       "docs": [
         "Per-address-book-root owner-managed (source_mint, chain, target_token) -> decimals registry.",
@@ -2584,6 +2607,31 @@
       }
     },
     {
+      "name": "FixedRole",
+      "docs": [
+        "Handler-controlled roles a `Fixed` slot can take. `Source`, `Destination`,",
+        "and `SigningAuthority` MUST appear in every template (enforced by",
+        "`validate_action_config`) so a relayer cannot redirect the input or output."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "TokenProgram"
+          },
+          {
+            "name": "SigningAuthority"
+          },
+          {
+            "name": "Source"
+          },
+          {
+            "name": "Destination"
+          }
+        ]
+      }
+    },
+    {
       "name": "ManageRouteParams",
       "docs": [
         "Inputs to `manage_route` — the route's only mutable policy (identity fields",
@@ -2613,6 +2661,39 @@
                 "vec": "pubkey"
               }
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "MinOut",
+      "docs": [
+        "Minimum-output reference for a `VerifiedCpi`'s post-fee balance-diff gate."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "SignedQuote",
+            "fields": [
+              {
+                "name": "quoter",
+                "type": "pubkey"
+              }
+            ]
+          },
+          {
+            "name": "Oracle",
+            "fields": [
+              {
+                "name": "feed",
+                "type": "pubkey"
+              },
+              {
+                "name": "max_slippage_bps",
+                "type": "u16"
+              }
+            ]
           }
         ]
       }
@@ -2930,10 +3011,32 @@
       }
     },
     {
+      "name": "SlotRole",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Fixed",
+            "fields": [
+              {
+                "defined": {
+                  "name": "FixedRole"
+                }
+              }
+            ]
+          },
+          {
+            "name": "Free"
+          }
+        ]
+      }
+    },
+    {
       "name": "SolanaAction",
       "docs": [
-        "A pre-registered action to execute on the destination chain after fill finalization.",
-        "v1: only SplTransfer is implemented."
+        "A pre-registered action to execute on the destination chain after fill",
+        "finalization. v1: `SplTransfer` (static, exact-match accounts) and",
+        "`VerifiedCpi` (dynamic accounts, outcome-verified)."
       ],
       "type": {
         "kind": "enum",
@@ -2951,6 +3054,62 @@
                   "Basis points of the execution vault balance to transfer (e.g., 10000 = 100%)."
                 ],
                 "type": "u16"
+              }
+            ]
+          },
+          {
+            "name": "VerifiedCpi",
+            "fields": [
+              {
+                "name": "program_id",
+                "docs": [
+                  "Pinned program — checked loader-owned-executable + exact pubkey at execution."
+                ],
+                "type": "pubkey"
+              },
+              {
+                "name": "input_mint",
+                "docs": [
+                  "Token spent from the vault (usually `expected_mint`)."
+                ],
+                "type": "pubkey"
+              },
+              {
+                "name": "input_bps",
+                "docs": [
+                  "Basis points of the vault moved into the scratch source — the input bound."
+                ],
+                "type": "u16"
+              },
+              {
+                "name": "account_template",
+                "type": {
+                  "defined": {
+                    "name": "AccountTemplate"
+                  }
+                }
+              },
+              {
+                "name": "output_mint",
+                "docs": [
+                  "Fungible receipt the engine balance-diffs (swap output, vault share, LST, …)."
+                ],
+                "type": "pubkey"
+              },
+              {
+                "name": "min_out",
+                "type": {
+                  "defined": {
+                    "name": "MinOut"
+                  }
+                }
+              },
+              {
+                "name": "allow_permissioned_output",
+                "docs": [
+                  "Opt-in for Token-2022 permissioned (perm-delegate / frozen) output mints."
+                ],
+                "type": "bool"
               }
             ]
           }

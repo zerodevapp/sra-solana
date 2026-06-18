@@ -1,9 +1,11 @@
 use anchor_lang::prelude::*;
 
 use crate::constants::MAX_ADAPTERS;
+use crate::types::actions::{AccountTemplate, MinOut};
 
-/// A pre-registered action to execute on the destination chain after fill finalization.
-/// v1: only SplTransfer is implemented.
+/// A pre-registered action to execute on the destination chain after fill
+/// finalization. v1: `SplTransfer` (static, exact-match accounts) and
+/// `VerifiedCpi` (dynamic accounts, outcome-verified).
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Debug, InitSpace)]
 pub enum SolanaAction {
     /// Transfer a percentage of execution vault balance to a recipient.
@@ -11,6 +13,24 @@ pub enum SolanaAction {
         recipient: Pubkey,
         /// Basis points of the execution vault balance to transfer (e.g., 10000 = 100%).
         amount_bps: u16,
+    },
+    /// Spend a fraction of the vault through a pinned program, verifying the
+    /// post-fee output by balance-diff against `min_out`. Routing accounts are
+    /// relayer-supplied (`Free` slots); the value-bearing slots are pinned by
+    /// `account_template`.
+    VerifiedCpi {
+        /// Pinned program — checked loader-owned-executable + exact pubkey at execution.
+        program_id: Pubkey,
+        /// Token spent from the vault (usually `expected_mint`).
+        input_mint: Pubkey,
+        /// Basis points of the vault moved into the scratch source — the input bound.
+        input_bps: u16,
+        account_template: AccountTemplate,
+        /// Fungible receipt the engine balance-diffs (swap output, vault share, LST, …).
+        output_mint: Pubkey,
+        min_out: MinOut,
+        /// Opt-in for Token-2022 permissioned (perm-delegate / frozen) output mints.
+        allow_permissioned_output: bool,
     },
 }
 
@@ -89,11 +109,53 @@ pub struct FillReceipt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{FixedRole, SlotRole};
 
     #[test]
-    fn solana_action_init_space() {
-        // enum disc (1) + Pubkey (32) + u16 (2) = 35
-        assert_eq!(SolanaAction::INIT_SPACE, 35);
+    fn solana_action_init_space_covers_verified_cpi() {
+        // InitSpace reserves the larger variant. VerifiedCpi = 32 program_id
+        // + 32 input_mint + 2 input_bps + 68 account_template + 32 output_mint
+        // + 35 min_out + 1 allow_permissioned_output = 202; enum disc (1) + 202.
+        assert_eq!(SolanaAction::INIT_SPACE, 203);
+    }
+
+    fn sample_verified_cpi() -> SolanaAction {
+        SolanaAction::VerifiedCpi {
+            program_id: Pubkey::new_unique(),
+            input_mint: Pubkey::new_unique(),
+            input_bps: 10_000,
+            account_template: AccountTemplate {
+                slots: vec![
+                    SlotRole::Fixed(FixedRole::SigningAuthority),
+                    SlotRole::Fixed(FixedRole::Source),
+                    SlotRole::Fixed(FixedRole::Destination),
+                    SlotRole::Free,
+                ],
+            },
+            output_mint: Pubkey::new_unique(),
+            min_out: MinOut::Oracle {
+                feed: Pubkey::new_unique(),
+                max_slippage_bps: 50,
+            },
+            allow_permissioned_output: true,
+        }
+    }
+
+    #[test]
+    fn solana_action_borsh_round_trip_spl_transfer() {
+        let action = SolanaAction::SplTransfer {
+            recipient: Pubkey::new_unique(),
+            amount_bps: 7_500,
+        };
+        let bytes = action.try_to_vec().unwrap();
+        assert_eq!(SolanaAction::try_from_slice(&bytes).unwrap(), action);
+    }
+
+    #[test]
+    fn solana_action_borsh_round_trip_verified_cpi() {
+        let action = sample_verified_cpi();
+        let bytes = action.try_to_vec().unwrap();
+        assert_eq!(SolanaAction::try_from_slice(&bytes).unwrap(), action);
     }
 
     #[test]
