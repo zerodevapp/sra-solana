@@ -97,6 +97,6 @@ This is a fund-custody cross-chain bridge: two Anchor (Solana/Rust) programs —
   code, comments, doc-comments, or the IDL (step labels, audit-finding codes,
   internal issue/PR numbers, internal-doc pointers, process jargon). Keep the
   technical substance, drop the citation.
-- If a change touches an instruction/account/event/type in `sra-handler` or
+- If a change modifies the public interface (instruction args/accounts, account structs, events, or types) in `sra-handler` or
   `sra-across-adapter`, the committed `idl/*.json` must be regenerated in the
-  same PR; flag such a code change with no matching IDL update.
+  same PR; flag such a change with no matching IDL update.
