@@ -1,25 +1,12 @@
 //! Owner-gated destination fund recovery.
 //!
-//! Drains the per-route execution vault back to the route owner's canonical ATA
-//! when a fill's actions cannot complete, advancing the receipt lifecycle to the
-//! terminal `Recovered` state. Authority is the route owner alone, and the
-//! payout target is pinned to the owner's ATA in both the authority and mint
-//! dimensions, so recovered funds can only reach the pre-configured owner
-//! account — never an arbitrary recipient.
-//!
-//! This is the destination sibling of the adapter's stranded-custody recovery:
-//! every PDA-owned token account that can strand funds has an owner-gated exit
-//! path in the program that controls its signer, plus an `ExecutionStatus` gate
-//! that stateless custody recovery does not need. The replay-marker receipt is
-//! never closed — recovery only advances its lifecycle state.
-//!
-//! The execution vault is one ATA per route, shared by every fill of that route,
-//! so recovery drains the whole balance and advances only the referenced
-//! receipt to `Recovered`. Since the sole authority is the route owner and the
-//! sole destination is that owner's ATA, this is fund-safe regardless of how
-//! many fills are staged: nothing can be lost, double-spent, or sent elsewhere.
-//! Sibling receipts of the same route simply keep their status with an emptied
-//! vault (a later recovery on them hits the empty-vault guard).
+//! Drains the route's execution vault to the route owner's canonical ATA (pinned
+//! by authority + mint, so funds can only reach the pre-configured owner) and
+//! advances the fill receipt to the terminal `Recovered` state; the replay-marker
+//! receipt is never closed. The vault is one ATA per route shared by every fill,
+//! so recovery drains the whole balance and advances only the referenced receipt
+//! — fund-safe, since the sole authority is the owner and the sole destination is
+//! their ATA.
 
 use anchor_lang::prelude::*;
 use anchor_spl::token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked};
