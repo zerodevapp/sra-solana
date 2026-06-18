@@ -25,4 +25,12 @@ pub mod sra_across_adapter {
     pub fn recover_stuck_custody(ctx: Context<RecoverStuckCustody>) -> Result<()> {
         instructions::recover_custody::handler(ctx)
     }
+
+    pub fn verify_across_fill(
+        ctx: Context<VerifyAcrossFill>,
+        relay_hash: [u8; 32],
+        relay_data: crate::utils::svm_spoke::types::RelayData,
+    ) -> Result<()> {
+        instructions::verify_fill::handler(ctx, relay_hash, relay_data)
+    }
 }

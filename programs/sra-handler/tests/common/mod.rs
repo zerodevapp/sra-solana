@@ -23,14 +23,15 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_system_interface::program as system_program;
+use sra_across_adapter::utils::svm_spoke::types::RelayData;
 use sra_common::{
     abi::u256_from_u64,
-    constants::ACROSS_SPOKE_POOL_ID,
+    constants::{ACROSS_SPOKE_POOL_ID, SOLANA_CHAIN_ID},
     instruction_data::encode_anchor_instruction_data,
     seeds::{
         action_config_hash, route_config_hash, SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK,
         SEED_ASSET_FEE_TIER, SEED_EXECUTION, SEED_FEE_CONFIG, SEED_FILL_RECEIPT, SEED_MINT_NONCE,
-        SEED_PROTOCOL_FEE, SEED_SRA, SEED_SRA_ROUTE,
+        SEED_PROTOCOL_FEE, SEED_SRA, SEED_SRA_ROUTE, SEED_VERIFIED_FILL,
     },
     source_deposit::{AcrossDepositParams, PrepareParams},
     test_utils::DEFAULT_ACTION_IDXS,
@@ -1517,4 +1518,80 @@ pub fn seed_fill_receipt_account(
     };
     svm.set_account(pda, account).unwrap();
     pda
+}
+
+// --- Destination fill verification (verify_across_fill) ---
+
+pub fn derive_verified_fill_pda(relay_hash: &[u8; 32]) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[SEED_VERIFIED_FILL, ADAPTER_PROGRAM_ID.as_ref(), relay_hash],
+        &ADAPTER_PROGRAM_ID,
+    )
+}
+
+/// Compute the destination relay hash the adapter re-derives on-chain (the fill
+/// lands on this chain, so the bound chain id is `SOLANA_CHAIN_ID`).
+pub fn relay_hash_for(relay_data: &RelayData) -> [u8; 32] {
+    sra_across_adapter::utils::relay_hash::compute_relay_hash(relay_data, SOLANA_CHAIN_ID)
+        .expect("relay hash should serialize")
+}
+
+/// A `RelayData` whose route-bound fields (`recipient`, `output_token`,
+/// `origin_chain_id`) are caller-chosen so route-binding tests can match or
+/// mismatch them; every other field is a fixed non-zero sample.
+pub fn sample_relay_data(
+    recipient: Pubkey,
+    output_token: Pubkey,
+    origin_chain_id: u64,
+    output_amount: u64,
+) -> RelayData {
+    RelayData {
+        depositor: Pubkey::new_from_array([0x11; 32]),
+        recipient,
+        exclusive_relayer: Pubkey::new_from_array([0x22; 32]),
+        input_token: Pubkey::new_from_array([0x33; 32]),
+        output_token,
+        input_amount: [0x44; 32],
+        output_amount,
+        origin_chain_id,
+        deposit_id: [0x55; 32],
+        fill_deadline: 1_900_000_000,
+        exclusivity_deadline: 1_899_900_000,
+        message: vec![0xde, 0xad, 0xbe, 0xef],
+    }
+}
+
+/// Build a `verify_across_fill` instruction. `fill_status` and `verified_fill`
+/// are both derived from `relay_hash`, exactly as the on-chain seeds require.
+pub fn verify_across_fill_ix(
+    payer: &Pubkey,
+    route: &Pubkey,
+    relay_hash: [u8; 32],
+    relay_data: RelayData,
+) -> Instruction {
+    let (fill_status, _) = derive_fill_status_pda(&relay_hash);
+    let (verified_fill, _) = derive_verified_fill_pda(&relay_hash);
+    Instruction {
+        program_id: ADAPTER_PROGRAM_ID,
+        accounts: sra_across_adapter::accounts::VerifyAcrossFill {
+            payer: *payer,
+            fill_status,
+            route: *route,
+            verified_fill,
+            across_program: ACROSS_SPOKE_POOL_ID,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: sra_across_adapter::instruction::VerifyAcrossFill {
+            relay_hash,
+            relay_data,
+        }
+        .data(),
+    }
+}
+
+pub fn fetch_verified_fill(svm: &LiteSVM, pda: &Pubkey) -> sra_across_adapter::state::VerifiedFill {
+    let acct = svm.get_account(pda).expect("verified_fill account exists");
+    sra_across_adapter::state::VerifiedFill::try_deserialize(&mut acct.data.as_slice())
+        .expect("valid VerifiedFill")
 }
