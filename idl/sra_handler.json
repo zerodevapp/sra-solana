@@ -846,6 +846,263 @@
       ]
     },
     {
+      "name": "recover_funds",
+      "discriminator": [
+        194,
+        165,
+        70,
+        223,
+        66,
+        241,
+        45,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "docs": [
+            "Recovery authority (route owner)."
+          ],
+          "signer": true,
+          "relations": [
+            "route"
+          ]
+        },
+        {
+          "name": "route",
+          "relations": [
+            "fill_receipt"
+          ]
+        },
+        {
+          "name": "fill_receipt",
+          "docs": [
+            "The fill lifecycle marker."
+          ],
+          "writable": true
+        },
+        {
+          "name": "expected_mint",
+          "docs": [
+            "Decimals read live for transfer_checked."
+          ]
+        },
+        {
+          "name": "execution_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  101,
+                  99,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "route"
+              }
+            ]
+          }
+        },
+        {
+          "name": "execution_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "execution_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "expected_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "owner_token_account",
+          "docs": [
+            "Payout target: the owner's canonical ATA."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "expected_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "remove_asset_fee_tier",
       "discriminator": [
         60,
@@ -2333,6 +2590,19 @@
       ]
     },
     {
+      "name": "FundsRecovered",
+      "discriminator": [
+        77,
+        226,
+        1,
+        193,
+        147,
+        128,
+        69,
+        18
+      ]
+    },
+    {
       "name": "PendingAdminSet",
       "discriminator": [
         53,
@@ -3090,6 +3360,41 @@
           },
           {
             "name": "Destination"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FundsRecovered",
+      "docs": [
+        "Emitted by `recover_funds` when the execution vault is drained to the owner."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "route",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Amount drained to the owner."
+            ],
+            "type": "u64"
           }
         ]
       }

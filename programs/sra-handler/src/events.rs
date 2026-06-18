@@ -116,6 +116,16 @@ pub struct FillFinalized {
     pub finalized_at: i64,
 }
 
+/// Emitted by `recover_funds` when the execution vault is drained to the owner.
+#[event]
+pub struct FundsRecovered {
+    pub route: Pubkey,
+    pub owner: Pubkey,
+    pub fill_id: [u8; 32],
+    /// Amount drained to the owner.
+    pub amount: u64,
+}
+
 /// Emitted by `validate_and_prepare` after funds reach adapter custody. Carries
 /// the routing inputs needed to build the target-specific bridge message.
 #[event]

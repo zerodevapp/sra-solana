@@ -59,6 +59,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Each integration-test file links its own statically-linked binary against
+      # the full Solana/LiteSVM dependency tree, so `cargo test --workspace` writes
+      # several GB of debug binaries. Reclaim the runner's pre-installed bloat to
+      # avoid `No space left on device` during linking.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup
+          df -h /
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
