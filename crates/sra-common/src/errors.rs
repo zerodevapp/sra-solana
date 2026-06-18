@@ -130,4 +130,8 @@ pub enum SraError {
 
     #[msg("Adapter already present in the allowlist")]
     DuplicateAdapter,
+
+    // -- Destination: fill finalization (appended to keep prior codes stable) --
+    #[msg("Route is paused")]
+    RoutePaused,
 }

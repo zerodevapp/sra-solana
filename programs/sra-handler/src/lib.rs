@@ -71,6 +71,14 @@ pub mod sra_handler {
         instructions::destination::manage_route::handler(ctx, params)
     }
 
+    pub fn finalize_fill(
+        ctx: Context<FinalizeFill>,
+        fill_id: [u8; 32],
+        route_config_hash: [u8; 32],
+    ) -> Result<()> {
+        instructions::destination::finalize_fill::handler(ctx, fill_id, route_config_hash)
+    }
+
     pub fn initialize_fee_config(
         ctx: Context<InitializeFeeConfig>,
         fee_recipient: Pubkey,

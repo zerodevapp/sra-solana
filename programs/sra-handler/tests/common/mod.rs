@@ -1412,7 +1412,35 @@ pub fn sample_create_route_params(expected_mint: Pubkey, salt: [u8; 32]) -> Crea
     }
 }
 
+/// Create the sample route (one allowed adapter, not paused) and return its PDA
+/// plus its `route_config_hash` — the canonical route creator. The hash is the
+/// signer seed the route needs to authorize vault transfers (e.g. finalize_fill)
+/// and can only be captured at creation time, since the sample params carry a
+/// freshly-generated recipient that the route can't recompute later.
+pub fn create_sample_route_with_hash(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    owner: &Keypair,
+    mint: Pubkey,
+    salt: [u8; 32],
+) -> (Pubkey, [u8; 32]) {
+    let params = sample_create_route_params(mint, salt);
+    let hash = route_config_hash_for(&owner.pubkey(), &params);
+    let (route_pda, _) = derive_route_pda(&owner.pubkey(), &hash, &params.salt);
+    let ix = create_route_ix_with_hash(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        hash,
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    send_ix(svm, ix, payer, &[owner]).expect("create_route should succeed");
+    (route_pda, hash)
+}
+
 /// Create the sample route (one allowed adapter, not paused) and return its PDA.
+/// Thin wrapper over [`create_sample_route_with_hash`] for callers that don't
+/// need the `route_config_hash`.
 pub fn create_sample_route(
     svm: &mut LiteSVM,
     payer: &Keypair,
@@ -1420,17 +1448,7 @@ pub fn create_sample_route(
     mint: Pubkey,
     salt: [u8; 32],
 ) -> Pubkey {
-    let params = sample_create_route_params(mint, salt);
-    let hash = route_config_hash_for(&owner.pubkey(), &params);
-    let (route_pda, _) = derive_route_pda(&owner.pubkey(), &hash, &params.salt);
-    let ix = create_route_ix(
-        &payer.pubkey(),
-        &owner.pubkey(),
-        params,
-        &[ADAPTER_PROGRAM_ID],
-    );
-    send_ix(svm, ix, payer, &[owner]).expect("create_route should succeed");
-    route_pda
+    create_sample_route_with_hash(svm, payer, owner, mint, salt).0
 }
 
 /// Deploy a second loader-owned-executable program (reusing the adapter binary)
@@ -1594,4 +1612,104 @@ pub fn fetch_verified_fill(svm: &LiteSVM, pda: &Pubkey) -> sra_across_adapter::s
     let acct = svm.get_account(pda).expect("verified_fill account exists");
     sra_across_adapter::state::VerifiedFill::try_deserialize(&mut acct.data.as_slice())
         .expect("valid VerifiedFill")
+}
+
+// --- Destination fill finalization (finalize_fill) ---
+
+/// Build a `finalize_fill` instruction. All vault/authority accounts are derived
+/// from the route + mint exactly as the on-chain constraints require.
+pub fn finalize_fill_ix(
+    payer: &Pubkey,
+    route: &Pubkey,
+    route_config_hash: [u8; 32],
+    verified_fill: &Pubkey,
+    fill_id: [u8; 32],
+    mint: &Pubkey,
+) -> Instruction {
+    let (execution_authority, _) = derive_execution_authority_pda(route);
+    let route_vault = derive_ata(route, mint);
+    let execution_vault = derive_ata(&execution_authority, mint);
+    let (fill_receipt, _) = derive_fill_receipt_pda(route, &fill_id);
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::FinalizeFill {
+            payer: *payer,
+            route: *route,
+            verified_fill: *verified_fill,
+            fill_receipt,
+            expected_mint: *mint,
+            route_vault,
+            execution_authority,
+            execution_vault,
+            token_program: TOKEN_PROGRAM_ID,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::FinalizeFill {
+            fill_id,
+            route_config_hash,
+        }
+        .data(),
+    }
+}
+
+pub fn fetch_fill_receipt(svm: &LiteSVM, pda: &Pubkey) -> FillReceipt {
+    let acct = svm.get_account(pda).expect("fill_receipt account exists");
+    FillReceipt::try_deserialize(&mut acct.data.as_slice()).expect("valid FillReceipt")
+}
+
+/// A valid `VerifiedFillData` bound to the given route/mint/fill, with
+/// `amount == expected_amount` (Across exact fill) and `source_chain_id` matching
+/// the sample route. Mutate fields to build forgery cases.
+pub fn sample_verified_fill_data(
+    route: Pubkey,
+    mint: Pubkey,
+    fill_id: [u8; 32],
+    amount: u64,
+) -> sra_common::types::VerifiedFillData {
+    sra_common::types::VerifiedFillData {
+        adapter: ADAPTER_PROGRAM_ID,
+        route,
+        fill_id,
+        mint,
+        amount,
+        expected_amount: amount,
+        source_chain_id: 42_161,
+        created_at: 0,
+        bump: 0,
+    }
+}
+
+/// Serialize a `VerifiedFillData` exactly as the adapter writes it on-chain:
+/// 8-byte discriminator + Borsh body.
+pub fn verified_fill_account_bytes(vf: &sra_common::types::VerifiedFillData) -> Vec<u8> {
+    let mut data = sra_common::types::VERIFIED_FILL_DISCRIMINATOR.to_vec();
+    vf.serialize(&mut data).unwrap();
+    data
+}
+
+/// Plant a `verified_fill`-shaped account at the verified-fill PDA for `fill_id`,
+/// owned by `owner`, holding `data`. The handler reads `verified_fill` as a raw
+/// `UncheckedAccount` (no seed/owner constraint), so the address is cosmetic —
+/// `fill_id` picks a stable, realistic one. Used to inject forged/edge evidence
+/// the genuine `verify_across_fill` flow can never produce.
+pub fn fabricate_verified_fill(
+    svm: &mut LiteSVM,
+    fill_id: [u8; 32],
+    owner: Pubkey,
+    data: Vec<u8>,
+) -> Pubkey {
+    let (pda, _) = derive_verified_fill_pda(&fill_id);
+    svm.set_account(
+        pda,
+        solana_sdk::account::Account {
+            lamports: svm.minimum_balance_for_rent_exemption(data.len().max(1)),
+            data,
+            owner,
+            executable: false,
+            rent_epoch: 0,
+        },
+    )
+    .unwrap();
+    pda
 }

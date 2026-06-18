@@ -321,6 +321,317 @@
       ]
     },
     {
+      "name": "finalize_fill",
+      "discriminator": [
+        166,
+        128,
+        11,
+        28,
+        138,
+        115,
+        194,
+        22
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Permissionless caller (relayer / cranker). Pays the receipt rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "route"
+        },
+        {
+          "name": "verified_fill",
+          "docs": [
+            "checked against `route.allowed_adapters` and the layout is validated by",
+            "`VerifiedFillData::deserialize_from_account` in the body (discriminator +",
+            "exact-length), so no Anchor type/owner check applies here."
+          ]
+        },
+        {
+          "name": "fill_receipt",
+          "docs": [
+            "The replay marker. `init` (never `init_if_needed`) — a second",
+            "finalization of the same fill collides on this PDA and aborts."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  105,
+                  108,
+                  108,
+                  95,
+                  114,
+                  101,
+                  99,
+                  101,
+                  105,
+                  112,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "route"
+              },
+              {
+                "kind": "arg",
+                "path": "fill_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "expected_mint",
+          "docs": [
+            "Bound to the route's committed mint; decimals are read live for",
+            "`transfer_checked` (never snapshotted)."
+          ]
+        },
+        {
+          "name": "route_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "route"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "expected_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "execution_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  101,
+                  99,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "route"
+              }
+            ]
+          }
+        },
+        {
+          "name": "execution_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "execution_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "expected_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "fill_id",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "route_config_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "initialize_address_book_root",
       "discriminator": [
         165,
@@ -1838,6 +2149,19 @@
       ]
     },
     {
+      "name": "FillReceipt",
+      "discriminator": [
+        8,
+        10,
+        169,
+        84,
+        163,
+        19,
+        167,
+        139
+      ]
+    },
+    {
       "name": "MintNonce",
       "discriminator": [
         207,
@@ -1993,6 +2317,19 @@
         221,
         233,
         244
+      ]
+    },
+    {
+      "name": "FillFinalized",
+      "discriminator": [
+        16,
+        182,
+        117,
+        230,
+        203,
+        44,
+        123,
+        165
       ]
     },
     {
@@ -2538,6 +2875,30 @@
       }
     },
     {
+      "name": "ExecutionStatus",
+      "docs": [
+        "Execution status state machine for fill lifecycle.",
+        "Borsh-serialized as a single u8 discriminant (no variant data). Size = 1 byte."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Finalized"
+          },
+          {
+            "name": "ActionsSucceeded"
+          },
+          {
+            "name": "ActionsFailed"
+          },
+          {
+            "name": "Recovered"
+          }
+        ]
+      }
+    },
+    {
       "name": "FeeConfig",
       "docs": [
         "Global fee state: admin + the single fee recipient."
@@ -2602,6 +2963,108 @@
           {
             "name": "new_fee_recipient",
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FillFinalized",
+      "docs": [
+        "Emitted by `finalize_fill` once the verified amount is staged in the",
+        "execution vault and the replay-marker receipt is written. Carries the",
+        "post-write fill lifecycle state for indexers. There are no fees on the",
+        "destination (collected on the source), so none appear here."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "route",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Amount moved route_vault -> execution_vault (the full verified amount)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "expected_amount",
+            "docs": [
+              "Source-committed minimum the fill had to satisfy."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "execution_status",
+            "type": {
+              "defined": {
+                "name": "ExecutionStatus"
+              }
+            }
+          },
+          {
+            "name": "finalized_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FillReceipt",
+      "docs": [
+        "Replay protection + execution lifecycle.",
+        "PDA seeds: [\"fill_receipt\", route, fill_id]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "route",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "expected_amount",
+            "type": "u64"
+          },
+          {
+            "name": "execution_status",
+            "type": {
+              "defined": {
+                "name": "ExecutionStatus"
+              }
+            }
+          },
+          {
+            "name": "finalized_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }
