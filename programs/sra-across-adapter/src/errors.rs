@@ -19,4 +19,19 @@ pub enum AcrossAdapterError {
 
     #[msg("Across fill status account has an invalid layout")]
     InvalidFillStatus,
+
+    #[msg("Across fill is not in the completed state")]
+    FillNotCompleted,
+
+    #[msg("Relay data does not re-derive the provided relay hash")]
+    RelayHashMismatch,
+
+    #[msg("Fill recipient does not match the route")]
+    RecipientMismatch,
+
+    #[msg("Fill output token does not match the route mint")]
+    OutputTokenMismatch,
+
+    #[msg("Fill origin chain does not match the route source chain")]
+    OriginChainMismatch,
 }

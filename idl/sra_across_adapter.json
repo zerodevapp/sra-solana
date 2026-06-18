@@ -648,6 +648,156 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "verify_across_fill",
+      "discriminator": [
+        226,
+        221,
+        247,
+        19,
+        217,
+        161,
+        113,
+        204
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "fill_status",
+          "docs": [
+            "SpokePool. Pinned by seeds + owner; read as raw bytes (never CPI'd), so",
+            "its layout is validated by `deserialize_fill_status` in the handler body."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  105,
+                  108,
+                  108,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "relay_hash"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "across_program"
+            }
+          }
+        },
+        {
+          "name": "route",
+          "docs": [
+            "The committed destination route the fill is being verified against. An",
+            "`Account` here requires it to be a genuine handler-owned route."
+          ]
+        },
+        {
+          "name": "verified_fill",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  101,
+                  114,
+                  105,
+                  102,
+                  105,
+                  101,
+                  100,
+                  95,
+                  102,
+                  105,
+                  108,
+                  108
+                ]
+              },
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  137,
+                  11,
+                  104,
+                  120,
+                  192,
+                  23,
+                  58,
+                  87,
+                  29,
+                  232,
+                  248,
+                  68,
+                  231,
+                  184,
+                  151,
+                  233,
+                  204,
+                  44,
+                  215,
+                  124,
+                  157,
+                  106,
+                  40,
+                  178,
+                  139,
+                  252,
+                  119,
+                  136,
+                  56,
+                  241,
+                  240
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "relay_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "across_program",
+          "address": "DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "relay_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "relay_data",
+          "type": {
+            "defined": {
+              "name": "RelayData"
+            }
+          }
+        }
+      ]
     }
   ],
   "accounts": [
@@ -665,6 +815,19 @@
       ]
     },
     {
+      "name": "SolanaSraRoute",
+      "discriminator": [
+        134,
+        92,
+        176,
+        20,
+        31,
+        152,
+        16,
+        120
+      ]
+    },
+    {
       "name": "SraConfig",
       "discriminator": [
         218,
@@ -675,6 +838,19 @@
         101,
         23,
         222
+      ]
+    },
+    {
+      "name": "VerifiedFill",
+      "discriminator": [
+        2,
+        228,
+        67,
+        96,
+        254,
+        74,
+        106,
+        58
       ]
     }
   ],
@@ -690,6 +866,19 @@
         143,
         61,
         23
+      ]
+    },
+    {
+      "name": "AcrossFillVerified",
+      "discriminator": [
+        178,
+        229,
+        164,
+        196,
+        147,
+        52,
+        17,
+        19
       ]
     },
     {
@@ -736,6 +925,31 @@
       "code": 6005,
       "name": "InvalidFillStatus",
       "msg": "Across fill status account has an invalid layout"
+    },
+    {
+      "code": 6006,
+      "name": "FillNotCompleted",
+      "msg": "Across fill is not in the completed state"
+    },
+    {
+      "code": 6007,
+      "name": "RelayHashMismatch",
+      "msg": "Relay data does not re-derive the provided relay hash"
+    },
+    {
+      "code": 6008,
+      "name": "RecipientMismatch",
+      "msg": "Fill recipient does not match the route"
+    },
+    {
+      "code": 6009,
+      "name": "OutputTokenMismatch",
+      "msg": "Fill output token does not match the route mint"
+    },
+    {
+      "code": 6010,
+      "name": "OriginChainMismatch",
+      "msg": "Fill origin chain does not match the route source chain"
     }
   ],
   "types": [
@@ -900,6 +1114,47 @@
       }
     },
     {
+      "name": "AcrossFillVerified",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "verified_fill",
+            "type": "pubkey"
+          },
+          {
+            "name": "route",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "expected_amount",
+            "type": "u64"
+          },
+          {
+            "name": "source_chain_id",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "CustodyRecovered",
       "type": {
         "kind": "struct",
@@ -945,6 +1200,143 @@
       }
     },
     {
+      "name": "RelayData",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "depositor",
+            "type": "pubkey"
+          },
+          {
+            "name": "recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "exclusive_relayer",
+            "type": "pubkey"
+          },
+          {
+            "name": "input_token",
+            "type": "pubkey"
+          },
+          {
+            "name": "output_token",
+            "type": "pubkey"
+          },
+          {
+            "name": "input_amount",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "output_amount",
+            "type": "u64"
+          },
+          {
+            "name": "origin_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "deposit_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "fill_deadline",
+            "type": "u32"
+          },
+          {
+            "name": "exclusivity_deadline",
+            "type": "u32"
+          },
+          {
+            "name": "message",
+            "type": "bytes"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SolanaSraRoute",
+      "docs": [
+        "Deterministic destination address for EVM->Solana fills.",
+        "PDA seeds: [\"sra_route\", owner, config_hash, salt]",
+        "config_hash = keccak256(borsh(owner, source_chain_id, expected_mint, app_id, action_config))"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "source_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "expected_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "app_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "action_config_hash",
+            "docs": [
+              "keccak256(borsh(action_config)). The action list is also folded into the",
+              "route's config_hash, but stored only as this digest; callers re-supply the",
+              "list as ix data and verify it against this hash, keeping the account small."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "salt",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "allowed_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "SraConfig",
       "docs": [
         "One source-side SRA per `(owner, final_handler, handler_data_hash, salt)`.",
@@ -979,6 +1371,69 @@
                 32
               ]
             }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VerifiedFill",
+      "docs": [
+        "Adapter-owned verification artifact. Created by this adapter once it has",
+        "confirmed an Across fill, then read by the handler across the program boundary",
+        "to authorize `finalize_fill`. A vault-balance increase alone cannot prove a",
+        "legitimate bridge fill — this account is the trust boundary that does.",
+        "",
+        "The post-discriminator field layout is a cross-program ABI contract with",
+        "`sra_common::types::VerifiedFillData`. The handler reads this account as raw bytes",
+        "(it must accept fills from multiple adapter programs, each with its own",
+        "program id, so it cannot import this type) and deserializes via that plain",
+        "struct, requiring an exact layout match. Any field reorder, addition, or",
+        "removal here is a breaking change and MUST be mirrored there — the round-trip",
+        "and discriminator tests below fail loudly if the two drift."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "adapter",
+            "type": "pubkey"
+          },
+          {
+            "name": "route",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "expected_amount",
+            "type": "u64"
+          },
+          {
+            "name": "source_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
           },
           {
             "name": "bump",
