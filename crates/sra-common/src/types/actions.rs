@@ -74,10 +74,8 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
                     *recipient != Pubkey::default(),
                     SraError::InvalidActionConfig
                 );
-                // 4 * u16::MAX can't overflow u32, but stay checked on principle.
-                spl_transfer_bps = spl_transfer_bps
-                    .checked_add(*amount_bps as u32)
-                    .ok_or(SraError::ArithmeticOverflow)?;
+                // u32 sum of ≤ MAX_ACTION_IDXS u16 values cannot overflow.
+                spl_transfer_bps += *amount_bps as u32;
             }
             SolanaAction::VerifiedCpi {
                 program_id,
