@@ -1433,7 +1433,7 @@ pub fn create_sample_route(
 }
 
 /// Deploy a second loader-owned-executable program (reusing the adapter binary)
-/// at a fresh id — a *distinct* valid adapter for `manage_route` add tests.
+/// at a fresh id — a *distinct* valid adapter for `manage_route` set/replace tests.
 pub fn deploy_extra_adapter(svm: &mut LiteSVM) -> Pubkey {
     let id = Pubkey::new_unique();
     let so = fs::read(adapter_program_so_path()).expect("adapter .so readable");
@@ -1442,21 +1442,21 @@ pub fn deploy_extra_adapter(svm: &mut LiteSVM) -> Pubkey {
     id
 }
 
-/// Build a `manage_route` instruction. Adapter program accounts for `add_adapters`
-/// ride in `remaining_accounts`, one per entry in the same order, so the program
-/// can loader-owned-executable-check each.
+/// Build a `manage_route` instruction. When `params.adapters` is `Some`, its
+/// program accounts ride in `remaining_accounts`, one per entry in the same
+/// order, so the program can loader-owned-executable-check each.
 pub fn manage_route_ix(
     owner: &Pubkey,
     route: &Pubkey,
     params: ManageRouteParams,
-    add_adapter_accounts: &[Pubkey],
+    adapter_accounts: &[Pubkey],
 ) -> Instruction {
     let mut accounts = sra_handler::accounts::ManageRoute {
         owner: *owner,
         route: *route,
     }
     .to_account_metas(None);
-    for adapter in add_adapter_accounts {
+    for adapter in adapter_accounts {
         accounts.push(AccountMeta::new_readonly(*adapter, false));
     }
     Instruction {

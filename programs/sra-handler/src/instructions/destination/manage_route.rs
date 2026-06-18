@@ -17,26 +17,19 @@ pub struct ManageRoute<'info> {
 }
 
 pub(crate) fn handler(ctx: Context<ManageRoute>, params: ManageRouteParams) -> Result<()> {
-    validate_adapter_accounts(&params.add_adapters, ctx.remaining_accounts)?;
-
     let route = &mut ctx.accounts.route;
 
     if let Some(paused) = params.pause {
         route.paused = paused;
     }
 
-    route
-        .allowed_adapters
-        .retain(|adapter| !params.remove_adapters.contains(adapter));
-    route
-        .allowed_adapters
-        .extend_from_slice(&params.add_adapters);
-
-    require_distinct_adapters(&route.allowed_adapters)?;
-    require!(
-        route.allowed_adapters.len() <= MAX_ADAPTERS,
-        SraError::TooManyAdapters
-    );
+    // Whole-list replace (EVM _installAdapters): validate the new set, then swap.
+    if let Some(adapters) = params.adapters {
+        require!(adapters.len() <= MAX_ADAPTERS, SraError::TooManyAdapters);
+        require_distinct_adapters(&adapters)?;
+        validate_adapter_accounts(&adapters, ctx.remaining_accounts)?;
+        route.allowed_adapters = adapters;
+    }
 
     emit!(RouteManaged {
         route: route.key(),

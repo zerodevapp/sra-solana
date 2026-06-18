@@ -23,7 +23,7 @@ pub(crate) fn validate_adapter_program(adapter_program: &AccountInfo) -> Result<
     Ok(())
 }
 
-/// Each added adapter must be a loader-owned-executable program, passed in
+/// Each adapter in the set must be a loader-owned-executable program, passed in
 /// `remaining_accounts` one-per-entry in order — else a mistyped pubkey could
 /// become a trusted fill attester.
 pub(crate) fn validate_adapter_accounts(

@@ -51,13 +51,15 @@ pub struct CreateRouteParams {
 }
 
 /// Inputs to `manage_route` — the route's only mutable policy (identity fields
-/// are immutable, baked into `route_config_hash`).
+/// are immutable, baked into `route_config_hash`). Each field is independently
+/// optional: `None` leaves that policy unchanged.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct ManageRouteParams {
     /// `Some(true)` pauses, `Some(false)` unpauses, `None` leaves it unchanged.
     pub pause: Option<bool>,
-    pub add_adapters: Vec<Pubkey>,
-    pub remove_adapters: Vec<Pubkey>,
+    /// `Some` replaces the whole adapter allowlist (EVM `_installAdapters`
+    /// parity); `Some(vec![])` clears it; `None` leaves it unchanged.
+    pub adapters: Option<Vec<Pubkey>>,
 }
 
 /// Execution status state machine for fill lifecycle.
