@@ -1,20 +1,15 @@
 //! Destination fill finalization.
 //!
-//! Consumes the adapter-written `VerifiedFill` evidence, moves the verified
-//! amount from the route vault into the execution vault, and writes the
-//! `FillReceipt` replay marker. This is the Solana analog of the EVM
-//! `_triggerTargetAction`: it forwards the **full** verified amount with no
-//! deduction (fees were already collected on the source deposit), and records
-//! the fill so it can never be finalized twice.
+//! Consumes the adapter-written `VerifiedFill`, moves the full verified amount
+//! from the route vault into the execution vault, and writes the `FillReceipt`
+//! replay marker. No fee is deducted — fees are collected on the source deposit.
 //!
-//! The action-running half of the EVM `_triggerTargetAction` is a separate
-//! instruction on Solana — finalization always leaves the receipt in the
-//! `Finalized` state (funds staged in the execution vault, no actions
-//! attempted yet).
+//! Running the route's actions is a separate instruction, so finalization
+//! always leaves the receipt `Finalized` (funds staged, no actions attempted).
 //!
-//! Every routing/amount-bearing value comes only from the relay-hash-bound
-//! `VerifiedFill`; the caller-supplied `fill_id` exists solely to seed the
-//! receipt PDA and is cross-checked against the evidence.
+//! Every routing/amount value comes only from the relay-hash-bound
+//! `VerifiedFill`; `fill_id` only seeds the receipt PDA and is cross-checked
+//! against the evidence.
 
 use anchor_lang::prelude::*;
 use anchor_spl::token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked};
@@ -90,7 +85,7 @@ pub(crate) fn handler(
     require!(!ctx.accounts.route.paused, SraError::RoutePaused);
 
     // 2. The evidence must be written by a currently-allowlisted adapter program
-    //    — the Solana analog of EVM `allowedAdapters[account][msg.sender]`.
+    //    (its program-owner ∈ the route allowlist).
     let verified_fill_owner = *ctx.accounts.verified_fill.owner;
     require!(
         ctx.accounts
@@ -127,20 +122,17 @@ pub(crate) fn handler(
         SraError::FillAmountTooLow
     );
 
-    // 9. The route vault must hold at least the verified amount. Unlike EVM
-    //    (which caps to the actual balance for fee-on-transfer bridged tokens),
-    //    Across SVM fills deliver an exact `output_amount`, so anything short is
-    //    an anomaly: reject and leave the funds recoverable rather than silently
-    //    forwarding a partial amount.
+    // 9. The route vault must hold at least the verified amount. Across fills
+    //    deliver an exact amount, so a short vault is an anomaly: reject and
+    //    leave the funds recoverable rather than forward a partial amount.
     require!(
         ctx.accounts.route_vault.amount >= verified.amount,
         SraError::InsufficientVaultBalance
     );
 
-    // 10. Move the FULL verified amount route_vault -> execution_vault. No fee
-    //     is deducted — this mirrors `SRAHandler._triggerTargetAction`, which
-    //     forwards the full amount ("fees already deducted on source"). The
-    //     route PDA owns the route vault and signs the transfer.
+    // 10. Move the full verified amount route_vault -> execution_vault with no
+    //     fee deducted (fees were collected on the source). The route PDA owns
+    //     the route vault and signs the transfer.
     let owner_bytes = ctx.accounts.route.owner.to_bytes();
     let salt = ctx.accounts.route.salt;
     let bump_arr = [ctx.accounts.route.bump];
