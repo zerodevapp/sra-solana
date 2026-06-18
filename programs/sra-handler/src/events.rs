@@ -91,6 +91,15 @@ pub struct RouteCreated {
     pub paused: bool,
 }
 
+/// Emitted by `manage_route` with the post-write adapter list and paused flag.
+#[event]
+pub struct RouteManaged {
+    pub route: Pubkey,
+    pub owner: Pubkey,
+    pub allowed_adapters: Vec<Pubkey>,
+    pub paused: bool,
+}
+
 /// Emitted by `validate_and_prepare` after funds reach adapter custody. Carries
 /// the routing inputs needed to build the target-specific bridge message.
 #[event]
