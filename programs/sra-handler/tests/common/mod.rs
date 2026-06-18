@@ -1505,14 +1505,18 @@ pub fn derive_fill_receipt_pda(route: &Pubkey, fill_id: &[u8; 32]) -> (Pubkey, u
     Pubkey::find_program_address(&[SEED_FILL_RECEIPT, route.as_ref(), fill_id], &PROGRAM_ID)
 }
 
-/// Plant a finalized `FillReceipt` directly (via `set_account`) so tests can
-/// assert other instructions never touch it. Used until `finalize_fill` exists
-/// to mint one for real — mirrors `seed_mint_nonce_account`.
-pub fn seed_fill_receipt_account(
+/// Plant a `FillReceipt` directly (via `set_account`) in the given lifecycle
+/// state, byte-identical to one `finalize_fill` writes (same discriminator,
+/// Borsh body, and PDA bump). Lets recovery/retry tests reach the
+/// `{ActionsFailed, ActionsSucceeded, Recovered}` states that have no producing
+/// instruction yet, and assert other instructions never touch a planted
+/// receipt — mirrors `seed_mint_nonce_account`.
+pub fn seed_fill_receipt_with_status(
     svm: &mut LiteSVM,
     route: &Pubkey,
     fill_id: [u8; 32],
     amount: u64,
+    execution_status: ExecutionStatus,
 ) -> Pubkey {
     let (pda, bump) = derive_fill_receipt_pda(route, &fill_id);
     let receipt = FillReceipt {
@@ -1520,7 +1524,7 @@ pub fn seed_fill_receipt_account(
         fill_id,
         amount,
         expected_amount: amount,
-        execution_status: ExecutionStatus::Finalized,
+        execution_status,
         finalized_at: 0,
         bump,
     };
@@ -1656,6 +1660,36 @@ pub fn finalize_fill_ix(
 pub fn fetch_fill_receipt(svm: &LiteSVM, pda: &Pubkey) -> FillReceipt {
     let acct = svm.get_account(pda).expect("fill_receipt account exists");
     FillReceipt::try_deserialize(&mut acct.data.as_slice()).expect("valid FillReceipt")
+}
+
+/// Build a `recover_funds` instruction. `owner_token_account` is passed
+/// explicitly (not derived) so non-canonical-payout tests can supply a
+/// non-ATA target; happy paths pass the owner's canonical ATA.
+pub fn recover_funds_ix(
+    owner: &Pubkey,
+    route: &Pubkey,
+    fill_id: &[u8; 32],
+    mint: &Pubkey,
+    owner_token_account: &Pubkey,
+) -> Instruction {
+    let (execution_authority, _) = derive_execution_authority_pda(route);
+    let execution_vault = derive_ata(&execution_authority, mint);
+    let (fill_receipt, _) = derive_fill_receipt_pda(route, fill_id);
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::RecoverFunds {
+            owner: *owner,
+            route: *route,
+            fill_receipt,
+            expected_mint: *mint,
+            execution_authority,
+            execution_vault,
+            owner_token_account: *owner_token_account,
+            token_program: TOKEN_PROGRAM_ID,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::RecoverFunds {}.data(),
+    }
 }
 
 /// A valid `VerifiedFillData` bound to the given route/mint/fill, with

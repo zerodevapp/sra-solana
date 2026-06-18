@@ -22,6 +22,7 @@ describe("sra-handler", () => {
       "initializeFeeConfig",
       "initializeSra",
       "manageRoute",
+      "recoverFunds",
       "removeAssetFeeTier",
       "removeProtocolFee",
       "setAddressBookEntry",

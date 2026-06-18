@@ -134,4 +134,8 @@ pub enum SraError {
     // -- Destination: fill finalization (appended to keep prior codes stable) --
     #[msg("Route is paused")]
     RoutePaused,
+
+    // -- Destination: fund recovery (appended to keep prior codes stable) --
+    #[msg("No funds available to recover")]
+    NothingToRecover,
 }
