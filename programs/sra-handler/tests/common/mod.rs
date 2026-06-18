@@ -1412,7 +1412,35 @@ pub fn sample_create_route_params(expected_mint: Pubkey, salt: [u8; 32]) -> Crea
     }
 }
 
+/// Create the sample route (one allowed adapter, not paused) and return its PDA
+/// plus its `route_config_hash` — the canonical route creator. The hash is the
+/// signer seed the route needs to authorize vault transfers (e.g. finalize_fill)
+/// and can only be captured at creation time, since the sample params carry a
+/// freshly-generated recipient that the route can't recompute later.
+pub fn create_sample_route_with_hash(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    owner: &Keypair,
+    mint: Pubkey,
+    salt: [u8; 32],
+) -> (Pubkey, [u8; 32]) {
+    let params = sample_create_route_params(mint, salt);
+    let hash = route_config_hash_for(&owner.pubkey(), &params);
+    let (route_pda, _) = derive_route_pda(&owner.pubkey(), &hash, &params.salt);
+    let ix = create_route_ix_with_hash(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        hash,
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    send_ix(svm, ix, payer, &[owner]).expect("create_route should succeed");
+    (route_pda, hash)
+}
+
 /// Create the sample route (one allowed adapter, not paused) and return its PDA.
+/// Thin wrapper over [`create_sample_route_with_hash`] for callers that don't
+/// need the `route_config_hash`.
 pub fn create_sample_route(
     svm: &mut LiteSVM,
     payer: &Keypair,
@@ -1420,17 +1448,7 @@ pub fn create_sample_route(
     mint: Pubkey,
     salt: [u8; 32],
 ) -> Pubkey {
-    let params = sample_create_route_params(mint, salt);
-    let hash = route_config_hash_for(&owner.pubkey(), &params);
-    let (route_pda, _) = derive_route_pda(&owner.pubkey(), &hash, &params.salt);
-    let ix = create_route_ix(
-        &payer.pubkey(),
-        &owner.pubkey(),
-        params,
-        &[ADAPTER_PROGRAM_ID],
-    );
-    send_ix(svm, ix, payer, &[owner]).expect("create_route should succeed");
-    route_pda
+    create_sample_route_with_hash(svm, payer, owner, mint, salt).0
 }
 
 /// Deploy a second loader-owned-executable program (reusing the adapter binary)
@@ -1597,31 +1615,6 @@ pub fn fetch_verified_fill(svm: &LiteSVM, pda: &Pubkey) -> sra_across_adapter::s
 }
 
 // --- Destination fill finalization (finalize_fill) ---
-
-/// Create the sample route and return both its PDA and the `route_config_hash`.
-/// `finalize_fill` needs the hash to re-derive the route's signer seeds, but the
-/// sample params carry a freshly-generated recipient, so the hash can only be
-/// captured at creation time — `create_sample_route` discards it.
-pub fn create_sample_route_with_hash(
-    svm: &mut LiteSVM,
-    payer: &Keypair,
-    owner: &Keypair,
-    mint: Pubkey,
-    salt: [u8; 32],
-) -> (Pubkey, [u8; 32]) {
-    let params = sample_create_route_params(mint, salt);
-    let hash = route_config_hash_for(&owner.pubkey(), &params);
-    let (route_pda, _) = derive_route_pda(&owner.pubkey(), &hash, &params.salt);
-    let ix = create_route_ix_with_hash(
-        &payer.pubkey(),
-        &owner.pubkey(),
-        hash,
-        params,
-        &[ADAPTER_PROGRAM_ID],
-    );
-    send_ix(svm, ix, payer, &[owner]).expect("create_route should succeed");
-    (route_pda, hash)
-}
 
 /// Build a `finalize_fill` instruction. All vault/authority accounts are derived
 /// from the route + mint exactly as the on-chain constraints require.
