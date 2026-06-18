@@ -27,6 +27,8 @@ This is a fund-custody cross-chain bridge: two Anchor (Solana/Rust) programs —
 - `idl/` and `idls/` are generated/vendored — don't nitpick their formatting.
 
 ## Security — Solana/Anchor program safety (highest priority)
+Assume the attacker controls every account passed in, every instruction
+argument, transaction ordering, and the CPI call graph.
 - Missing owner/signer checks: an account trusted without verifying its owning
   program (`Account<'info,T>` or explicit `.owner`), or an authority used
   without `Signer<'info>`/`is_signer`.
@@ -37,6 +39,12 @@ This is a fund-custody cross-chain bridge: two Anchor (Solana/Rust) programs —
   and equality-checked per fill; a relayer must never redirect input or output.
 - Missing payer/authority binding: a guard that matches an account by address
   or amount but ignores *who* funded/authorized it (any actor could satisfy it).
+- Duplicate mutable accounts: the same account passed into two mutable slots, so
+  one write silently overwrites the other or a "transfer" becomes a self-transfer.
+  Mutable accounts that must differ have to be checked for inequality.
+- Data matching: a stored field (owner/authority/mint/route) must be checked
+  against the account actually passed or signing (e.g. `has_one`) — type/owner
+  checks alone don't prove the right *instance* was supplied.
 - Arbitrary CPI: `invoke`/`invoke_signed` into a program id that isn't pinned
   (exact pubkey + loader-owned-executable). For PDA-signed CPIs, the input must
   be bounded (move only the committed fraction into a scratch account; never
@@ -51,6 +59,8 @@ This is a fund-custody cross-chain bridge: two Anchor (Solana/Rust) programs —
 - `remaining_accounts` bypass Anchor validation and must be validated manually
   (pubkey, order, writability, owner). Cross-instruction attestation must pin
   program id + account slots + hash the exact instruction data.
+- Sysvars (clock / rent / instructions): read via checked accessors or a pinned
+  canonical address — never a caller-passed account trusted by its layout alone.
 - Token-2022: use the post-fee received balance (amount received != amount
   sent), pass through transfer-hook extra accounts and budget CU, and never
   silently custody permanent-delegate / pausable / default-frozen mints (require
