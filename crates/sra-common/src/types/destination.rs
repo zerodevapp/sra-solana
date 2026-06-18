@@ -26,7 +26,7 @@ pub enum SolanaAction {
         /// Basis points of the vault moved into the scratch source — the input bound.
         input_bps: u16,
         account_template: AccountTemplate,
-        /// Fungible receipt the engine balance-diffs (swap out, kToken, LST, …).
+        /// Fungible receipt the engine balance-diffs (swap output, vault share, LST, …).
         output_mint: Pubkey,
         min_out: MinOut,
         /// Opt-in for Token-2022 permissioned (perm-delegate / frozen) output mints.

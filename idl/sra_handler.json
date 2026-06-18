@@ -2980,7 +2980,7 @@
               {
                 "name": "output_mint",
                 "docs": [
-                  "Fungible receipt the engine balance-diffs (swap out, kToken, LST, …)."
+                  "Fungible receipt the engine balance-diffs (swap output, vault share, LST, …)."
                 ],
                 "type": "pubkey"
               },
