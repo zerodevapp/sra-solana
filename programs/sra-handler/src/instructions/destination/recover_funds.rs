@@ -48,7 +48,8 @@ pub struct RecoverFunds<'info> {
 }
 
 pub(crate) fn handler(ctx: Context<RecoverFunds>) -> Result<()> {
-    // Only Finalized/ActionsFailed recover; ActionsSucceeded/Recovered are terminal.
+    // Recoverable from Finalized (actions not yet run, or a run aborted before
+    // marking failure — e.g. CU exhaustion) or ActionsFailed; the rest are terminal.
     require!(
         matches!(
             ctx.accounts.fill_receipt.execution_status,
