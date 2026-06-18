@@ -79,10 +79,12 @@ argument, transaction ordering, and the CPI call graph.
   Security guards must fail closed.
 
 ## Correctness vs the counterpart
-- This program mirrors a contract on the other chain. Flag logic that diverges
-  from parity (fee/slippage formulas, resolution order, replay-key construction,
-  message encoding) unless the divergence is explained in the diff. If you can't
-  tell whether it matches, flag it as unverified and ask.
+- This program mirrors the EVM contracts in the companion `zerodevapp/sra-stx`
+  repo (the parity source of truth — `BaseHandler.sol` / `SRAHandler.sol`).
+- Flag logic that diverges from parity (fee/slippage formulas, resolution order,
+  replay-key construction, message encoding) unless the divergence is explained
+  in the diff. If you can't confirm parity from this PR alone, flag it as
+  unverified, name the counterpart file to check, and ask.
 
 ## Atomicity & state
 - Flag partial state mutation on an error/early-return path (e.g. a vector or
