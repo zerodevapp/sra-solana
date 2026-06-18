@@ -13,4 +13,10 @@ pub enum AcrossAdapterError {
 
     #[msg("No tokens in adapter custody to recover")]
     NothingToRecover,
+
+    #[msg("Failed to serialize relay data for the relay hash")]
+    RelayHashSerializationFailed,
+
+    #[msg("Across fill status account has an invalid layout")]
+    InvalidFillStatus,
 }
