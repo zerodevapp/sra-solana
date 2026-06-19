@@ -69,7 +69,9 @@ pub(crate) fn handler<'info>(
 
     let expected_mint = ctx.accounts.route.expected_mint;
     let token_program = ctx.accounts.token_program.key();
-    // Snapshot once: each amount_bps is a fraction of this, so a 100% set drains exactly.
+    // Snapshot once (not a shrinking live balance): each amount_bps is a fraction
+    // of this, so a 100%-summing set moves ~the whole vault — integer-floor
+    // rounding can leave a few base units of dust, which stay staged.
     let vault_snapshot = ctx.accounts.execution_vault.amount;
     // A frozen source vault would abort every transfer — fail soft, not hard-abort.
     let source_frozen = ctx.accounts.execution_vault.state == AccountState::Frozen;
@@ -181,15 +183,18 @@ fn recipient_can_receive(
     }
 }
 
-/// Amount to move for a `SplTransfer`: `amount_bps` of a fixed vault snapshot.
+/// Amount to move for a `SplTransfer`: floor(`amount_bps` * vault snapshot /
+/// `BPS_DENOMINATOR`).
 ///
 /// The caller snapshots the execution-vault balance once at the start of the run
-/// and computes every action's amount off that same snapshot, so a set of
-/// transfers whose `amount_bps` sum to `BPS_DENOMINATOR` drains the snapshot
-/// exactly. `amount_bps <= BPS_DENOMINATOR` is guaranteed upstream
-/// (`validate_action_config` at `create_route`, re-bound here by the
-/// `action_config_hash` check), so the product is `<= vault_snapshot` and the
-/// `u64` cast is lossless.
+/// and computes every action's amount off that same snapshot. Because the
+/// division floors, a set whose `amount_bps` sum to `BPS_DENOMINATOR` transfers
+/// at most the snapshot and can leave a few base units of dust (one short of the
+/// divisor per action; e.g. snapshot 1 with a 60/40 split yields 0 + 0) — the
+/// remainder stays staged in the vault and is recoverable, never over-spent.
+/// `amount_bps <= BPS_DENOMINATOR` is guaranteed upstream (`validate_action_config`
+/// at `create_route`, re-bound here by the `action_config_hash` check), so the
+/// product is `<= vault_snapshot` and the `u64` cast is lossless.
 fn vault_amount_for_bps(vault_snapshot: u64, amount_bps: u16) -> u64 {
     ((vault_snapshot as u128 * amount_bps as u128) / BPS_DENOMINATOR as u128) as u64
 }
@@ -277,17 +282,20 @@ mod tests {
     }
 
     #[test]
-    fn vault_amount_for_bps_split_sums_to_snapshot() {
-        // The two-pass engine computes every amount off the SAME start-of-run
-        // snapshot, so a 60/40 split drains the vault exactly (no shrinkage).
+    fn vault_amount_for_bps_split_floors_leaving_dust() {
+        // Every amount is computed off the SAME start-of-run snapshot (no
+        // shrinkage), but the floor means a 60/40 split of an indivisible
+        // balance moves at most the snapshot and leaves dust behind.
         let snapshot = 1_000_001u64;
         let a = vault_amount_for_bps(snapshot, 6_000);
         let b = vault_amount_for_bps(snapshot, 4_000);
         assert_eq!(a, 600_000);
         assert_eq!(b, 400_000);
-        assert!(
-            a + b <= snapshot,
-            "floored split never exceeds the snapshot"
+        assert_eq!(a + b, 1_000_000);
+        assert_eq!(
+            snapshot - (a + b),
+            1,
+            "1 base unit of floor dust stays staged"
         );
     }
 
