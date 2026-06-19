@@ -138,4 +138,14 @@ pub enum SraError {
     // -- Destination: fund recovery (appended to keep prior codes stable) --
     #[msg("No funds available to recover")]
     NothingToRecover,
+
+    // -- Destination: action execution (appended to keep prior codes stable) --
+    #[msg("Supplied action config does not match the route's committed action config hash")]
+    ActionConfigHashMismatch,
+
+    #[msg("Action's supplied accounts do not match its required accounts")]
+    ActionAccountMismatch,
+
+    #[msg("Action variant is not executable by this program")]
+    UnsupportedAction,
 }

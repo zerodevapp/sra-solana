@@ -321,6 +321,213 @@
       ]
     },
     {
+      "name": "execute_actions",
+      "discriminator": [
+        157,
+        155,
+        107,
+        254,
+        111,
+        17,
+        231,
+        10
+      ],
+      "accounts": [
+        {
+          "name": "route",
+          "docs": [
+            "The route whose committed actions run. Not seed-bound here (that needs",
+            "`route_config_hash`, which `execute_actions` does not require): the",
+            "`fill_receipt` PDA below is seeded by `route.key()`, so passing any other",
+            "route would fail to find a finalized receipt — and per the single-tenant",
+            "trust model a route only ever touches its own execution authority."
+          ]
+        },
+        {
+          "name": "fill_receipt",
+          "docs": [
+            "The replay/lifecycle marker; bound to `route` + `fill_id` by its seeds."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  105,
+                  108,
+                  108,
+                  95,
+                  114,
+                  101,
+                  99,
+                  101,
+                  105,
+                  112,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "route"
+              },
+              {
+                "kind": "arg",
+                "path": "fill_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "expected_mint"
+        },
+        {
+          "name": "execution_authority",
+          "docs": [
+            "by seeds and signs the `SplTransfer` payouts."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  101,
+                  99,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "route"
+              }
+            ]
+          }
+        },
+        {
+          "name": "execution_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "execution_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "expected_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "fill_id",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "action_config",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "SolanaAction"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "finalize_fill",
       "discriminator": [
         166,
@@ -2473,6 +2680,32 @@
   ],
   "events": [
     {
+      "name": "ActionsExecuted",
+      "discriminator": [
+        149,
+        247,
+        110,
+        222,
+        80,
+        71,
+        194,
+        31
+      ]
+    },
+    {
+      "name": "ActionsFailed",
+      "discriminator": [
+        26,
+        50,
+        139,
+        234,
+        24,
+        95,
+        255,
+        72
+      ]
+    },
+    {
       "name": "AddressBookEntrySet",
       "discriminator": [
         0,
@@ -2700,6 +2933,57 @@
                   "name": "SlotRole"
                 }
               }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ActionsExecuted",
+      "docs": [
+        "Emitted by `execute_actions` when every committed action applied and the",
+        "receipt advanced to `ActionsSucceeded` (terminal)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "route",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ActionsFailed",
+      "docs": [
+        "Emitted by `execute_actions` when an action could not be applied; the receipt",
+        "advances to `ActionsFailed` and the funds stay in the execution vault for",
+        "`retry_actions` / `recover_funds`. No transfers from this run persist."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "route",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
             }
           }
         ]

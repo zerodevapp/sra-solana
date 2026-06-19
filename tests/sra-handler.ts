@@ -17,6 +17,7 @@ describe("sra-handler", () => {
     const expectedInstructionNames = [
       "acceptAdmin",
       "createRoute",
+      "executeActions",
       "finalizeFill",
       "initializeAddressBookRoot",
       "initializeFeeConfig",

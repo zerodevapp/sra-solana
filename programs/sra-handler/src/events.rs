@@ -126,6 +126,23 @@ pub struct FundsRecovered {
     pub amount: u64,
 }
 
+/// Emitted by `execute_actions` when every committed action applied and the
+/// receipt advanced to `ActionsSucceeded` (terminal).
+#[event]
+pub struct ActionsExecuted {
+    pub route: Pubkey,
+    pub fill_id: [u8; 32],
+}
+
+/// Emitted by `execute_actions` when an action could not be applied; the receipt
+/// advances to `ActionsFailed` and the funds stay in the execution vault for
+/// `retry_actions` / `recover_funds`. No transfers from this run persist.
+#[event]
+pub struct ActionsFailed {
+    pub route: Pubkey,
+    pub fill_id: [u8; 32],
+}
+
 /// Emitted by `validate_and_prepare` after funds reach adapter custody. Carries
 /// the routing inputs needed to build the target-specific bridge message.
 #[event]
