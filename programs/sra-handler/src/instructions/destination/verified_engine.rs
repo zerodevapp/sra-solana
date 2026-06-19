@@ -268,8 +268,10 @@ fn build_inner_metas(
         .collect()
 }
 
-/// The account info filling a given `Fixed` role in the template (`validate_action_config`
-/// guarantees Source / Destination / SigningAuthority each appear exactly once).
+/// The first account info filling a given `Fixed` role. `validate_action_config`
+/// guarantees Source/Destination/SigningAuthority are each present (≥1), and
+/// `validate_template_slots` pins every occurrence to the same resolved account,
+/// so the first match is representative even if a role repeats.
 pub(crate) fn fixed_slot<'a, 'info>(
     slots: &'a [AccountInfo<'info>],
     template: &AccountTemplate,
