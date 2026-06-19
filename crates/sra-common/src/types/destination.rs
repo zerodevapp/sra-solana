@@ -82,6 +82,22 @@ pub struct ManageRouteParams {
     pub adapters: Option<Vec<Pubkey>>,
 }
 
+/// Per-`VerifiedCpi`-action runtime data the relayer supplies to `execute_actions`,
+/// one entry per `VerifiedCpi` action in action order. Carries the inner CPI's
+/// instruction data plus the signed-quote fields (`min_amount_out`, `expiry`); the
+/// quote's signature rides in a separate ed25519 instruction in the same
+/// transaction. `min_amount_out`/`expiry` are bound into the quote message and
+/// verified against the route-committed quoter, so a relayer cannot inflate them.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
+pub struct VerifiedCpiRuntime {
+    /// The inner program's instruction data (relayer-built swap/deposit args).
+    pub inner_data: Vec<u8>,
+    /// The signed quote's minimum acceptable output (the balance-diff floor).
+    pub min_amount_out: u64,
+    /// The signed quote's unix expiry.
+    pub expiry: i64,
+}
+
 /// Execution status state machine for fill lifecycle.
 /// Borsh-serialized as a single u8 discriminant (no variant data). Size = 1 byte.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Debug, InitSpace)]

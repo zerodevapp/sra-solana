@@ -385,7 +385,7 @@
         {
           "name": "execution_authority",
           "docs": [
-            "by seeds and signs the `SplTransfer` payouts."
+            "by seeds and signs the `SplTransfer` payouts and the vault->scratch move."
           ],
           "pda": {
             "seeds": [
@@ -503,6 +503,13 @@
         {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "instructions_sysvar",
+          "docs": [
+            "price quote backing a `VerifiedCpi` action's `min_out`."
+          ],
+          "address": "Sysvar1nstructions1111111111111111111111111"
         }
       ],
       "args": [
@@ -521,6 +528,16 @@
             "vec": {
               "defined": {
                 "name": "SolanaAction"
+              }
+            }
+          }
+        },
+        {
+          "name": "verified_runtimes",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "VerifiedCpiRuntime"
               }
             }
           }
@@ -4399,6 +4416,43 @@
                 32
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "VerifiedCpiRuntime",
+      "docs": [
+        "Per-`VerifiedCpi`-action runtime data the relayer supplies to `execute_actions`,",
+        "one entry per `VerifiedCpi` action in action order. Carries the inner CPI's",
+        "instruction data plus the signed-quote fields (`min_amount_out`, `expiry`); the",
+        "quote's signature rides in a separate ed25519 instruction in the same",
+        "transaction. `min_amount_out`/`expiry` are bound into the quote message and",
+        "verified against the route-committed quoter, so a relayer cannot inflate them."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "inner_data",
+            "docs": [
+              "The inner program's instruction data (relayer-built swap/deposit args)."
+            ],
+            "type": "bytes"
+          },
+          {
+            "name": "min_amount_out",
+            "docs": [
+              "The signed quote's minimum acceptable output (the balance-diff floor)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "expiry",
+            "docs": [
+              "The signed quote's unix expiry."
+            ],
+            "type": "i64"
           }
         ]
       }

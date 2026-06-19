@@ -16,6 +16,10 @@ pub const SEED_ADDRESS_BOOK: &[u8] = b"address_book";
 pub const SEED_SRA_ROUTE: &[u8] = b"sra_route";
 pub const SEED_FILL_RECEIPT: &[u8] = b"fill_receipt";
 pub const SEED_EXECUTION: &[u8] = b"execution";
+/// Authority over a route's verified-CPI scratch account. Distinct from the
+/// execution authority so a hostile inner CPI signed by this PDA can never move
+/// the execution vault (a different authority owns it) — only the scratch.
+pub const SEED_SCRATCH: &[u8] = b"scratch";
 
 // Shared (handler-owned)
 pub const SEED_FEE_CONFIG: &[u8] = b"fee_config";

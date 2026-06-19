@@ -148,4 +148,26 @@ pub enum SraError {
 
     #[msg("Action variant is not executable by this program")]
     UnsupportedAction,
+
+    // -- Destination: verified-CPI engine (appended to keep prior codes stable) --
+    #[msg("Verified-CPI program is not the pinned program or is not a deployed executable")]
+    ProgramNotPinned,
+
+    #[msg("Verified-CPI output destination is not the route owner's output token account")]
+    DestinationNotPinned,
+
+    #[msg("Verified-CPI input_mint must equal the route's expected_mint")]
+    InvalidInputMint,
+
+    #[msg("Verified-CPI output gained less than the minimum acceptable amount")]
+    MinOutNotMet,
+
+    #[msg("Verified-CPI scratch account did not fully sweep back to the vault")]
+    ScratchNotEmpty,
+
+    #[msg("Signed price quote has expired")]
+    PriceQuoteExpired,
+
+    #[msg("No matching authorized signed price quote was found in the transaction")]
+    InvalidPriceSignature,
 }
