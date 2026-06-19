@@ -2465,6 +2465,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mock-swap"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+]
+
+[[package]]
 name = "nix"
 version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6558,6 +6566,7 @@ dependencies = [
  "litesvm",
  "litesvm-token",
  "mock-spoke-pool",
+ "mock-swap",
  "reqwest",
  "serde_json",
  "solana-client",

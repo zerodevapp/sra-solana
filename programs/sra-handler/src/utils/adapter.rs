@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use solana_sdk_ids::{bpf_loader, bpf_loader_deprecated, bpf_loader_upgradeable, loader_v4};
 use sra_common::errors::SraError;
 
-fn is_program_owner(owner: &Pubkey) -> bool {
+pub(crate) fn is_program_owner(owner: &Pubkey) -> bool {
     bpf_loader::check_id(owner)
         || bpf_loader_deprecated::check_id(owner)
         || bpf_loader_upgradeable::check_id(owner)

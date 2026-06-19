@@ -38,7 +38,7 @@ use sra_common::{
     types::{
         AddressBookEntry, AddressBookRoot, AssetFeeTier, CreateRouteParams, ExecutionStatus,
         FeeConfig, FillReceipt, ManageRouteParams, MintNonce, ProtocolFeeConfig, SolanaAction,
-        SolanaSraRoute, SourceHandlerData, SraConfig,
+        SolanaSraRoute, SourceHandlerData, SraConfig, VerifiedCpiRuntime,
     },
 };
 use std::{fs, path::PathBuf};
@@ -57,6 +57,10 @@ fn adapter_program_so_path() -> PathBuf {
 
 fn mock_spoke_pool_so_path() -> PathBuf {
     deploy_artifact_path("mock_spoke_pool.so")
+}
+
+fn mock_swap_so_path() -> PathBuf {
+    deploy_artifact_path("mock_swap.so")
 }
 
 fn deploy_artifact_path(file_name: &str) -> PathBuf {
@@ -98,6 +102,16 @@ pub fn setup_svm() -> LiteSVM {
         )
     });
     svm.add_program(ACROSS_SPOKE_POOL_ID, mock_spoke_so.as_slice())
+        .unwrap();
+
+    let mock_swap_so_path = mock_swap_so_path();
+    let mock_swap_so = fs::read(&mock_swap_so_path).unwrap_or_else(|err| {
+        panic!(
+            "failed to read program binary at {}: {err}. Run `anchor build` first.",
+            mock_swap_so_path.display()
+        )
+    });
+    svm.add_program(mock_swap::ID, mock_swap_so.as_slice())
         .unwrap();
     svm
 }
@@ -464,6 +478,18 @@ pub fn send_ix_expect_err(
     msg: &str,
 ) -> TransactionError {
     send_ix(svm, ix, payer, signers).expect_err(msg).err.clone()
+}
+
+pub fn send_instructions_expect_err(
+    svm: &mut LiteSVM,
+    ixs: &[Instruction],
+    payer: &Keypair,
+    signers: &[&Keypair],
+) -> TransactionError {
+    send_instructions(svm, ixs, payer, signers)
+        .expect_err("expected the transaction to fail")
+        .err
+        .clone()
 }
 
 pub fn fetch_sra_config(svm: &LiteSVM, pda: &Pubkey) -> SraConfig {
@@ -1751,12 +1777,32 @@ pub fn fabricate_verified_fill(
 /// writable, non-signer `remaining_accounts` (one per `SplTransfer`, in action
 /// order) — negative tests can pass wrong pubkeys or flip writability on the
 /// returned instruction.
+/// SplTransfer-only convenience: each recipient ATA rides writable, no verified
+/// runtimes. Delegates to the full builder.
 pub fn execute_actions_ix(
     route: &Pubkey,
     fill_id: [u8; 32],
     action_config: Vec<SolanaAction>,
     mint: &Pubkey,
     recipient_atas: &[Pubkey],
+) -> Instruction {
+    let remaining = recipient_atas
+        .iter()
+        .map(|ata| AccountMeta::new(*ata, false))
+        .collect();
+    execute_actions_ix_full(route, fill_id, action_config, vec![], mint, remaining)
+}
+
+/// Full `execute_actions` builder: caller supplies the exact per-action
+/// `remaining_accounts` metas (SplTransfer recipient ATAs and/or VerifiedCpi
+/// `[program, template slots…]` runs) and the per-VerifiedCpi-action runtimes.
+pub fn execute_actions_ix_full(
+    route: &Pubkey,
+    fill_id: [u8; 32],
+    action_config: Vec<SolanaAction>,
+    verified_runtimes: Vec<VerifiedCpiRuntime>,
+    mint: &Pubkey,
+    remaining: Vec<AccountMeta>,
 ) -> Instruction {
     let (execution_authority, _) = derive_execution_authority_pda(route);
     let execution_vault = derive_ata(&execution_authority, mint);
@@ -1768,18 +1814,50 @@ pub fn execute_actions_ix(
         execution_authority,
         execution_vault,
         token_program: TOKEN_PROGRAM_ID,
+        instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
     }
     .to_account_metas(None);
-    for ata in recipient_atas {
-        accounts.push(AccountMeta::new(*ata, false));
-    }
+    accounts.extend(remaining);
     Instruction {
         program_id: PROGRAM_ID,
         accounts,
         data: sra_handler::instruction::ExecuteActions {
             fill_id,
             action_config,
+            verified_runtimes,
         }
         .data(),
     }
+}
+
+/// PDA that authorizes a route's verified-CPI scratch account.
+pub fn derive_scratch_authority_pda(route: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[sra_common::seeds::SEED_SCRATCH, route.as_ref()],
+        &PROGRAM_ID,
+    )
+}
+
+/// The mock-swap pool authority PDA and its input/output reserve ATAs.
+pub fn derive_mock_swap_pool(
+    input_mint: &Pubkey,
+    output_mint: &Pubkey,
+) -> (Pubkey, Pubkey, Pubkey) {
+    let (pool_authority, _) =
+        Pubkey::find_program_address(&[mock_swap::POOL_AUTHORITY_SEED], &mock_swap::ID);
+    let pool_input = derive_ata(&pool_authority, input_mint);
+    let pool_output = derive_ata(&pool_authority, output_mint);
+    (pool_authority, pool_input, pool_output)
+}
+
+/// Build a self-contained single-signature ed25519 verification instruction over
+/// `message`, signed by `quoter`. Placed alongside `execute_actions` in the same
+/// transaction, it is what the handler's signed-quote check locates.
+pub fn ed25519_quote_ix(quoter: &Keypair, message: &[u8]) -> Instruction {
+    let signature = quoter.sign_message(message);
+    solana_sdk::ed25519_instruction::new_ed25519_instruction_with_signature(
+        message,
+        signature.as_ref().try_into().expect("64-byte ed25519 sig"),
+        &quoter.pubkey().to_bytes(),
+    )
 }
