@@ -145,6 +145,7 @@ mod tests {
                     SlotRole::Fixed(FixedRole::SigningAuthority),
                     SlotRole::Fixed(FixedRole::Source),
                     SlotRole::Fixed(FixedRole::Destination),
+                    SlotRole::Fixed(FixedRole::OutputMint),
                     SlotRole::Free,
                 ],
             },

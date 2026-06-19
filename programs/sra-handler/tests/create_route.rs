@@ -429,6 +429,7 @@ fn create_route_verified_cpi_happy_path() {
         SlotRole::Fixed(FixedRole::SigningAuthority),
         SlotRole::Fixed(FixedRole::Source),
         SlotRole::Fixed(FixedRole::Destination),
+        SlotRole::Fixed(FixedRole::OutputMint),
         SlotRole::Free,
     ])];
     let hash = route_config_hash_for(&owner.pubkey(), &params);

@@ -15,7 +15,9 @@
 //! mid-action) — strictly more conservative than EVM's catch.
 
 use anchor_lang::prelude::*;
-use anchor_spl::associated_token::get_associated_token_address;
+use anchor_spl::associated_token::{
+    get_associated_token_address, get_associated_token_address_with_program_id,
+};
 use anchor_spl::token::spl_token::state::AccountState;
 use anchor_spl::token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked};
 use sra_common::constants::BPS_DENOMINATOR;
@@ -28,8 +30,9 @@ use sra_common::types::{
 };
 
 use super::verified_engine::{
-    execute_verified, fixed_slot, token_account_usable, validate_pinned_program,
-    validate_template_slots, verify_signed_quote, TokenBalanceCheck, VerifiedCpiCall,
+    execute_verified, fixed_slot, mint_is_permissioned, token_account_usable,
+    validate_pinned_program, validate_template_slots, verify_signed_quote, TokenBalanceCheck,
+    VerifiedCpiCall,
 };
 use crate::events::{ActionsExecuted, ActionsFailed};
 
@@ -86,6 +89,7 @@ enum Planned {
         input_amount: u64,
         min_out: u64,
         runtime_index: usize,
+        output_token_program: Pubkey,
     },
 }
 
@@ -176,7 +180,7 @@ pub(crate) fn handler<'info>(
                 account_template,
                 output_mint,
                 min_out,
-                allow_permissioned_output: _,
+                allow_permissioned_output,
             } => {
                 // Only the ed25519 signed-quote min_out source is wired; oracle is
                 // not yet executable (fail-closed, receipt stays Finalized).
@@ -201,7 +205,34 @@ pub(crate) fn handler<'info>(
                 validate_pinned_program(&ctx.remaining_accounts[program_index], program_id)?;
 
                 let slots = &ctx.remaining_accounts[slots_start..end];
-                let destination = get_associated_token_address(&owner, output_mint);
+
+                // The output token program (legacy SPL or Token-2022) is read from
+                // the pinned output mint's owner — never assumed, never relayer-set.
+                let output_mint_info = fixed_slot(slots, account_template, FixedRole::OutputMint)?;
+                require_keys_eq!(
+                    output_mint_info.key(),
+                    *output_mint,
+                    SraError::ActionAccountMismatch
+                );
+                let output_token_program = *output_mint_info.owner;
+                require!(
+                    output_token_program == token_program
+                        || output_token_program == anchor_spl::token_2022::ID,
+                    SraError::ActionAccountMismatch
+                );
+                // Safety gate: never silently custody a permissioned output
+                // (permanent-delegate / pausable / default-frozen) unless the route
+                // explicitly opted in.
+                require!(
+                    *allow_permissioned_output || !mint_is_permissioned(output_mint_info)?,
+                    SraError::PermissionedOutputNotAllowed
+                );
+
+                let destination = get_associated_token_address_with_program_id(
+                    &owner,
+                    output_mint,
+                    &output_token_program,
+                );
                 validate_template_slots(
                     slots,
                     account_template,
@@ -209,6 +240,7 @@ pub(crate) fn handler<'info>(
                     &scratch_auth,
                     &scratch_account,
                     &destination,
+                    output_mint,
                 )?;
 
                 // One runtime entry per VerifiedCpi action, consumed in order.
@@ -221,7 +253,7 @@ pub(crate) fn handler<'info>(
                 let scratch_info = fixed_slot(slots, account_template, FixedRole::Source)?;
                 let dest_info = fixed_slot(slots, account_template, FixedRole::Destination)?;
                 let scratch_ok = token_account_usable(scratch_info, &token_program, &expected_mint);
-                let dest_ok = token_account_usable(dest_info, &token_program, output_mint);
+                let dest_ok = token_account_usable(dest_info, &output_token_program, output_mint);
                 if source_frozen || !scratch_ok || !dest_ok {
                     any_action_would_fail = true;
                     cursor = end;
@@ -255,6 +287,7 @@ pub(crate) fn handler<'info>(
                     input_amount,
                     min_out: runtime.min_amount_out,
                     runtime_index: runtime_index - 1,
+                    output_token_program,
                 });
                 cursor = end;
             }
@@ -319,6 +352,7 @@ pub(crate) fn handler<'info>(
                 input_amount,
                 min_out,
                 runtime_index,
+                output_token_program,
             } => {
                 let (_, scratch_bump, _) =
                     scratch.expect("scratch derived when a VerifiedCpi action is present");
@@ -349,7 +383,7 @@ pub(crate) fn handler<'info>(
                 };
                 let post = TokenBalanceCheck {
                     account: dest_info,
-                    token_program,
+                    token_program: *output_token_program,
                     min_out: *min_out as u128,
                 };
                 execute_verified(&call, execution_signer, scratch_signer, &post)?;

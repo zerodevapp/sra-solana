@@ -43,7 +43,7 @@ fn spl(recipient: Pubkey, amount_bps: u16) -> SolanaAction {
     }
 }
 
-/// A valid `VerifiedCpi` action (pins all three required slots, non-zero keys) —
+/// A valid `VerifiedCpi` action (pins all four required slots, non-zero keys) —
 /// creatable at `create_route`, not executable in this build.
 fn verified_cpi() -> SolanaAction {
     SolanaAction::VerifiedCpi {
@@ -56,6 +56,7 @@ fn verified_cpi() -> SolanaAction {
                 SlotRole::Fixed(FixedRole::SigningAuthority),
                 SlotRole::Fixed(FixedRole::Source),
                 SlotRole::Fixed(FixedRole::Destination),
+                SlotRole::Fixed(FixedRole::OutputMint),
                 SlotRole::Free,
             ],
         },
