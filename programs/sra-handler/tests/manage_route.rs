@@ -5,7 +5,11 @@ use common::*;
 use solana_sdk::{
     instruction::InstructionError, pubkey::Pubkey, signer::Signer, transaction::TransactionError,
 };
-use sra_common::{constants::MAX_ADAPTERS, errors::SraError, types::ManageRouteParams};
+use sra_common::{
+    constants::MAX_ADAPTERS,
+    errors::SraError,
+    types::{ExecutionStatus, ManageRouteParams},
+};
 
 fn custom_error(err: SraError) -> TransactionError {
     TransactionError::InstructionError(0, InstructionError::Custom(err.into()))
@@ -337,8 +341,14 @@ fn manage_route_does_not_affect_finalized_receipts() {
     let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
     let route = create_sample_route(&mut svm, &payer, &owner, mint, [11u8; 32]);
 
-    // Planted directly (finalize_fill is a later step); manage_route must not touch it.
-    let fill_receipt = seed_fill_receipt_account(&mut svm, &route, [0xCDu8; 32], 5_000);
+    // Planted directly (no full fill flow); manage_route must not touch it.
+    let fill_receipt = seed_fill_receipt_with_status(
+        &mut svm,
+        &route,
+        [0xCDu8; 32],
+        5_000,
+        ExecutionStatus::Finalized,
+    );
     let before = svm
         .get_account(&fill_receipt)
         .expect("planted receipt exists")

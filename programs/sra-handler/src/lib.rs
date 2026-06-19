@@ -87,6 +87,10 @@ pub mod sra_handler {
         instructions::destination::execute_actions::handler(ctx, fill_id, action_config)
     }
 
+    pub fn recover_funds(ctx: Context<RecoverFunds>) -> Result<()> {
+        instructions::destination::recover_funds::handler(ctx)
+    }
+
     pub fn initialize_fee_config(
         ctx: Context<InitializeFeeConfig>,
         fee_recipient: Pubkey,

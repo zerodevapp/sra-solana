@@ -135,6 +135,10 @@ pub enum SraError {
     #[msg("Route is paused")]
     RoutePaused,
 
+    // -- Destination: fund recovery (appended to keep prior codes stable) --
+    #[msg("No funds available to recover")]
+    NothingToRecover,
+
     // -- Destination: action execution (appended to keep prior codes stable) --
     #[msg("Supplied action config does not match the route's committed action config hash")]
     ActionConfigHashMismatch,
