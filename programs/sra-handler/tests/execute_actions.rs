@@ -110,7 +110,8 @@ fn stage(svm: &mut litesvm::LiteSVM, action_config: Vec<SolanaAction>, amount: u
     if amount > 0 {
         mint_to(svm, &payer, &payer, &mint, &execution_vault, amount);
     }
-    let fill_receipt = seed_fill_receipt_account(svm, &route, FILL_ID, amount);
+    let fill_receipt =
+        seed_fill_receipt_with_status(svm, &route, FILL_ID, amount, ExecutionStatus::Finalized);
 
     Staged {
         payer,
