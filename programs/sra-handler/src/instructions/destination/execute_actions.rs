@@ -1,26 +1,18 @@
-//! Destination action execution.
+//! Destination action execution: run a finalized route's committed `action_config`
+//! against funds staged in its `execution_vault`.
 //!
-//! Runs a finalized route's committed `action_config` against the funds staged in
-//! its `execution_vault`. Two action variants:
+//! * `SplTransfer` — exact-matched recipient ATA, a percentage of a start-of-run
+//!   vault snapshot. No third-party CPI.
+//! * `VerifiedCpi` — dynamic accounts through the shared engine (scratch-bound
+//!   input, pinned slots, balance-diff `≥ min_out` from a signed quote). Only the
+//!   ed25519 signed-quote source is wired; oracle `min_out` is not yet executable.
 //!
-//! * **`SplTransfer`** — static accounts, exact-matched recipient ATA, a
-//!   percentage of a start-of-run vault snapshot. No third-party CPI.
-//! * **`VerifiedCpi`** — dynamic accounts through the shared verified-CPI engine
-//!   (scratch-bound input, pinned source/destination/authority, balance-diff
-//!   `≥ min_out` from a signed quote, fail-closed). Only the ed25519 signed-quote
-//!   `min_out` source is wired here; the oracle source is not yet executable.
-//!
-//! Failure model (EVM `try/catch` + atomicity parity, two-pass validate-then-execute):
-//! * Bad runtime state of a *handler-pinned* account (a missing/frozen recipient,
-//!   scratch, or output ATA, or a frozen source vault) sets `ActionsFailed` and
-//!   persists it with no partial movement — the funds stay staged and recoverable
-//!   by the route owner.
-//! * A structural relayer error (wrong/missing accounts, unpinned program, bad
-//!   destination) hard-rejects, leaving the receipt `Finalized` (retryable).
-//! * A post-CPI shortfall (`min_out` not met) or any failing CPI hard-reverts the
-//!   whole transaction atomically — funds stay in the vault, receipt `Finalized`.
-//!   Unlike the EVM `try/catch`, a Solana CPI revert cannot be caught mid-action,
-//!   so a failed swap is retryable rather than terminal — strictly more conservative.
+//! Failure model (two-pass validate-then-execute): a bad handler-pinned-account
+//! state (missing/frozen recipient/scratch/output ATA, frozen vault) → soft
+//! `ActionsFailed`, funds staged and owner-recoverable. A structural relayer error
+//! → hard reject, receipt stays `Finalized` (retryable). A post-CPI `min_out`
+//! shortfall or failing CPI → hard tx revert (Solana can't catch a CPI revert
+//! mid-action) — strictly more conservative than EVM's catch.
 
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::get_associated_token_address;
@@ -373,17 +365,10 @@ pub(crate) fn handler<'info>(
     Ok(())
 }
 
-/// Amount to move for an `amount_bps`-of-vault action: floor(`amount_bps` * vault
-/// snapshot / `BPS_DENOMINATOR`).
-///
-/// The caller snapshots the execution-vault balance once at the start of the run
-/// and computes every action's amount off that same snapshot. Because the division
-/// floors, a set whose `amount_bps` sum to `BPS_DENOMINATOR` transfers at most the
-/// snapshot and can leave a few base units of dust — the remainder stays staged in
-/// the vault and is recoverable, never over-spent. `amount_bps <= BPS_DENOMINATOR`
-/// is guaranteed upstream (`validate_action_config` at `create_route`, re-bound here
-/// by the `action_config_hash` check), so the product is `<= vault_snapshot` and the
-/// `u64` cast is lossless.
+/// `floor(amount_bps * vault_snapshot / BPS_DENOMINATOR)`. `amount_bps <= 10_000`
+/// is guaranteed upstream (`validate_action_config`, re-bound by the
+/// `action_config_hash` check), so the product is `<= vault_snapshot` (lossless
+/// `u64` cast); the floor can leave a few base units of recoverable dust.
 fn vault_amount_for_bps(vault_snapshot: u64, amount_bps: u16) -> u64 {
     ((vault_snapshot as u128 * amount_bps as u128) / BPS_DENOMINATOR as u128) as u64
 }

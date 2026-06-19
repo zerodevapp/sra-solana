@@ -1,20 +1,9 @@
-//! Generic balance-diff swap mock for destination verified-CPI engine tests.
-//!
-//! NOT a deploy target (absent from `Anchor.toml`). It stands in for any
-//! third-party swap/deposit program (Jupiter, Kamino, …) the verified-CPI engine
-//! routes through, exercising the engine's security properties without a real
-//! integration:
-//!
-//! * It **pulls** `in_amount` from the engine-supplied `source` (the scratch
-//!   account) using the signing authority the engine grants via `invoke_signed`
-//!   — so a `swap` asking for more than the scratch holds fails (the scratch
-//!   bound), and asking for less leaves a remainder the engine must sweep.
-//! * It **delivers** `out_amount` of the output mint from its own pool to the
-//!   engine-pinned `destination` — `out_amount` is caller-controlled, so a test
-//!   can under-deliver to exercise the `min_out` floor.
-//!
-//! Both legs are real SPL `transfer_checked`s, so balances move exactly as a real
-//! swap would and the engine's pre/post balance-diff is meaningful.
+//! Generic balance-diff swap mock for verified-CPI engine tests (not a deploy
+//! target). Stands in for any third-party swap/deposit the engine routes through.
+//! Two real SPL `transfer_checked` legs: pull `in_amount` from the scratch `source`
+//! (signing authority granted by the engine's `invoke_signed`, so over-pulling
+//! fails the scratch bound), then deliver `out_amount` from its pool to the pinned
+//! `destination` (`out_amount` is caller-controlled, to exercise the `min_out` floor).
 
 use anchor_lang::prelude::*;
 use anchor_spl::token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked};

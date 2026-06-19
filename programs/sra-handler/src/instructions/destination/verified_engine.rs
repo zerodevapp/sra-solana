@@ -1,26 +1,17 @@
-//! Shared verified-CPI execution engine.
+//! Shared verified-CPI engine. The Solana-only safety model for a PDA-signed CPI
+//! over a relayer-supplied account set:
 //!
-//! Dynamic-account actions (today `VerifiedCpi`; later `VerifiedPosition`) all run
-//! through one skeleton; only the post-condition check varies (a Rust trait, never
-//! serialized into the ABI). The skeleton contains the Solana-only safety model
-//! for handing a relayer-supplied account set to a PDA-signed CPI:
+//! 1. Pin the program (committed id, loader-owned, executable).
+//! 2. Bound the input: move exactly `input_amount` into a scratch whose authority
+//!    is distinct from the vault's, and expose only the scratch — a hostile callee
+//!    can take at most that, never the vault.
+//! 3. Pin the source/destination/signing-authority slots; the relayer fills only
+//!    routing (`Free`) slots, so the output lands in the owner's account.
+//! 4. Require `post − pre ≥ min_out` on the pinned output, fail-closed.
+//! 5. Sweep the scratch back to the vault; it must end empty.
 //!
-//! 1. **Pin the program** — exact committed id, loader-owned, executable.
-//! 2. **Bound the input** — move *exactly* `input_amount` from the execution vault
-//!    into a scratch account whose authority is distinct from the vault's, then
-//!    expose only the scratch to the CPI. A hostile callee/account-set can take at
-//!    most `input_amount`; it can never reach the vault.
-//! 3. **Pin source / destination / signing-authority** slots to handler-controlled
-//!    accounts so the relayer can only fill routing (`Free`) slots — the output
-//!    lands in the owner's account, not the relayer's.
-//! 4. **Verify the outcome** — `post − pre ≥ min_out` on the pinned output account,
-//!    fail-closed (revert) otherwise.
-//! 5. **Sweep** the scratch back to the vault; it must end empty.
-//!
-//! `min_out` is resolved from an authorized **signed quote** (ed25519), bound to a
-//! per-fill, per-action context hash so a quote cannot be replayed across fills or
-//! actions. This mirrors the EVM signed-pair resolver's context binding; the curve
-//! is ed25519 (Solana-native) rather than secp256k1.
+//! `min_out` comes from an ed25519 signed quote bound to a per-fill/per-action
+//! context hash (a port of the EVM signed-pair resolver; ed25519, not secp256k1).
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
@@ -75,9 +66,7 @@ pub(crate) struct TokenBalanceCheck<'a, 'info> {
 
 impl PostCheck for TokenBalanceCheck<'_, '_> {
     fn observe(&self) -> Result<u128> {
-        // The account is the engine-pinned destination; it must be a token
-        // account of the route's token program. A non-token account here is a
-        // structural error, not a soft outcome.
+        // A non-token account at the pinned destination is structural, not soft.
         require_keys_eq!(
             *self.account.owner,
             self.token_program,

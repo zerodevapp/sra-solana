@@ -1,18 +1,10 @@
-//! Signed price-quote scheme for verified-CPI `min_out` resolution.
+//! Signed price-quote scheme for verified-CPI `min_out`. An authorized off-chain
+//! quoter ed25519-signs a per-action quote naming the minimum output; the handler
+//! verifies it and uses `min_amount_out` as the balance-diff floor.
 //!
-//! A cross-asset action (e.g. swap USDC -> SOL) has no meaningful slippage bound
-//! without a reference price. An authorized off-chain quoter signs a per-action
-//! quote naming the minimum acceptable output; the handler verifies that signature
-//! (ed25519) and uses the signed `min_amount_out` as the balance-diff floor.
-//!
-//! The quote is bound to a per-fill, per-action **context hash** so a quote signed
-//! for one action of one fill cannot be replayed against another action or another
-//! fill. This mirrors the reference resolver's context binding: the signer commits
-//! to `(context, input, output, input_amount, chain, min_out, expiry)` and the
-//! verifier reconstructs the identical message before matching the signature.
-//!
-//! Both functions are pure (no account reads) so the off-chain quoter and the
-//! on-chain verifier share one definition and cannot drift.
+//! The quote binds a per-fill/per-action context hash, so a quote for one
+//! fill/action can't be replayed against another. Both functions are pure, so the
+//! off-chain quoter and on-chain verifier share one definition and can't drift.
 
 use anchor_lang::prelude::Pubkey;
 use solana_keccak_hasher::hash as keccak_hash;
