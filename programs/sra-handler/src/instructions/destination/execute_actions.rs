@@ -54,18 +54,13 @@ pub(crate) fn handler<'info>(
     fill_id: [u8; 32],
     action_config: Vec<SolanaAction>,
 ) -> Result<()> {
-    // 1. The fill must be settled and not yet acted on: `ActionsSucceeded` is
-    //    terminal, and an `ActionsFailed` receipt is re-driven through
-    //    `retry_actions`, not here.
+    // Must be settled and not yet acted on (ActionsFailed is retried via retry_actions).
     require!(
         ctx.accounts.fill_receipt.execution_status == ExecutionStatus::Finalized,
         SraError::InvalidExecutionStatus
     );
 
-    // 2. The re-supplied action list must match the route's committed digest, so
-    //    a relayer can neither inject, drop, nor reorder actions (the
-    //    commit-by-hash + pass-as-data model — same shape as the source
-    //    `handler_data_hash` check).
+    // Re-supplied action list must match the committed digest — no inject/drop/reorder.
     require!(
         action_config_hash(&action_config)? == ctx.accounts.route.action_config_hash,
         SraError::ActionConfigHashMismatch
@@ -73,17 +68,11 @@ pub(crate) fn handler<'info>(
 
     let expected_mint = ctx.accounts.route.expected_mint;
     let token_program = ctx.accounts.token_program.key();
-    // One balance snapshot for the whole run: every `SplTransfer` takes its
-    // `amount_bps` of THIS value, so a set summing to `BPS_DENOMINATOR` drains
-    // the vault exactly (computing off a shrinking live balance would not).
+    // Snapshot once: each amount_bps is a fraction of this, so a 100% set drains exactly.
     let vault_snapshot = ctx.accounts.execution_vault.amount;
 
-    // Pass 1 — validate every action's accounts against `required_accounts`
-    // (a structural relayer error is a hard reject) and the recipient ATA's
-    // runtime state (a bad state is a soft `ActionsFailed`), collecting the
-    // planned transfers WITHOUT moving any funds. This is what makes the batch
-    // atomic: a failure anywhere means no transfer ran (EVM try/catch parity —
-    // `_resolveAndExecuteActions` reverts the whole action leg on any failure).
+    // Pass 1: validate accounts (hard reject) + recipient state (soft fail) and plan the
+    // transfers, moving nothing — so any failure leaves the batch atomic (EVM-parity).
     let mut cursor = 0usize;
     let mut planned_transfers: Vec<(AccountInfo, u64)> = Vec::new();
     let mut any_action_would_fail = false;
@@ -103,8 +92,7 @@ pub(crate) fn handler<'info>(
                 SraError::ActionAccountMismatch
             );
         }
-        // Only `SplTransfer` reaches here — `required_accounts` already rejected
-        // `VerifiedCpi` with `UnsupportedAction`.
+        // Only SplTransfer reaches here (required_accounts rejected VerifiedCpi above).
         if let SolanaAction::SplTransfer { amount_bps, .. } = action {
             let recipient_ata = supplied[0].to_account_info();
             if recipient_can_receive(&recipient_ata, &token_program, &expected_mint) {
@@ -118,14 +106,13 @@ pub(crate) fn handler<'info>(
         }
         cursor = end;
     }
-    // No leftover relayer accounts beyond what the actions require.
+    // Reject leftover relayer accounts.
     require!(
         cursor == ctx.remaining_accounts.len(),
         SraError::ActionAccountMismatch
     );
 
-    // 3. Soft failure: persist `ActionsFailed` and return `Ok` so the status
-    //    write survives; the funds stay staged for `retry_actions`/`recover_funds`.
+    // Soft fail: persist ActionsFailed (return Ok), funds stay staged for retry/recover.
     if any_action_would_fail {
         ctx.accounts.fill_receipt.execution_status = ExecutionStatus::ActionsFailed;
         emit!(ActionsFailed {
@@ -135,10 +122,7 @@ pub(crate) fn handler<'info>(
         return Ok(());
     }
 
-    // 4. Pass 2 — execute. Every recipient validated and Σ`amount_bps` ≤
-    //    `BPS_DENOMINATOR` (enforced at `create_route`, re-bound by the hash
-    //    check), so Σ amounts ≤ snapshot and each transfer succeeds. The
-    //    execution authority PDA signs.
+    // Pass 2: execute the validated transfers; the execution authority PDA signs.
     let route_key = ctx.accounts.route.key();
     let execution_bump = [ctx.bumps.execution_authority];
     let signer_seeds: &[&[&[u8]]] = &[&[SEED_EXECUTION, route_key.as_ref(), &execution_bump]];
