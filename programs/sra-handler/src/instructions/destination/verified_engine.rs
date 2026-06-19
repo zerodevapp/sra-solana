@@ -323,10 +323,12 @@ pub(crate) fn token_account_usable(
 // ---------------------------------------------------------------------------
 
 /// Confirm the transaction carries an authorized, unexpired signed quote whose
-/// bytes equal `expected_message`. The ed25519 native program has already
-/// verified the signature transaction-wide; this only locates that verification
-/// and checks the signer is the route-committed `quoter` and the signed message
-/// is the one we reconstructed.
+/// bytes equal `expected_message`. Solana verifies the ed25519 precompile over
+/// the whole transaction at load, before any instruction runs — so a matching
+/// ed25519 instruction *anywhere* in the tx is already verified, and the scan is
+/// position-independent by design (restricting it to earlier indices would only
+/// reject valid orderings, not add safety). This just locates that verification
+/// and checks the signer is the route-committed `quoter` over our message.
 pub(crate) fn verify_signed_quote(
     instructions_sysvar: &AccountInfo,
     quoter: &Pubkey,
