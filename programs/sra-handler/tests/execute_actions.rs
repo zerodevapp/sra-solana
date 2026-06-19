@@ -309,6 +309,35 @@ fn execute_actions_frozen_recipient_ata_sets_actions_failed() {
 }
 
 #[test]
+fn execute_actions_frozen_source_vault_sets_actions_failed() {
+    let mut svm = setup_svm();
+    let recipient = Pubkey::new_unique();
+    let s = stage(&mut svm, vec![spl(recipient, 10_000)], AMOUNT);
+    let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
+    // Freeze the SOURCE execution vault (a freeze-authority mint can freeze any
+    // account of its mint, including this PDA-owned vault). The transfer would
+    // abort, so the engine must preflight it into a retryable ActionsFailed
+    // rather than hard-aborting and stranding the receipt at Finalized.
+    freeze_token_account(&mut svm, &s.execution_vault);
+
+    let ix = execute_actions_ix(
+        &s.route,
+        FILL_ID,
+        s.action_config.clone(),
+        &s.mint,
+        &[recipient_ata],
+    );
+    send_ix(&mut svm, ix, &s.payer, &[]).expect("frozen source vault -> ActionsFailed, not abort");
+
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
+    assert_eq!(fetch_token_balance(&svm, &recipient_ata), 0);
+    assert_eq!(
+        status(&svm, &s.fill_receipt),
+        ExecutionStatus::ActionsFailed
+    );
+}
+
+#[test]
 fn execute_actions_partial_failure_atomic() {
     let mut svm = setup_svm();
     let r1 = Pubkey::new_unique();

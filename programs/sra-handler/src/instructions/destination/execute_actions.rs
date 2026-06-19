@@ -8,6 +8,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::AccountMeta;
 use anchor_spl::associated_token::get_associated_token_address;
+use anchor_spl::token::spl_token::state::AccountState;
 use anchor_spl::token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked};
 use sra_common::constants::BPS_DENOMINATOR;
 use sra_common::errors::SraError;
@@ -70,6 +71,8 @@ pub(crate) fn handler<'info>(
     let token_program = ctx.accounts.token_program.key();
     // Snapshot once: each amount_bps is a fraction of this, so a 100% set drains exactly.
     let vault_snapshot = ctx.accounts.execution_vault.amount;
+    // A frozen source vault would abort every transfer — fail soft, not hard-abort.
+    let source_frozen = ctx.accounts.execution_vault.state == AccountState::Frozen;
 
     // Pass 1: validate accounts (hard reject) + recipient state (soft fail) and plan the
     // transfers, moving nothing — so any failure leaves the batch atomic (EVM-parity).
@@ -95,7 +98,9 @@ pub(crate) fn handler<'info>(
         // Only SplTransfer reaches here (required_accounts rejected VerifiedCpi above).
         if let SolanaAction::SplTransfer { amount_bps, .. } = action {
             let recipient_ata = supplied[0].to_account_info();
-            if recipient_can_receive(&recipient_ata, &token_program, &expected_mint) {
+            if !source_frozen
+                && recipient_can_receive(&recipient_ata, &token_program, &expected_mint)
+            {
                 planned_transfers.push((
                     recipient_ata,
                     vault_amount_for_bps(vault_snapshot, *amount_bps),
@@ -162,7 +167,7 @@ fn recipient_can_receive(
     expected_mint: &Pubkey,
 ) -> bool {
     use anchor_lang::solana_program::program_pack::Pack;
-    use anchor_spl::token::spl_token::state::{Account as SplTokenAccount, AccountState};
+    use anchor_spl::token::spl_token::state::Account as SplTokenAccount;
 
     if info.owner != token_program {
         return false;
