@@ -12,11 +12,9 @@
 
 mod common;
 
-use anchor_lang::InstructionData;
 use anchor_spl::token::ID as TOKEN_PROGRAM_ID;
 use common::*;
 use solana_sdk::{
-    clock::Clock,
     instruction::{AccountMeta, InstructionError},
     pubkey::Pubkey,
     signature::Keypair,
@@ -26,10 +24,7 @@ use solana_sdk::{
 use sra_common::{
     errors::SraError,
     quote::{action_context_hash, signed_quote_message},
-    types::{
-        AccountTemplate, CreateRouteParams, ExecutionStatus, FixedRole, MinOut, SlotRole,
-        SolanaAction, VerifiedCpiRuntime,
-    },
+    types::{CreateRouteParams, ExecutionStatus, MinOut, SolanaAction},
 };
 
 const VAULT: u64 = 4_000_000;
@@ -45,27 +40,6 @@ fn custom_error_at(index: u8, err: SraError) -> TransactionError {
 /// The execute_actions instruction sits at index 1 (the ed25519 quote is index 0).
 fn exec_error(err: SraError) -> TransactionError {
     custom_error_at(1, err)
-}
-
-/// The mock-swap account template, in the mock's `Swap` account order: five pinned
-/// Fixed slots then the relayer-supplied routing (output token program, input mint,
-/// pool accounts). `OutputMint` is pinned so the handler reads the output token
-/// program + extensions from a committed account.
-fn mock_swap_template() -> AccountTemplate {
-    AccountTemplate {
-        slots: vec![
-            SlotRole::Fixed(FixedRole::TokenProgram), // input token program
-            SlotRole::Fixed(FixedRole::SigningAuthority),
-            SlotRole::Fixed(FixedRole::Source),
-            SlotRole::Fixed(FixedRole::Destination),
-            SlotRole::Fixed(FixedRole::OutputMint),
-            SlotRole::Free, // output_token_program
-            SlotRole::Free, // input_mint
-            SlotRole::Free, // pool_authority
-            SlotRole::Free, // pool_input
-            SlotRole::Free, // pool_output
-        ],
-    }
 }
 
 /// How the staged route's output mint is created — drives its token program and
@@ -106,13 +80,6 @@ fn verified_cpi(
 
 fn signed(quoter: Pubkey) -> MinOut {
     MinOut::SignedQuote { quoter }
-}
-
-fn spl(recipient: Pubkey, amount_bps: u16) -> SolanaAction {
-    SolanaAction::SplTransfer {
-        recipient,
-        amount_bps,
-    }
 }
 
 struct Staged {
@@ -288,31 +255,6 @@ impl Staged {
         )
         .to_vec()
     }
-}
-
-fn now(svm: &litesvm::LiteSVM) -> i64 {
-    svm.get_sysvar::<Clock>().unix_timestamp
-}
-
-/// `inner_data` for the mock swap: pull `in_amount`, deliver `out_amount`.
-fn swap_data(in_amount: u64, out_amount: u64) -> Vec<u8> {
-    mock_swap::instruction::Swap {
-        in_amount,
-        out_amount,
-    }
-    .data()
-}
-
-fn runtime(inner_data: Vec<u8>, min_amount_out: u64, expiry: i64) -> VerifiedCpiRuntime {
-    VerifiedCpiRuntime {
-        inner_data,
-        min_amount_out,
-        expiry,
-    }
-}
-
-fn status(svm: &litesvm::LiteSVM, fill_receipt: &Pubkey) -> ExecutionStatus {
-    fetch_fill_receipt(svm, fill_receipt).execution_status
 }
 
 // --------------------------------------------------------------------------

@@ -16,8 +16,7 @@ mod common;
 use anchor_lang::error::ErrorCode;
 use common::*;
 use solana_sdk::{
-    clock::Clock, instruction::InstructionError, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, transaction::TransactionError,
+    clock::Clock, pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::TransactionError,
 };
 use sra_common::{
     errors::SraError,
@@ -29,14 +28,6 @@ const AMOUNT: u64 = 4_000_000;
 /// bound to.
 const SOURCE_CHAIN_ID: u64 = 42_161;
 const FILL_DEADLINE: u32 = 1_900_000_000;
-
-fn custom_error(err: SraError) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(err.into()))
-}
-
-fn anchor_error(code: ErrorCode) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(code as u32))
-}
 
 // --------------------------------------------------------------------------
 // genuine end-to-end evidence

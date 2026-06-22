@@ -134,11 +134,19 @@ pub struct ActionsExecuted {
     pub fill_id: [u8; 32],
 }
 
-/// Emitted by `execute_actions` when an action could not be applied; the receipt
-/// advances to `ActionsFailed` and the funds stay in the execution vault for
-/// `retry_actions` / `recover_funds`. No transfers from this run persist.
+/// Emitted by `execute_actions` / `retry_actions` when an action could not be
+/// applied; the receipt is `ActionsFailed` and funds stay staged for retry or
+/// recovery. No transfers from this run persist.
 #[event]
 pub struct ActionsFailed {
+    pub route: Pubkey,
+    pub fill_id: [u8; 32],
+}
+
+/// Emitted by `retry_actions` on a successful re-run (receipt -> `ActionsSucceeded`).
+/// Distinct from `ActionsExecuted` so indexers see the success came via a retry.
+#[event]
+pub struct ActionsRetried {
     pub route: Pubkey,
     pub fill_id: [u8; 32],
 }

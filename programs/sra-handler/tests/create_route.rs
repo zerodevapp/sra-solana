@@ -1,18 +1,12 @@
 mod common;
 
 use common::*;
-use solana_sdk::{
-    instruction::InstructionError, pubkey::Pubkey, signer::Signer, transaction::TransactionError,
-};
+use solana_sdk::{pubkey::Pubkey, signer::Signer};
 use sra_common::{
     constants::{MAX_ACTION_IDXS, MAX_ADAPTERS},
     errors::SraError,
     types::{AccountTemplate, FixedRole, MinOut, SlotRole, SolanaAction},
 };
-
-fn custom_error(err: SraError) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(err.into()))
-}
 
 // --------------------------------------------------------------------------
 // happy path

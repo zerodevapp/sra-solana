@@ -11,21 +11,12 @@ mod common;
 use anchor_lang::error::ErrorCode;
 use common::*;
 use solana_sdk::{
-    instruction::InstructionError, pubkey::Pubkey, signature::Keypair, signer::Signer,
-    transaction::TransactionError,
+    pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::TransactionError,
 };
 use sra_common::{errors::SraError, types::ExecutionStatus};
 
 const AMOUNT: u64 = 4_000_000;
 const FILL_ID: [u8; 32] = [0x55; 32];
-
-fn custom_error(err: SraError) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(err.into()))
-}
-
-fn anchor_error(code: ErrorCode) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(code as u32))
-}
 
 /// A route with a planted receipt and a (possibly funded) execution vault.
 struct Recoverable {

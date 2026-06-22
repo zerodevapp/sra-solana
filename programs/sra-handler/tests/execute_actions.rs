@@ -16,10 +16,7 @@
 mod common;
 
 use common::*;
-use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, instruction::InstructionError, pubkey::Pubkey,
-    signer::Signer, transaction::TransactionError,
-};
+use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey, signer::Signer};
 use sra_common::{
     errors::SraError,
     types::{
@@ -31,17 +28,6 @@ use sra_common::{
 const AMOUNT: u64 = 4_000_000;
 const SOURCE_CHAIN_ID: u64 = 42_161;
 const FILL_ID: [u8; 32] = [7u8; 32];
-
-fn custom_error(err: SraError) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(err.into()))
-}
-
-fn spl(recipient: Pubkey, amount_bps: u16) -> SolanaAction {
-    SolanaAction::SplTransfer {
-        recipient,
-        amount_bps,
-    }
-}
 
 /// A valid `VerifiedCpi` action (pins all four required slots, non-zero keys) —
 /// creatable at `create_route`, not executable in this build.
@@ -122,10 +108,6 @@ fn stage(svm: &mut litesvm::LiteSVM, action_config: Vec<SolanaAction>, amount: u
         fill_receipt,
         action_config,
     }
-}
-
-fn status(svm: &litesvm::LiteSVM, fill_receipt: &Pubkey) -> ExecutionStatus {
-    fetch_fill_receipt(svm, fill_receipt).execution_status
 }
 
 // --------------------------------------------------------------------------

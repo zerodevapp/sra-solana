@@ -2,22 +2,12 @@ mod common;
 
 use anchor_lang::error::ErrorCode;
 use common::*;
-use solana_sdk::{
-    instruction::InstructionError, pubkey::Pubkey, signer::Signer, transaction::TransactionError,
-};
+use solana_sdk::{pubkey::Pubkey, signer::Signer};
 use sra_common::{
     constants::MAX_ADAPTERS,
     errors::SraError,
     types::{ExecutionStatus, ManageRouteParams},
 };
-
-fn custom_error(err: SraError) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(err.into()))
-}
-
-fn anchor_error(code: ErrorCode) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(code as u32))
-}
 
 fn mr_params(pause: Option<bool>, adapters: Option<Vec<Pubkey>>) -> ManageRouteParams {
     ManageRouteParams { pause, adapters }

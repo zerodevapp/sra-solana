@@ -95,6 +95,20 @@ pub mod sra_handler {
         )
     }
 
+    pub fn retry_actions<'info>(
+        ctx: Context<'_, '_, '_, 'info, RetryActions<'info>>,
+        fill_id: [u8; 32],
+        action_config: Vec<SolanaAction>,
+        verified_runtimes: Vec<VerifiedCpiRuntime>,
+    ) -> Result<()> {
+        instructions::destination::retry_actions::handler(
+            ctx,
+            fill_id,
+            action_config,
+            verified_runtimes,
+        )
+    }
+
     pub fn recover_funds(ctx: Context<RecoverFunds>) -> Result<()> {
         instructions::destination::recover_funds::handler(ctx)
     }

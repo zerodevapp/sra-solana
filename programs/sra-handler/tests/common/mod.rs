@@ -2,7 +2,8 @@
 #![allow(clippy::too_many_arguments)]
 
 use anchor_lang::{
-    AccountDeserialize, AnchorSerialize, Discriminator, InstructionData, ToAccountMetas,
+    error::ErrorCode, AccountDeserialize, AnchorSerialize, Discriminator, InstructionData,
+    ToAccountMetas,
 };
 use anchor_spl::{
     associated_token::{get_associated_token_address, ID as ATA_PROGRAM_ID},
@@ -13,8 +14,9 @@ use litesvm_token::{
     spl_token::state::Account as SplTokenAccount, CreateAssociatedTokenAccount, CreateMint, MintTo,
 };
 use solana_sdk::{
+    clock::Clock,
     compute_budget::ComputeBudgetInstruction,
-    instruction::{AccountMeta, Instruction},
+    instruction::{AccountMeta, Instruction, InstructionError},
     message::{AddressLookupTableAccount, Message},
     pubkey::Pubkey,
     signature::Keypair,
@@ -26,6 +28,7 @@ use sra_across_adapter::utils::svm_spoke::types::RelayData;
 use sra_common::{
     abi::u256_from_u64,
     constants::{ACROSS_SPOKE_POOL_ID, SOLANA_CHAIN_ID},
+    errors::SraError,
     instruction_data::encode_anchor_instruction_data,
     seeds::{
         action_config_hash, route_config_hash, SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK,
@@ -35,9 +38,10 @@ use sra_common::{
     source_deposit::{AcrossDepositParams, PrepareParams},
     test_utils::DEFAULT_ACTION_IDXS,
     types::{
-        AddressBookEntry, AddressBookRoot, AssetFeeTier, CreateRouteParams, ExecutionStatus,
-        FeeConfig, FillReceipt, ManageRouteParams, MintNonce, ProtocolFeeConfig, SolanaAction,
-        SolanaSraRoute, SourceHandlerData, SraConfig, VerifiedCpiRuntime,
+        AccountTemplate, AddressBookEntry, AddressBookRoot, AssetFeeTier, CreateRouteParams,
+        ExecutionStatus, FeeConfig, FillReceipt, FixedRole, ManageRouteParams, MintNonce,
+        ProtocolFeeConfig, SlotRole, SolanaAction, SolanaSraRoute, SourceHandlerData, SraConfig,
+        VerifiedCpiRuntime,
     },
 };
 use std::{fs, path::PathBuf};
@@ -45,6 +49,72 @@ use std::{fs, path::PathBuf};
 pub const PROGRAM_ID: Pubkey = sra_handler::ID;
 pub const ADAPTER_PROGRAM_ID: Pubkey = sra_across_adapter::ID;
 pub const SOL: u64 = 1_000_000_000;
+
+// --- Shared test assertions & action builders ---
+
+/// `TransactionError` for a program `SraError` from the instruction at index 0.
+pub fn custom_error(err: SraError) -> TransactionError {
+    TransactionError::InstructionError(0, InstructionError::Custom(err.into()))
+}
+
+/// `TransactionError` for an Anchor built-in `ErrorCode` at instruction index 0.
+pub fn anchor_error(code: ErrorCode) -> TransactionError {
+    TransactionError::InstructionError(0, InstructionError::Custom(code as u32))
+}
+
+/// The `execution_status` of the fill receipt at `fill_receipt`.
+pub fn status(svm: &LiteSVM, fill_receipt: &Pubkey) -> ExecutionStatus {
+    fetch_fill_receipt(svm, fill_receipt).execution_status
+}
+
+/// A `SplTransfer` action sending `amount_bps` of the vault snapshot to `recipient`.
+pub fn spl(recipient: Pubkey, amount_bps: u16) -> SolanaAction {
+    SolanaAction::SplTransfer {
+        recipient,
+        amount_bps,
+    }
+}
+
+/// The mock-swap account template: five pinned slots then relayer routing.
+pub fn mock_swap_template() -> AccountTemplate {
+    AccountTemplate {
+        slots: vec![
+            SlotRole::Fixed(FixedRole::TokenProgram), // input token program
+            SlotRole::Fixed(FixedRole::SigningAuthority),
+            SlotRole::Fixed(FixedRole::Source),
+            SlotRole::Fixed(FixedRole::Destination),
+            SlotRole::Fixed(FixedRole::OutputMint),
+            SlotRole::Free, // output_token_program
+            SlotRole::Free, // input_mint
+            SlotRole::Free, // pool_authority
+            SlotRole::Free, // pool_input
+            SlotRole::Free, // pool_output
+        ],
+    }
+}
+
+/// `inner_data` for the mock swap: pull `in_amount`, deliver `out_amount`.
+pub fn swap_data(in_amount: u64, out_amount: u64) -> Vec<u8> {
+    mock_swap::instruction::Swap {
+        in_amount,
+        out_amount,
+    }
+    .data()
+}
+
+/// A `VerifiedCpiRuntime` for one mock-swap action.
+pub fn runtime(inner_data: Vec<u8>, min_amount_out: u64, expiry: i64) -> VerifiedCpiRuntime {
+    VerifiedCpiRuntime {
+        inner_data,
+        min_amount_out,
+        expiry,
+    }
+}
+
+/// Current on-chain unix timestamp.
+pub fn now(svm: &LiteSVM) -> i64 {
+    svm.get_sysvar::<Clock>().unix_timestamp
+}
 
 fn program_so_path() -> PathBuf {
     deploy_artifact_path("sra_handler.so")
@@ -1987,6 +2057,67 @@ pub fn execute_actions_ix_full(
         program_id: PROGRAM_ID,
         accounts,
         data: sra_handler::instruction::ExecuteActions {
+            fill_id,
+            action_config,
+            verified_runtimes,
+        }
+        .data(),
+    }
+}
+
+/// SplTransfer-only retry convenience (mirrors `execute_actions_ix` + owner signer).
+pub fn retry_actions_ix(
+    owner: &Pubkey,
+    route: &Pubkey,
+    fill_id: [u8; 32],
+    action_config: Vec<SolanaAction>,
+    mint: &Pubkey,
+    recipient_atas: &[Pubkey],
+) -> Instruction {
+    let remaining = recipient_atas
+        .iter()
+        .map(|ata| AccountMeta::new(*ata, false))
+        .collect();
+    retry_actions_ix_full(
+        owner,
+        route,
+        fill_id,
+        action_config,
+        vec![],
+        mint,
+        remaining,
+    )
+}
+
+/// Full `retry_actions` builder (mirrors `execute_actions_ix_full` + owner signer).
+pub fn retry_actions_ix_full(
+    owner: &Pubkey,
+    route: &Pubkey,
+    fill_id: [u8; 32],
+    action_config: Vec<SolanaAction>,
+    verified_runtimes: Vec<VerifiedCpiRuntime>,
+    mint: &Pubkey,
+    remaining: Vec<AccountMeta>,
+) -> Instruction {
+    let (execution_authority, _) = derive_execution_authority_pda(route);
+    let execution_vault = derive_ata(&execution_authority, mint);
+    let (fill_receipt, _) = derive_fill_receipt_pda(route, &fill_id);
+    let mut accounts = sra_handler::accounts::RetryActions {
+        owner: *owner,
+        route: *route,
+        fill_receipt,
+        expected_mint: *mint,
+        execution_authority,
+        execution_vault,
+        token_program: TOKEN_PROGRAM_ID,
+        instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
+    }
+    .to_account_metas(None);
+    accounts.extend(remaining);
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts,
+        data: sra_handler::instruction::RetryActions {
             fill_id,
             action_config,
             verified_runtimes,

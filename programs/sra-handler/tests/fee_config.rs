@@ -3,10 +3,7 @@ mod common;
 use anchor_lang::error::ErrorCode;
 use common::*;
 use litesvm::LiteSVM;
-use solana_sdk::{
-    instruction::InstructionError, pubkey::Pubkey, signature::Keypair, signer::Signer,
-    transaction::TransactionError,
-};
+use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use sra_common::{constants::MAX_FEE_BPS, errors::SraError};
 
 const DEFAULT_FEE_BPS: u16 = 30;
@@ -16,14 +13,6 @@ const TIER_ABOVE_BPS: u16 = 10;
 
 fn sample_app_id() -> [u8; 32] {
     [0x77u8; 32]
-}
-
-fn custom_error(err: SraError) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(err.into()))
-}
-
-fn anchor_error(code: ErrorCode) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(code as u32))
 }
 
 /// Initialize the singleton fee config and return the admin keypair that owns it.
