@@ -10,8 +10,7 @@ use anchor_spl::{
 };
 use litesvm::LiteSVM;
 use litesvm_token::{
-    get_spl_account, spl_token::state::Account as SplTokenAccount, CreateAssociatedTokenAccount,
-    CreateMint, MintTo,
+    spl_token::state::Account as SplTokenAccount, CreateAssociatedTokenAccount, CreateMint, MintTo,
 };
 use solana_sdk::{
     compute_budget::ComputeBudgetInstruction,
@@ -772,8 +771,15 @@ pub fn mint_to(
 }
 
 pub fn fetch_token_balance(svm: &LiteSVM, ata: &Pubkey) -> u64 {
-    get_spl_account::<SplTokenAccount>(svm, ata)
-        .expect("token account exists")
+    // Read via StateWithExtensions so this works for both legacy SPL accounts
+    // (exactly 165 bytes) and Token-2022 accounts carrying extensions (e.g.
+    // TransferFeeAmount) — same reader the handler uses. The base `amount` is the
+    // post-fee landed balance.
+    use anchor_spl::token_2022::spl_token_2022::{extension::StateWithExtensions, state::Account};
+    let account = svm.get_account(ata).expect("token account exists");
+    StateWithExtensions::<Account>::unpack(&account.data)
+        .expect("initialized token account")
+        .base
         .amount
 }
 
