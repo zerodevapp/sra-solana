@@ -14,8 +14,7 @@
 //! shortfall or failing CPI → hard tx revert (Solana can't catch a CPI revert
 //! mid-action) — strictly more conservative than EVM's catch.
 //!
-//! The validate-plan-execute core is `run_committed_actions`; `retry_actions`
-//! re-runs the same function so first-execution and retry can never diverge.
+//! The validate-plan-execute core is `run_committed_actions`, shared with `retry_actions`.
 
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::{
@@ -96,19 +95,16 @@ enum Planned {
     },
 }
 
-/// The terminal outcome of running a route's committed actions. The caller maps
-/// it to the receipt status + lifecycle event for its instruction.
+/// Outcome of running committed actions; the caller maps it to status + event.
 pub(crate) enum ActionOutcome {
-    /// Every action applied; advance the receipt to `ActionsSucceeded`.
+    /// Every action applied.
     Succeeded,
-    /// A recoverable per-account problem was detected before any transfer; persist
-    /// `ActionsFailed` and leave the funds staged for retry/recover.
+    /// A recoverable per-account problem was found before any transfer (none ran).
     SoftFailed,
 }
 
-/// The handler accounts `run_committed_actions` needs, borrowed identically from
-/// `ExecuteActions` and `RetryActions` so first-execution and retry share one code
-/// path and can never diverge.
+/// The accounts `run_committed_actions` needs, borrowed identically from
+/// `ExecuteActions` and `RetryActions`.
 pub(crate) struct ActionAccounts<'a, 'info> {
     pub route: &'a Account<'info, SolanaSraRoute>,
     pub expected_mint: &'a Account<'info, Mint>,
@@ -157,12 +153,10 @@ pub(crate) fn handler<'info>(
     Ok(())
 }
 
-/// Re-supply-and-verify the committed `action_config`, then validate-plan-execute
-/// it against the execution vault. Moves nothing until every action passes its
-/// checks (atomicity): returns `SoftFailed` (no transfers) on a recoverable
-/// per-account problem, `Succeeded` after running the whole batch. Hard-rejects
-/// (structural relayer errors, hash mismatch, expired/invalid quote, post-CPI
-/// shortfall) return `Err`; the receipt status is the caller's to set.
+/// Verify and run the committed `action_config` against the execution vault.
+/// Two-pass: moves nothing until every action passes (atomicity). Returns
+/// `SoftFailed` (no transfers) on a recoverable per-account problem, `Succeeded`
+/// after the whole batch; hard-rejects return `Err`. Caller sets the receipt status.
 pub(crate) fn run_committed_actions<'info>(
     accounts: &ActionAccounts<'_, 'info>,
     fill_id: [u8; 32],
@@ -367,7 +361,7 @@ pub(crate) fn run_committed_actions<'info>(
         SraError::ActionAccountMismatch
     );
 
-    // Soft fail: report it so the caller persists ActionsFailed; funds stay staged.
+    // Soft fail (no transfers ran) — caller persists ActionsFailed.
     if any_action_would_fail {
         return Ok(ActionOutcome::SoftFailed);
     }

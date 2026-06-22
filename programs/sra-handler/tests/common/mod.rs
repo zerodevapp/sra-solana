@@ -1995,8 +1995,7 @@ pub fn execute_actions_ix_full(
     }
 }
 
-/// SplTransfer-only retry convenience: mirrors `execute_actions_ix` plus the
-/// owner signer that `retry_actions` requires. Delegates to the full builder.
+/// SplTransfer-only retry convenience (mirrors `execute_actions_ix` + owner signer).
 pub fn retry_actions_ix(
     owner: &Pubkey,
     route: &Pubkey,
@@ -2020,8 +2019,7 @@ pub fn retry_actions_ix(
     )
 }
 
-/// Full `retry_actions` builder: same per-action `remaining_accounts` shape as
-/// `execute_actions_ix_full`, plus the owner signer and `has_one`-bound route.
+/// Full `retry_actions` builder (mirrors `execute_actions_ix_full` + owner signer).
 pub fn retry_actions_ix_full(
     owner: &Pubkey,
     route: &Pubkey,

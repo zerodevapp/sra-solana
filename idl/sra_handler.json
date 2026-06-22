@@ -1528,7 +1528,7 @@
         {
           "name": "owner",
           "docs": [
-            "Only the route owner may retry — the recovery counterpart of `recover_funds`."
+            "Only the route owner may retry."
           ],
           "signer": true,
           "relations": [
@@ -1538,16 +1538,14 @@
         {
           "name": "route",
           "docs": [
-            "Bound to `owner` by `has_one`. Not seed-bound (same rationale as",
-            "`ExecuteActions`): the `fill_receipt` PDA below is seeded by `route.key()`."
+            "`has_one = owner`; not seed-bound (the `fill_receipt` PDA is seeded by `route`)."
           ]
         },
         {
           "name": "fill_receipt",
           "docs": [
-            "The replay/lifecycle marker; bound to `route` + `fill_id` by its seeds. Read",
-            "for the `ActionsFailed` precondition and advanced to `ActionsSucceeded` on a",
-            "clean re-run. Never closed (closing it would re-enable replay of the fill)."
+            "Replay/lifecycle marker: gates on `ActionsFailed`, advanced on a clean",
+            "re-run, never closed."
           ],
           "writable": true,
           "pda": {
@@ -1585,9 +1583,6 @@
         },
         {
           "name": "execution_authority",
-          "docs": [
-            "by seeds and signs the `SplTransfer` payouts and the vault->scratch move."
-          ],
           "pda": {
             "seeds": [
               {
@@ -1707,9 +1702,6 @@
         },
         {
           "name": "instructions_sysvar",
-          "docs": [
-            "price quote backing a `VerifiedCpi` action's `min_out`."
-          ],
           "address": "Sysvar1nstructions1111111111111111111111111"
         }
       ],
@@ -3229,10 +3221,9 @@
     {
       "name": "ActionsFailed",
       "docs": [
-        "Emitted by `execute_actions` (and `retry_actions` on a re-run that still",
-        "fails) when an action could not be applied; the receipt is `ActionsFailed`",
-        "and the funds stay in the execution vault for `retry_actions` /",
-        "`recover_funds`. No transfers from this run persist."
+        "Emitted by `execute_actions` / `retry_actions` when an action could not be",
+        "applied; the receipt is `ActionsFailed` and funds stay staged for retry or",
+        "recovery. No transfers from this run persist."
       ],
       "type": {
         "kind": "struct",
@@ -3256,10 +3247,8 @@
     {
       "name": "ActionsRetried",
       "docs": [
-        "Emitted by `retry_actions` when a re-run of a previously `ActionsFailed`",
-        "receipt applied every committed action and advanced it to `ActionsSucceeded`",
-        "(terminal). Distinct from `ActionsExecuted` so indexers can observe that the",
-        "success came via a retry rather than the first `execute_actions`."
+        "Emitted by `retry_actions` on a successful re-run (receipt -> `ActionsSucceeded`).",
+        "Distinct from `ActionsExecuted` so indexers see the success came via a retry."
       ],
       "type": {
         "kind": "struct",

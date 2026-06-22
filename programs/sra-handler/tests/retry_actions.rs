@@ -1,13 +1,6 @@
 //! Owner-gated re-execution of a route's committed actions (`retry_actions`).
-//!
-//! A route lands in `ActionsFailed` when `execute_actions` hits a recoverable
-//! runtime problem (missing/frozen recipient ATA, frozen vault, a verified swap
-//! that fell short). `retry_actions` re-runs the *same* committed `action_config`
-//! through the *same* shared engine as `execute_actions`, so a fix applied
-//! out-of-band (creating the ATA, fixing a quote) settles on the next attempt.
-//! It is owner-gated (the recovery counterpart of `recover_funds`) and runs
-//! indefinitely — no retry counter, matching the EVM model where a failed target
-//! action leaves the funds usable with no attempt limit.
+//! Re-runs the same `action_config` through the same shared engine as
+//! `execute_actions` after a soft-fail, so an out-of-band fix settles on retry.
 
 mod common;
 
@@ -68,9 +61,8 @@ struct Staged {
     action_config: Vec<SolanaAction>,
 }
 
-/// Create a route with `action_config`, fund its execution vault, and seed a
-/// `FillReceipt` in `initial_status`. Recipient ATAs are NOT created here (tests
-/// opt in). Returns the owner keypair so retry tests can sign the owner gate.
+/// Create a route, fund its execution vault, and seed a `FillReceipt` in
+/// `initial_status`. Recipient ATAs are not created here (tests opt in).
 fn stage(
     svm: &mut litesvm::LiteSVM,
     action_config: Vec<SolanaAction>,
@@ -271,9 +263,7 @@ fn retry_actions_still_failing_stays_actions_failed() {
 
 #[test]
 fn retry_actions_non_actions_failed_status_rejected() {
-    // Retry has exactly one entry status (ActionsFailed). Every other state is
-    // rejected and left untouched: Finalized belongs to execute_actions, and
-    // ActionsSucceeded / Recovered are terminal — none can be re-run.
+    // Only ActionsFailed is retryable; every other state is rejected and untouched.
     for rejected in [
         ExecutionStatus::Finalized,
         ExecutionStatus::ActionsSucceeded,
@@ -494,8 +484,7 @@ impl VerifiedStaged {
 }
 
 /// Stage a route with one signed-quote VerifiedCpi action, a funded mock-swap
-/// pool, the scratch + destination ATAs, and an `ActionsFailed` receipt — ready
-/// for a `retry_actions` that should settle through the verified engine.
+/// pool, scratch + destination ATAs, and an `ActionsFailed` receipt.
 fn stage_verified(svm: &mut litesvm::LiteSVM, quoter: &Keypair) -> VerifiedStaged {
     let payer = funded_keypair(svm, 100 * SOL);
     let owner = funded_keypair(svm, 100 * SOL);

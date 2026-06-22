@@ -1,13 +1,8 @@
-//! Owner-gated re-execution of a route's committed actions.
-//!
-//! When `execute_actions` hits a recoverable per-account failure it persists
-//! `ActionsFailed` and leaves the funds staged. `retry_actions` lets the route
-//! owner re-run the same committed `action_config` through the same shared engine
-//! (`run_committed_actions`) once the underlying problem is fixed out-of-band
-//! (the recipient ATA created, a fresh quote provided). It runs indefinitely —
-//! there is no retry counter, matching the model where a failed target action
-//! leaves the funds usable with no attempt limit. The only other escape from
-//! `ActionsFailed` is `recover_funds` (drain to the owner).
+//! Owner-gated re-execution of a route's committed actions after an
+//! `execute_actions` run left the receipt `ActionsFailed`. Re-runs the same
+//! `action_config` through the shared `run_committed_actions`, so retry can never
+//! diverge from first execution. Retryable indefinitely (no counter); the other
+//! `ActionsFailed` escape is `recover_funds`.
 
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
@@ -23,15 +18,13 @@ use crate::events::{ActionsFailed, ActionsRetried};
 #[derive(Accounts)]
 #[instruction(fill_id: [u8; 32])]
 pub struct RetryActions<'info> {
-    /// Only the route owner may retry — the recovery counterpart of `recover_funds`.
+    /// Only the route owner may retry.
     pub owner: Signer<'info>,
-    /// Bound to `owner` by `has_one`. Not seed-bound (same rationale as
-    /// `ExecuteActions`): the `fill_receipt` PDA below is seeded by `route.key()`.
+    /// `has_one = owner`; not seed-bound (the `fill_receipt` PDA is seeded by `route`).
     #[account(has_one = owner)]
     pub route: Box<Account<'info, SolanaSraRoute>>,
-    /// The replay/lifecycle marker; bound to `route` + `fill_id` by its seeds. Read
-    /// for the `ActionsFailed` precondition and advanced to `ActionsSucceeded` on a
-    /// clean re-run. Never closed (closing it would re-enable replay of the fill).
+    /// Replay/lifecycle marker: gates on `ActionsFailed`, advanced on a clean
+    /// re-run, never closed.
     #[account(
         mut,
         seeds = [SEED_FILL_RECEIPT, route.key().as_ref(), &fill_id],
@@ -40,8 +33,7 @@ pub struct RetryActions<'info> {
     pub fill_receipt: Box<Account<'info, FillReceipt>>,
     #[account(address = route.expected_mint)]
     pub expected_mint: Box<Account<'info, Mint>>,
-    /// CHECK: PDA ["execution", route] — the execution-vault authority; validated
-    /// by seeds and signs the `SplTransfer` payouts and the vault->scratch move.
+    /// CHECK: PDA ["execution", route]; signs the payouts and vault->scratch move.
     #[account(seeds = [SEED_EXECUTION, route.key().as_ref()], bump)]
     pub execution_authority: UncheckedAccount<'info>,
     #[account(
@@ -51,8 +43,7 @@ pub struct RetryActions<'info> {
     )]
     pub execution_vault: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
-    /// CHECK: instructions sysvar, pinned by address; read to locate the signed
-    /// price quote backing a `VerifiedCpi` action's `min_out`.
+    /// CHECK: instructions sysvar; locates the `VerifiedCpi` signed price quote.
     #[account(address = anchor_lang::solana_program::sysvar::instructions::ID)]
     pub instructions_sysvar: UncheckedAccount<'info>,
     // Per-action accounts ride in `remaining_accounts`, identical to `ExecuteActions`.
@@ -64,8 +55,7 @@ pub(crate) fn handler<'info>(
     action_config: Vec<SolanaAction>,
     verified_runtimes: Vec<VerifiedCpiRuntime>,
 ) -> Result<()> {
-    // Retry only operates on a previously-failed run. A Finalized receipt belongs
-    // to execute_actions, and the terminal states cannot be re-run.
+    // Only an ActionsFailed receipt is retryable (Finalized -> execute_actions; terminal states can't re-run).
     require!(
         ctx.accounts.fill_receipt.execution_status == ExecutionStatus::ActionsFailed,
         SraError::InvalidExecutionStatus
@@ -85,13 +75,13 @@ pub(crate) fn handler<'info>(
 
     match run_committed_actions(&accounts, fill_id, &action_config, &verified_runtimes)? {
         ActionOutcome::Succeeded => {
+            // The re-run applied. ActionsRetried is the retry-path success event
+            // (the counterpart of execute_actions' ActionsExecuted), not a re-attempt.
             ctx.accounts.fill_receipt.execution_status = ExecutionStatus::ActionsSucceeded;
             emit!(ActionsRetried { route, fill_id });
         }
         ActionOutcome::SoftFailed => {
-            // Still failing: the status is already ActionsFailed (the precondition),
-            // so leave it; re-emit the marker so the attempt is observable. Funds
-            // stay staged and the route can be retried again later.
+            // Already ActionsFailed; leave it and re-emit so the attempt is observable.
             emit!(ActionsFailed { route, fill_id });
         }
     }
