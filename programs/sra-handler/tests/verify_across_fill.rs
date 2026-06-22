@@ -31,10 +31,6 @@ fn adapter_error(err: AcrossAdapterError) -> TransactionError {
     TransactionError::InstructionError(0, InstructionError::Custom(err.into()))
 }
 
-fn anchor_error(code: ErrorCode) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(code as u32))
-}
-
 struct Dest {
     payer: Keypair,
     owner: Keypair,

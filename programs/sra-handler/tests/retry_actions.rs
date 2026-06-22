@@ -5,24 +5,13 @@
 mod common;
 
 use anchor_lang::error::ErrorCode;
-use anchor_lang::InstructionData;
 use anchor_spl::token::ID as TOKEN_PROGRAM_ID;
 use common::*;
-use solana_sdk::{
-    clock::Clock,
-    instruction::{AccountMeta, InstructionError},
-    pubkey::Pubkey,
-    signature::Keypair,
-    signer::Signer,
-    transaction::TransactionError,
-};
+use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey, signature::Keypair, signer::Signer};
 use sra_common::{
     errors::SraError,
     quote::{action_context_hash, signed_quote_message},
-    types::{
-        AccountTemplate, CreateRouteParams, ExecutionStatus, FixedRole, MinOut, SlotRole,
-        SolanaAction, VerifiedCpiRuntime,
-    },
+    types::{CreateRouteParams, ExecutionStatus, MinOut, SolanaAction},
 };
 
 const AMOUNT: u64 = 4_000_000;
@@ -31,25 +20,6 @@ const POOL_LIQUIDITY: u64 = 100_000_000;
 const SOURCE_CHAIN_ID: u64 = 42_161;
 const FILL_ID: [u8; 32] = [7u8; 32];
 const DECIMALS: u8 = 6;
-
-fn custom_error(err: SraError) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(err.into()))
-}
-
-fn anchor_error(code: ErrorCode) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(code as u32))
-}
-
-fn spl(recipient: Pubkey, amount_bps: u16) -> SolanaAction {
-    SolanaAction::SplTransfer {
-        recipient,
-        amount_bps,
-    }
-}
-
-fn status(svm: &litesvm::LiteSVM, fill_receipt: &Pubkey) -> ExecutionStatus {
-    fetch_fill_receipt(svm, fill_receipt).execution_status
-}
 
 struct Staged {
     payer: Keypair,
@@ -382,25 +352,7 @@ fn retry_actions_spl_transfer_substitution_rejected() {
 // VerifiedCpi retry runs through the same shared engine as execute_actions
 // --------------------------------------------------------------------------
 
-/// The mock-swap account template (five pinned slots then relayer routing),
-/// matching the verified-CPI engine tests.
-fn mock_swap_template() -> AccountTemplate {
-    AccountTemplate {
-        slots: vec![
-            SlotRole::Fixed(FixedRole::TokenProgram),
-            SlotRole::Fixed(FixedRole::SigningAuthority),
-            SlotRole::Fixed(FixedRole::Source),
-            SlotRole::Fixed(FixedRole::Destination),
-            SlotRole::Fixed(FixedRole::OutputMint),
-            SlotRole::Free, // output_token_program
-            SlotRole::Free, // input_mint
-            SlotRole::Free, // pool_authority
-            SlotRole::Free, // pool_input
-            SlotRole::Free, // pool_output
-        ],
-    }
-}
-
+/// One signed-quote VerifiedCpi action over the shared `mock_swap_template`.
 fn verified_cpi(input_mint: Pubkey, output_mint: Pubkey, quoter: Pubkey) -> SolanaAction {
     SolanaAction::VerifiedCpi {
         program_id: mock_swap::ID,
@@ -411,26 +363,6 @@ fn verified_cpi(input_mint: Pubkey, output_mint: Pubkey, quoter: Pubkey) -> Sola
         min_out: MinOut::SignedQuote { quoter },
         allow_permissioned_output: false,
     }
-}
-
-fn swap_data(in_amount: u64, out_amount: u64) -> Vec<u8> {
-    mock_swap::instruction::Swap {
-        in_amount,
-        out_amount,
-    }
-    .data()
-}
-
-fn runtime(inner_data: Vec<u8>, min_amount_out: u64, expiry: i64) -> VerifiedCpiRuntime {
-    VerifiedCpiRuntime {
-        inner_data,
-        min_amount_out,
-        expiry,
-    }
-}
-
-fn now(svm: &litesvm::LiteSVM) -> i64 {
-    svm.get_sysvar::<Clock>().unix_timestamp
 }
 
 struct VerifiedStaged {
