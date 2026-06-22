@@ -10,8 +10,7 @@ use anchor_spl::{
 };
 use litesvm::LiteSVM;
 use litesvm_token::{
-    get_spl_account, spl_token::state::Account as SplTokenAccount, CreateAssociatedTokenAccount,
-    CreateMint, MintTo,
+    spl_token::state::Account as SplTokenAccount, CreateAssociatedTokenAccount, CreateMint, MintTo,
 };
 use solana_sdk::{
     compute_budget::ComputeBudgetInstruction,
@@ -772,9 +771,175 @@ pub fn mint_to(
 }
 
 pub fn fetch_token_balance(svm: &LiteSVM, ata: &Pubkey) -> u64 {
-    get_spl_account::<SplTokenAccount>(svm, ata)
-        .expect("token account exists")
+    // Read via StateWithExtensions so this works for both legacy SPL accounts
+    // (exactly 165 bytes) and Token-2022 accounts carrying extensions (e.g.
+    // TransferFeeAmount) — same reader the handler uses. The base `amount` is the
+    // post-fee landed balance.
+    use anchor_spl::token_2022::spl_token_2022::{extension::StateWithExtensions, state::Account};
+    let account = svm.get_account(ata).expect("token account exists");
+    StateWithExtensions::<Account>::unpack(&account.data)
+        .expect("initialized token account")
+        .base
         .amount
+}
+
+// --- Token-2022 helpers ---
+//
+// litesvm-token defaults to legacy SPL; `.token_program_id` switches each builder
+// to Token-2022 (the program is bundled in `LiteSVM::new`, so transfers, fees, and
+// extension enforcement are real). Extension mints are built with the real
+// Token-2022 instructions so their on-chain layout is authentic.
+
+pub fn derive_ata_2022(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+    anchor_spl::associated_token::get_associated_token_address_with_program_id(
+        owner,
+        mint,
+        &TOKEN_2022_PROGRAM_ID,
+    )
+}
+
+pub fn create_mint_2022(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    mint_authority: &Pubkey,
+    decimals: u8,
+) -> Pubkey {
+    // Built from real Token-2022 instructions (litesvm-token's legacy builders
+    // mishandle a Token-2022 program-id override).
+    create_mint_2022_with_extensions(svm, payer, mint_authority, decimals, &[], |_| vec![])
+}
+
+pub fn create_ata_2022(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    owner: &Pubkey,
+    mint: &Pubkey,
+) -> Pubkey {
+    CreateAssociatedTokenAccount::new(svm, payer, mint)
+        .owner(owner)
+        .token_program_id(&TOKEN_2022_PROGRAM_ID)
+        .send()
+        .expect("create_associated_token_account (token-2022) should succeed")
+}
+
+pub fn mint_to_2022(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    mint_authority: &Keypair,
+    mint: &Pubkey,
+    to: &Pubkey,
+    amount: u64,
+) {
+    let ix = anchor_spl::token_2022::spl_token_2022::instruction::mint_to(
+        &TOKEN_2022_PROGRAM_ID,
+        mint,
+        to,
+        &mint_authority.pubkey(),
+        &[],
+        amount,
+    )
+    .expect("mint_to (token-2022) instruction");
+    send_instructions(svm, &[ix], payer, &[mint_authority]).expect("mint_to (token-2022)");
+}
+
+/// Build a Token-2022 mint carrying the given extensions (initialized via the real
+/// program instructions, then the mint). `ext_ixs` builds the per-extension
+/// initialize instruction(s), which must precede `initialize_mint2`.
+fn create_mint_2022_with_extensions(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    mint_authority: &Pubkey,
+    decimals: u8,
+    extensions: &[anchor_spl::token_2022::spl_token_2022::extension::ExtensionType],
+    ext_ixs: impl FnOnce(&Pubkey) -> Vec<Instruction>,
+) -> Pubkey {
+    use anchor_spl::token_2022::spl_token_2022::{
+        extension::ExtensionType, instruction::initialize_mint2, state::Mint,
+    };
+
+    let mint = Keypair::new();
+    let space = ExtensionType::try_calculate_account_len::<Mint>(extensions)
+        .expect("mint length with extensions");
+    let mut ixs = vec![solana_system_interface::instruction::create_account(
+        &payer.pubkey(),
+        &mint.pubkey(),
+        svm.minimum_balance_for_rent_exemption(space),
+        space as u64,
+        &TOKEN_2022_PROGRAM_ID,
+    )];
+    ixs.extend(ext_ixs(&mint.pubkey()));
+    ixs.push(
+        initialize_mint2(
+            &TOKEN_2022_PROGRAM_ID,
+            &mint.pubkey(),
+            mint_authority,
+            None,
+            decimals,
+        )
+        .expect("initialize_mint2"),
+    );
+    send_instructions(svm, &ixs, payer, &[&mint]).expect("create token-2022 extension mint");
+    mint.pubkey()
+}
+
+/// A Token-2022 mint with a transfer fee (`fee_bps`, capped at `max_fee`).
+pub fn create_transfer_fee_mint_2022(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    mint_authority: &Pubkey,
+    decimals: u8,
+    fee_bps: u16,
+    max_fee: u64,
+) -> Pubkey {
+    use anchor_spl::token_2022::spl_token_2022::extension::{
+        transfer_fee::instruction::initialize_transfer_fee_config, ExtensionType,
+    };
+    let authority = *mint_authority;
+    create_mint_2022_with_extensions(
+        svm,
+        payer,
+        mint_authority,
+        decimals,
+        &[ExtensionType::TransferFeeConfig],
+        |mint| {
+            vec![initialize_transfer_fee_config(
+                &TOKEN_2022_PROGRAM_ID,
+                mint,
+                Some(&authority),
+                Some(&authority),
+                fee_bps,
+                max_fee,
+            )
+            .expect("initialize_transfer_fee_config")]
+        },
+    )
+}
+
+/// A Token-2022 mint with a permanent delegate — the canonical "permissioned"
+/// (issuer can move/burn from any account) output the executor must gate.
+pub fn create_permissioned_mint_2022(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    mint_authority: &Pubkey,
+    decimals: u8,
+) -> Pubkey {
+    use anchor_spl::token_2022::spl_token_2022::{
+        extension::ExtensionType, instruction::initialize_permanent_delegate,
+    };
+    let delegate = *mint_authority;
+    create_mint_2022_with_extensions(
+        svm,
+        payer,
+        mint_authority,
+        decimals,
+        &[ExtensionType::PermanentDelegate],
+        |mint| {
+            vec![
+                initialize_permanent_delegate(&TOKEN_2022_PROGRAM_ID, mint, &delegate)
+                    .expect("initialize_permanent_delegate"),
+            ]
+        },
+    )
 }
 
 pub fn setup_address_book_entry(

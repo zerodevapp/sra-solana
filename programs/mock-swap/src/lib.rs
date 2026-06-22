@@ -1,12 +1,20 @@
 //! Generic balance-diff swap mock for verified-CPI engine tests (not a deploy
 //! target). Stands in for any third-party swap/deposit the engine routes through.
-//! Two real SPL `transfer_checked` legs: pull `in_amount` from the scratch `source`
+//! Two real `transfer_checked` legs: pull `in_amount` from the scratch `source`
 //! (signing authority granted by the engine's `invoke_signed`, so over-pulling
 //! fails the scratch bound), then deliver `out_amount` from its pool to the pinned
-//! `destination` (`out_amount` is caller-controlled, to exercise the `min_out` floor).
+//! `destination` (`out_amount` is caller-controlled, to exercise the `min_out`
+//! floor).
+//!
+//! The two legs carry separate token programs (`token_program` for the input leg,
+//! `output_token_program` for the output leg) and `token_interface` account types,
+//! so a legacy-SPL input can swap to a Token-2022 output — the cross-program shape
+//! every real swap into a Token-2022 mint takes.
 
 use anchor_lang::prelude::*;
-use anchor_spl::token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked};
+use anchor_spl::token_interface::{
+    transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
+};
 
 declare_id!("48ua4x3ax2gWbtCBfEdwC9hg8V9FYpG2aFcMNeZ8mK6h");
 
@@ -40,7 +48,8 @@ pub mod mock_swap {
         }
 
         // Leg 2: deliver output from the pool. The pool authority is this
-        // program's PDA, so the mock signs for it.
+        // program's PDA, so the mock signs for it. The output leg uses its own
+        // token program, so the output mint can be Token-2022.
         if out_amount > 0 {
             let (pool_authority, bump) =
                 Pubkey::find_program_address(&[POOL_AUTHORITY_SEED], &crate::ID);
@@ -52,7 +61,7 @@ pub mod mock_swap {
             let signer_seeds: &[&[&[u8]]] = &[&[POOL_AUTHORITY_SEED, &[bump]]];
             transfer_checked(
                 CpiContext::new_with_signer(
-                    ctx.accounts.token_program.to_account_info(),
+                    ctx.accounts.output_token_program.to_account_info(),
                     TransferChecked {
                         from: ctx.accounts.pool_output.to_account_info(),
                         mint: ctx.accounts.output_mint.to_account_info(),
@@ -70,26 +79,30 @@ pub mod mock_swap {
     }
 }
 
-/// Account order matches the engine's committed `AccountTemplate`: the four
-/// Fixed slots first (TokenProgram, SigningAuthority, Source, Destination), then
-/// the Free routing slots the relayer supplies.
+/// Account order matches the engine's committed `AccountTemplate`: the five Fixed
+/// slots first (TokenProgram, SigningAuthority, Source, Destination, OutputMint),
+/// then the Free routing slots the relayer supplies (output token program, input
+/// mint, pool accounts).
 #[derive(Accounts)]
 pub struct Swap<'info> {
-    pub token_program: Program<'info, Token>,
+    /// Input-leg token program (the bridged token is legacy SPL).
+    pub token_program: Interface<'info, TokenInterface>,
     /// The engine's scratch authority — a signer via the caller's `invoke_signed`.
     pub signing_authority: Signer<'info>,
     #[account(mut)]
-    pub source: Box<Account<'info, TokenAccount>>,
+    pub source: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(mut)]
-    pub destination: Box<Account<'info, TokenAccount>>,
-    pub input_mint: Box<Account<'info, Mint>>,
-    pub output_mint: Box<Account<'info, Mint>>,
+    pub destination: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub output_mint: Box<InterfaceAccount<'info, Mint>>,
+    /// Output-leg token program (may be Token-2022).
+    pub output_token_program: Interface<'info, TokenInterface>,
+    pub input_mint: Box<InterfaceAccount<'info, Mint>>,
     /// CHECK: pool authority PDA (`["pool"]`), validated in-handler before signing.
     pub pool_authority: UncheckedAccount<'info>,
     #[account(mut)]
-    pub pool_input: Box<Account<'info, TokenAccount>>,
+    pub pool_input: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(mut)]
-    pub pool_output: Box<Account<'info, TokenAccount>>,
+    pub pool_output: Box<InterfaceAccount<'info, TokenAccount>>,
 }
 
 #[error_code]

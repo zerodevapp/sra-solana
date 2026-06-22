@@ -3644,8 +3644,9 @@
       "name": "FixedRole",
       "docs": [
         "Handler-controlled roles a `Fixed` slot can take. `Source`, `Destination`,",
-        "and `SigningAuthority` MUST appear in every template (enforced by",
-        "`validate_action_config`) so a relayer cannot redirect the input or output."
+        "`SigningAuthority`, and `OutputMint` MUST appear in every template (enforced by",
+        "`validate_action_config`) so a relayer cannot redirect the input or output, and",
+        "so the handler reads the output mint from a pinned account."
       ],
       "type": {
         "kind": "enum",
@@ -3661,6 +3662,9 @@
           },
           {
             "name": "Destination"
+          },
+          {
+            "name": "OutputMint"
           }
         ]
       }

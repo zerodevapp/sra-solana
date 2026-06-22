@@ -15,10 +15,15 @@
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
-use anchor_lang::solana_program::program_pack::Pack;
 use anchor_lang::solana_program::sysvar::instructions as ix_sysvar;
-use anchor_spl::token::spl_token::state::{Account as SplTokenAccount, AccountState};
 use anchor_spl::token::{transfer_checked, TransferChecked};
+use anchor_spl::token_2022::spl_token_2022::extension::default_account_state::DefaultAccountState;
+use anchor_spl::token_2022::spl_token_2022::extension::{
+    BaseStateWithExtensions, ExtensionType, StateWithExtensions,
+};
+use anchor_spl::token_2022::spl_token_2022::state::{
+    Account as TokenAccountState, AccountState, Mint,
+};
 
 use sra_common::errors::SraError;
 use sra_common::quote::SIGNED_QUOTE_MESSAGE_LEN;
@@ -67,17 +72,10 @@ pub(crate) struct TokenBalanceCheck<'a, 'info> {
 impl PostCheck for TokenBalanceCheck<'_, '_> {
     fn observe(&self) -> Result<u128> {
         // A non-token account at the pinned destination is structural, not soft.
-        require_keys_eq!(
-            *self.account.owner,
-            self.token_program,
-            SraError::DestinationNotPinned
-        );
-        let data = self
-            .account
-            .try_borrow_data()
-            .map_err(|_| error!(SraError::DestinationNotPinned))?;
-        let token =
-            SplTokenAccount::unpack(&data).map_err(|_| error!(SraError::DestinationNotPinned))?;
+        // The balance is read post-fee (the landed amount, after any Token-2022
+        // transfer fee was withheld) on the output token program.
+        let token = token_account(self.account, &self.token_program)
+            .ok_or(error!(SraError::DestinationNotPinned))?;
         Ok(token.amount as u128)
     }
 
@@ -211,6 +209,7 @@ pub(crate) fn validate_template_slots(
     scratch_auth: &Pubkey,
     scratch: &Pubkey,
     destination: &Pubkey,
+    output_mint: &Pubkey,
 ) -> Result<()> {
     require!(
         slots.len() == template.slots.len(),
@@ -230,6 +229,9 @@ pub(crate) fn validate_template_slots(
             SlotRole::Fixed(FixedRole::Destination) => {
                 require_keys_eq!(info.key(), *destination, SraError::DestinationNotPinned);
             }
+            SlotRole::Fixed(FixedRole::OutputMint) => {
+                require_keys_eq!(info.key(), *output_mint, SraError::ActionAccountMismatch);
+            }
             SlotRole::Free => {}
         }
     }
@@ -239,6 +241,13 @@ pub(crate) fn validate_template_slots(
 /// Build the inner-CPI account metas. `Fixed` slots get deterministic flags
 /// (only the signing authority is our signer; source/destination are writable);
 /// `Free` slots keep the relayer's writability but never sign.
+///
+/// `Free` slots pass through verbatim — this is also how a Token-2022 transfer-hook
+/// output mint's extra accounts reach the inner swap CPI (the relayer supplies them
+/// as routing). The executor does not pre-resolve the hook account list: a
+/// missing/wrong set makes the inner `transfer_checked` revert, which aborts the
+/// whole instruction (fail-closed, funds stay staged and retryable). The post-fee
+/// balance-diff is the binding correctness gate regardless of the hook's behavior.
 fn build_inner_metas(
     slots: &[AccountInfo],
     template: &AccountTemplate,
@@ -257,6 +266,7 @@ fn build_inner_metas(
             }
             SlotRole::Fixed(FixedRole::Source) => AccountMeta::new(info.key(), false),
             SlotRole::Fixed(FixedRole::Destination) => AccountMeta::new(info.key(), false),
+            SlotRole::Fixed(FixedRole::OutputMint) => AccountMeta::new_readonly(info.key(), false),
             SlotRole::Free => {
                 if info.is_writable {
                     AccountMeta::new(info.key(), false)
@@ -289,13 +299,17 @@ pub(crate) fn fixed_slot<'a, 'info>(
 // Token-account state
 // ---------------------------------------------------------------------------
 
-/// `Some(unpacked)` iff `info` is an initialized token account of `token_program`.
-fn token_account(info: &AccountInfo, token_program: &Pubkey) -> Option<SplTokenAccount> {
+/// `Some(base state)` iff `info` is an initialized token account of `token_program`.
+/// Reads via `StateWithExtensions`, so it handles both legacy SPL accounts and
+/// Token-2022 accounts carrying extensions (e.g. ImmutableOwner, TransferFeeAmount).
+fn token_account(info: &AccountInfo, token_program: &Pubkey) -> Option<TokenAccountState> {
     if info.owner != token_program {
         return None;
     }
     let data = info.try_borrow_data().ok()?;
-    SplTokenAccount::unpack(&data).ok()
+    StateWithExtensions::<TokenAccountState>::unpack(&data)
+        .ok()
+        .map(|state| state.base)
 }
 
 fn token_amount(info: &AccountInfo, token_program: &Pubkey) -> Result<u64> {
@@ -316,6 +330,45 @@ pub(crate) fn token_account_usable(
         Some(t) => t.mint == *mint && t.state != AccountState::Frozen,
         None => false,
     }
+}
+
+/// Whether `mint_info` carries an issuer-control extension — permanent delegate,
+/// pausable, or default-frozen — that lets a third party move or freeze the held
+/// token. Holding such an output is a custody hazard the route owner must opt into
+/// (`allow_permissioned_output`). Legacy SPL mints carry no extensions.
+pub(crate) fn mint_is_permissioned(mint_info: &AccountInfo) -> Result<bool> {
+    if mint_info.owner != &anchor_spl::token_2022::ID {
+        return Ok(false);
+    }
+    let data = mint_info
+        .try_borrow_data()
+        .map_err(|_| error!(SraError::ActionAccountMismatch))?;
+    mint_data_is_permissioned(&data)
+}
+
+/// The extension scan over a Token-2022 mint's serialized data, split out from the
+/// `AccountInfo` owner check so it is unit-testable against packed mint buffers.
+fn mint_data_is_permissioned(data: &[u8]) -> Result<bool> {
+    let mint = StateWithExtensions::<Mint>::unpack(data)
+        .map_err(|_| error!(SraError::ActionAccountMismatch))?;
+    for ext in mint
+        .get_extension_types()
+        .map_err(|_| error!(SraError::ActionAccountMismatch))?
+    {
+        match ext {
+            ExtensionType::PermanentDelegate | ExtensionType::Pausable => return Ok(true),
+            ExtensionType::DefaultAccountState => {
+                let das = mint
+                    .get_extension::<DefaultAccountState>()
+                    .map_err(|_| error!(SraError::ActionAccountMismatch))?;
+                if das.state == AccountState::Frozen as u8 {
+                    return Ok(true);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -498,5 +551,83 @@ mod tests {
         let mut data = ed25519_data(&[7u8; 32], &[9u8; 64], b"message");
         data.push(0xaa);
         assert!(parse_ed25519_self_contained(&data).is_none());
+    }
+
+    // ---- mint_is_permissioned (Token-2022 extension scan) ----
+
+    use anchor_lang::solana_program::program_option::COption;
+    use anchor_spl::token_2022::spl_token_2022::extension::pausable::PausableConfig;
+    use anchor_spl::token_2022::spl_token_2022::extension::permanent_delegate::PermanentDelegate;
+    use anchor_spl::token_2022::spl_token_2022::extension::{
+        BaseStateWithExtensionsMut, StateWithExtensionsMut,
+    };
+
+    /// Pack a Token-2022 mint buffer carrying `exts`, letting `set` fill each
+    /// extension after allocation — the same layout the token program writes, so the
+    /// scan reads real TLV data (the canonical build order from spl-token-2022).
+    fn packed_mint(
+        exts: &[ExtensionType],
+        set: impl FnOnce(&mut StateWithExtensionsMut<Mint>),
+    ) -> Vec<u8> {
+        let len = ExtensionType::try_calculate_account_len::<Mint>(exts).unwrap();
+        let mut buf = vec![0u8; len];
+        {
+            let mut state = StateWithExtensionsMut::<Mint>::unpack_uninitialized(&mut buf).unwrap();
+            set(&mut state);
+            state.base = Mint {
+                mint_authority: COption::None,
+                supply: 0,
+                decimals: 6,
+                is_initialized: true,
+                freeze_authority: COption::None,
+            };
+            state.pack_base();
+            state.init_account_type().unwrap();
+        }
+        buf
+    }
+
+    #[test]
+    fn base_token_2022_mint_is_not_permissioned() {
+        let data = packed_mint(&[], |_| {});
+        assert!(!mint_data_is_permissioned(&data).unwrap());
+    }
+
+    #[test]
+    fn permanent_delegate_mint_is_permissioned() {
+        let data = packed_mint(&[ExtensionType::PermanentDelegate], |m| {
+            m.init_extension::<PermanentDelegate>(true).unwrap();
+        });
+        assert!(mint_data_is_permissioned(&data).unwrap());
+    }
+
+    #[test]
+    fn pausable_mint_is_permissioned() {
+        // The hazard is the issuer's *ability* to pause, so presence of the extension
+        // is enough — paused state is not required.
+        let data = packed_mint(&[ExtensionType::Pausable], |m| {
+            m.init_extension::<PausableConfig>(true).unwrap();
+        });
+        assert!(mint_data_is_permissioned(&data).unwrap());
+    }
+
+    #[test]
+    fn default_frozen_mint_is_permissioned() {
+        let data = packed_mint(&[ExtensionType::DefaultAccountState], |m| {
+            m.init_extension::<DefaultAccountState>(true).unwrap().state =
+                AccountState::Frozen as u8;
+        });
+        assert!(mint_data_is_permissioned(&data).unwrap());
+    }
+
+    #[test]
+    fn default_initialized_mint_is_not_permissioned() {
+        // DefaultAccountState present but == Initialized: no default freeze armed, so
+        // not a custody hazard — discriminates the Frozen-state check from mere presence.
+        let data = packed_mint(&[ExtensionType::DefaultAccountState], |m| {
+            m.init_extension::<DefaultAccountState>(true).unwrap().state =
+                AccountState::Initialized as u8;
+        });
+        assert!(!mint_data_is_permissioned(&data).unwrap());
     }
 }

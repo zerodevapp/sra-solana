@@ -170,4 +170,7 @@ pub enum SraError {
 
     #[msg("No matching authorized signed price quote was found in the transaction")]
     InvalidPriceSignature,
+
+    #[msg("Output mint is permissioned (permanent-delegate / pausable / default-frozen) and the action did not opt in")]
+    PermissionedOutputNotAllowed,
 }

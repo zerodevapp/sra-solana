@@ -30,14 +30,20 @@ pub enum SlotRole {
 }
 
 /// Handler-controlled roles a `Fixed` slot can take. `Source`, `Destination`,
-/// and `SigningAuthority` MUST appear in every template (enforced by
-/// `validate_action_config`) so a relayer cannot redirect the input or output.
+/// `SigningAuthority`, and `OutputMint` MUST appear in every template (enforced by
+/// `validate_action_config`) so a relayer cannot redirect the input or output, and
+/// so the handler reads the output mint from a pinned account.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Debug, InitSpace)]
 pub enum FixedRole {
     TokenProgram,
     SigningAuthority,
     Source,
     Destination,
+    /// The output mint, pinned to the action's committed `output_mint`. The
+    /// handler reads its owner (the output token program) and its extensions, so
+    /// it can derive the right destination ATA, read a post-fee balance, and gate
+    /// permissioned (Token-2022) outputs.
+    OutputMint,
 }
 
 /// Minimum-output reference for a `VerifiedCpi`'s post-fee balance-diff gate.
@@ -100,11 +106,14 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
                     account_template.slots.len() <= MAX_TEMPLATE_SLOTS,
                     SraError::TooManyTemplateSlots
                 );
-                // Pin the value-bearing slots so a relayer can't redirect funds.
+                // Pin the value-bearing slots so a relayer can't redirect funds,
+                // and the output mint so the handler reads its program/extensions
+                // from a committed account.
                 require!(
                     account_template.pins(FixedRole::Source)
                         && account_template.pins(FixedRole::Destination)
-                        && account_template.pins(FixedRole::SigningAuthority),
+                        && account_template.pins(FixedRole::SigningAuthority)
+                        && account_template.pins(FixedRole::OutputMint),
                     SraError::InvalidActionConfig
                 );
                 // The min-out reference must name a real signer/feed.
@@ -151,6 +160,7 @@ mod tests {
                 SlotRole::Fixed(FixedRole::SigningAuthority),
                 SlotRole::Fixed(FixedRole::Source),
                 SlotRole::Fixed(FixedRole::Destination),
+                SlotRole::Fixed(FixedRole::OutputMint),
                 SlotRole::Free,
             ],
         }
@@ -296,6 +306,7 @@ mod tests {
         assert_template_rejected(&[
             SlotRole::Fixed(FixedRole::SigningAuthority),
             SlotRole::Fixed(FixedRole::Destination),
+            SlotRole::Fixed(FixedRole::OutputMint),
             SlotRole::Free,
         ]);
     }
@@ -305,6 +316,7 @@ mod tests {
         assert_template_rejected(&[
             SlotRole::Fixed(FixedRole::SigningAuthority),
             SlotRole::Fixed(FixedRole::Source),
+            SlotRole::Fixed(FixedRole::OutputMint),
             SlotRole::Free,
         ]);
     }
@@ -312,6 +324,17 @@ mod tests {
     #[test]
     fn validate_action_config_verified_cpi_template_missing_authority_rejected() {
         assert_template_rejected(&[
+            SlotRole::Fixed(FixedRole::Source),
+            SlotRole::Fixed(FixedRole::Destination),
+            SlotRole::Fixed(FixedRole::OutputMint),
+            SlotRole::Free,
+        ]);
+    }
+
+    #[test]
+    fn validate_action_config_verified_cpi_template_missing_output_mint_rejected() {
+        assert_template_rejected(&[
+            SlotRole::Fixed(FixedRole::SigningAuthority),
             SlotRole::Fixed(FixedRole::Source),
             SlotRole::Fixed(FixedRole::Destination),
             SlotRole::Free,
@@ -344,6 +367,7 @@ mod tests {
             SlotRole::Fixed(FixedRole::Source),
             SlotRole::Fixed(FixedRole::Destination),
             SlotRole::Fixed(FixedRole::SigningAuthority),
+            SlotRole::Fixed(FixedRole::OutputMint),
         ];
         slots.extend(vec![SlotRole::Free; free]);
         slots
@@ -362,8 +386,8 @@ mod tests {
 
     #[test]
     fn validate_action_config_verified_cpi_oversized_template_rejected() {
-        // 3 pins + (MAX - 2) free = MAX + 1 slots (still pins all three).
-        let action = verified_cpi_with_template(pinned_slots_plus_free(MAX_TEMPLATE_SLOTS - 2));
+        // 4 pins + (MAX - 3) free = MAX + 1 slots (still pins all four).
+        let action = verified_cpi_with_template(pinned_slots_plus_free(MAX_TEMPLATE_SLOTS - 3));
         assert_eq!(
             validate_action_config(&[action]).unwrap_err(),
             SraError::TooManyTemplateSlots.into()
@@ -372,7 +396,7 @@ mod tests {
 
     #[test]
     fn validate_action_config_verified_cpi_template_at_max_accepted() {
-        let action = verified_cpi_with_template(pinned_slots_plus_free(MAX_TEMPLATE_SLOTS - 3));
+        let action = verified_cpi_with_template(pinned_slots_plus_free(MAX_TEMPLATE_SLOTS - 4));
         assert!(validate_action_config(&[action]).is_ok());
     }
 
