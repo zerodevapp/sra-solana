@@ -1995,6 +1995,69 @@ pub fn execute_actions_ix_full(
     }
 }
 
+/// SplTransfer-only retry convenience: mirrors `execute_actions_ix` plus the
+/// owner signer that `retry_actions` requires. Delegates to the full builder.
+pub fn retry_actions_ix(
+    owner: &Pubkey,
+    route: &Pubkey,
+    fill_id: [u8; 32],
+    action_config: Vec<SolanaAction>,
+    mint: &Pubkey,
+    recipient_atas: &[Pubkey],
+) -> Instruction {
+    let remaining = recipient_atas
+        .iter()
+        .map(|ata| AccountMeta::new(*ata, false))
+        .collect();
+    retry_actions_ix_full(
+        owner,
+        route,
+        fill_id,
+        action_config,
+        vec![],
+        mint,
+        remaining,
+    )
+}
+
+/// Full `retry_actions` builder: same per-action `remaining_accounts` shape as
+/// `execute_actions_ix_full`, plus the owner signer and `has_one`-bound route.
+pub fn retry_actions_ix_full(
+    owner: &Pubkey,
+    route: &Pubkey,
+    fill_id: [u8; 32],
+    action_config: Vec<SolanaAction>,
+    verified_runtimes: Vec<VerifiedCpiRuntime>,
+    mint: &Pubkey,
+    remaining: Vec<AccountMeta>,
+) -> Instruction {
+    let (execution_authority, _) = derive_execution_authority_pda(route);
+    let execution_vault = derive_ata(&execution_authority, mint);
+    let (fill_receipt, _) = derive_fill_receipt_pda(route, &fill_id);
+    let mut accounts = sra_handler::accounts::RetryActions {
+        owner: *owner,
+        route: *route,
+        fill_receipt,
+        expected_mint: *mint,
+        execution_authority,
+        execution_vault,
+        token_program: TOKEN_PROGRAM_ID,
+        instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
+    }
+    .to_account_metas(None);
+    accounts.extend(remaining);
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts,
+        data: sra_handler::instruction::RetryActions {
+            fill_id,
+            action_config,
+            verified_runtimes,
+        }
+        .data(),
+    }
+}
+
 /// PDA that authorizes a route's verified-CPI scratch account.
 pub fn derive_scratch_authority_pda(route: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(

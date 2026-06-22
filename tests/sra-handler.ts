@@ -26,6 +26,7 @@ describe("sra-handler", () => {
       "recoverFunds",
       "removeAssetFeeTier",
       "removeProtocolFee",
+      "retryActions",
       "setAddressBookEntry",
       "setAssetFeeTier",
       "setFeeRecipient",

@@ -13,6 +13,9 @@
 //! → hard reject, receipt stays `Finalized` (retryable). A post-CPI `min_out`
 //! shortfall or failing CPI → hard tx revert (Solana can't catch a CPI revert
 //! mid-action) — strictly more conservative than EVM's catch.
+//!
+//! The validate-plan-execute core is `run_committed_actions`; `retry_actions`
+//! re-runs the same function so first-execution and retry can never diverge.
 
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::{
@@ -93,6 +96,30 @@ enum Planned {
     },
 }
 
+/// The terminal outcome of running a route's committed actions. The caller maps
+/// it to the receipt status + lifecycle event for its instruction.
+pub(crate) enum ActionOutcome {
+    /// Every action applied; advance the receipt to `ActionsSucceeded`.
+    Succeeded,
+    /// A recoverable per-account problem was detected before any transfer; persist
+    /// `ActionsFailed` and leave the funds staged for retry/recover.
+    SoftFailed,
+}
+
+/// The handler accounts `run_committed_actions` needs, borrowed identically from
+/// `ExecuteActions` and `RetryActions` so first-execution and retry share one code
+/// path and can never diverge.
+pub(crate) struct ActionAccounts<'a, 'info> {
+    pub route: &'a Account<'info, SolanaSraRoute>,
+    pub expected_mint: &'a Account<'info, Mint>,
+    pub execution_authority: &'a UncheckedAccount<'info>,
+    pub execution_vault: &'a Account<'info, TokenAccount>,
+    pub token_program: &'a Program<'info, Token>,
+    pub instructions_sysvar: &'a UncheckedAccount<'info>,
+    pub remaining_accounts: &'a [AccountInfo<'info>],
+    pub execution_authority_bump: u8,
+}
+
 pub(crate) fn handler<'info>(
     ctx: Context<'_, '_, '_, 'info, ExecuteActions<'info>>,
     fill_id: [u8; 32],
@@ -105,22 +132,59 @@ pub(crate) fn handler<'info>(
         SraError::InvalidExecutionStatus
     );
 
+    let route = ctx.accounts.route.key();
+    let accounts = ActionAccounts {
+        route: &ctx.accounts.route,
+        expected_mint: &ctx.accounts.expected_mint,
+        execution_authority: &ctx.accounts.execution_authority,
+        execution_vault: &ctx.accounts.execution_vault,
+        token_program: &ctx.accounts.token_program,
+        instructions_sysvar: &ctx.accounts.instructions_sysvar,
+        remaining_accounts: ctx.remaining_accounts,
+        execution_authority_bump: ctx.bumps.execution_authority,
+    };
+
+    match run_committed_actions(&accounts, fill_id, &action_config, &verified_runtimes)? {
+        ActionOutcome::Succeeded => {
+            ctx.accounts.fill_receipt.execution_status = ExecutionStatus::ActionsSucceeded;
+            emit!(ActionsExecuted { route, fill_id });
+        }
+        ActionOutcome::SoftFailed => {
+            ctx.accounts.fill_receipt.execution_status = ExecutionStatus::ActionsFailed;
+            emit!(ActionsFailed { route, fill_id });
+        }
+    }
+    Ok(())
+}
+
+/// Re-supply-and-verify the committed `action_config`, then validate-plan-execute
+/// it against the execution vault. Moves nothing until every action passes its
+/// checks (atomicity): returns `SoftFailed` (no transfers) on a recoverable
+/// per-account problem, `Succeeded` after running the whole batch. Hard-rejects
+/// (structural relayer errors, hash mismatch, expired/invalid quote, post-CPI
+/// shortfall) return `Err`; the receipt status is the caller's to set.
+pub(crate) fn run_committed_actions<'info>(
+    accounts: &ActionAccounts<'_, 'info>,
+    fill_id: [u8; 32],
+    action_config: &[SolanaAction],
+    verified_runtimes: &[VerifiedCpiRuntime],
+) -> Result<ActionOutcome> {
     // Re-supplied action list must match the committed digest — no inject/drop/reorder.
     require!(
-        action_config_hash(&action_config)? == ctx.accounts.route.action_config_hash,
+        action_config_hash(action_config)? == accounts.route.action_config_hash,
         SraError::ActionConfigHashMismatch
     );
 
-    let route_key = ctx.accounts.route.key();
-    let owner = ctx.accounts.route.owner;
-    let expected_mint = ctx.accounts.route.expected_mint;
-    let token_program = ctx.accounts.token_program.key();
-    let decimals = ctx.accounts.expected_mint.decimals;
+    let route_key = accounts.route.key();
+    let owner = accounts.route.owner;
+    let expected_mint = accounts.route.expected_mint;
+    let token_program = accounts.token_program.key();
+    let decimals = accounts.expected_mint.decimals;
     // Snapshot once (not a shrinking live balance): each amount is a fraction of
     // this, so a 100%-summing set moves ~the whole vault.
-    let vault_snapshot = ctx.accounts.execution_vault.amount;
+    let vault_snapshot = accounts.execution_vault.amount;
     // A frozen source vault would abort every movement — fail soft, not hard-abort.
-    let source_frozen = ctx.accounts.execution_vault.state == AccountState::Frozen;
+    let source_frozen = accounts.execution_vault.state == AccountState::Frozen;
 
     // Scratch identity is the same for every verified action of this route; derive
     // it once, and only if a VerifiedCpi action is present (keeps the SplTransfer-only
@@ -154,10 +218,10 @@ pub(crate) fn handler<'info>(
                 amount_bps,
             } => {
                 require!(
-                    cursor < ctx.remaining_accounts.len(),
+                    cursor < accounts.remaining_accounts.len(),
                     SraError::ActionAccountMismatch
                 );
-                let info = &ctx.remaining_accounts[cursor];
+                let info = &accounts.remaining_accounts[cursor];
                 let expected = get_associated_token_address(recipient, &expected_mint);
                 require!(
                     info.key() == expected && info.is_writable && !info.is_signer,
@@ -198,13 +262,13 @@ pub(crate) fn handler<'info>(
                 let slots_start = cursor + 1;
                 let end = slots_start + slots_len;
                 require!(
-                    end <= ctx.remaining_accounts.len(),
+                    end <= accounts.remaining_accounts.len(),
                     SraError::ActionAccountMismatch
                 );
 
-                validate_pinned_program(&ctx.remaining_accounts[program_index], program_id)?;
+                validate_pinned_program(&accounts.remaining_accounts[program_index], program_id)?;
 
-                let slots = &ctx.remaining_accounts[slots_start..end];
+                let slots = &accounts.remaining_accounts[slots_start..end];
 
                 // The output token program (legacy SPL or Token-2022) is read from
                 // the pinned output mint's owner — never assumed, never relayer-set.
@@ -272,7 +336,7 @@ pub(crate) fn handler<'info>(
                     runtime.expiry,
                 );
                 verify_signed_quote(
-                    &ctx.accounts.instructions_sysvar,
+                    accounts.instructions_sysvar,
                     quoter,
                     &message,
                     runtime.expiry,
@@ -295,7 +359,7 @@ pub(crate) fn handler<'info>(
     }
     // Reject leftover relayer accounts and unused runtime entries.
     require!(
-        cursor == ctx.remaining_accounts.len(),
+        cursor == accounts.remaining_accounts.len(),
         SraError::ActionAccountMismatch
     );
     require!(
@@ -303,25 +367,20 @@ pub(crate) fn handler<'info>(
         SraError::ActionAccountMismatch
     );
 
-    // Soft fail: persist ActionsFailed (return Ok), funds stay staged for retry/recover.
+    // Soft fail: report it so the caller persists ActionsFailed; funds stay staged.
     if any_action_would_fail {
-        ctx.accounts.fill_receipt.execution_status = ExecutionStatus::ActionsFailed;
-        emit!(ActionsFailed {
-            route: route_key,
-            fill_id,
-        });
-        return Ok(());
+        return Ok(ActionOutcome::SoftFailed);
     }
 
     // Pass 2: execute the validated plan in action order; PDAs sign their leg.
-    let execution_bump = [ctx.bumps.execution_authority];
+    let execution_bump = [accounts.execution_authority_bump];
     let execution_signer: &[&[&[u8]]] = &[&[SEED_EXECUTION, route_key.as_ref(), &execution_bump]];
 
     // Bind the controlled account infos once; they outlive each engine call.
-    let expected_mint_info = ctx.accounts.expected_mint.to_account_info();
-    let token_program_info = ctx.accounts.token_program.to_account_info();
-    let execution_vault_info = ctx.accounts.execution_vault.to_account_info();
-    let execution_authority_info = ctx.accounts.execution_authority.to_account_info();
+    let expected_mint_info = accounts.expected_mint.to_account_info();
+    let token_program_info = accounts.token_program.to_account_info();
+    let execution_vault_info = accounts.execution_vault.to_account_info();
+    let execution_authority_info = accounts.execution_authority.to_account_info();
 
     for entry in &plan {
         match entry {
@@ -335,7 +394,7 @@ pub(crate) fn handler<'info>(
                         TransferChecked {
                             from: execution_vault_info.clone(),
                             mint: expected_mint_info.clone(),
-                            to: ctx.remaining_accounts[*recipient_index].to_account_info(),
+                            to: accounts.remaining_accounts[*recipient_index].to_account_info(),
                             authority: execution_authority_info.clone(),
                         },
                         execution_signer,
@@ -366,11 +425,11 @@ pub(crate) fn handler<'info>(
                 else {
                     unreachable!("plan entry references a VerifiedCpi action");
                 };
-                let slots = &ctx.remaining_accounts[*slots_start..*slots_start + *slots_len];
+                let slots = &accounts.remaining_accounts[*slots_start..*slots_start + *slots_len];
                 let dest_info = fixed_slot(slots, account_template, FixedRole::Destination)?;
 
                 let call = VerifiedCpiCall {
-                    program: &ctx.remaining_accounts[*program_index],
+                    program: &accounts.remaining_accounts[*program_index],
                     inner_data: &verified_runtimes[*runtime_index].inner_data,
                     template: account_template,
                     slots,
@@ -391,12 +450,7 @@ pub(crate) fn handler<'info>(
         }
     }
 
-    ctx.accounts.fill_receipt.execution_status = ExecutionStatus::ActionsSucceeded;
-    emit!(ActionsExecuted {
-        route: route_key,
-        fill_id,
-    });
-    Ok(())
+    Ok(ActionOutcome::Succeeded)
 }
 
 /// `floor(amount_bps * vault_snapshot / BPS_DENOMINATOR)`. `amount_bps <= 10_000`
