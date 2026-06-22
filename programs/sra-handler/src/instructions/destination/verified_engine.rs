@@ -343,7 +343,13 @@ pub(crate) fn mint_is_permissioned(mint_info: &AccountInfo) -> Result<bool> {
     let data = mint_info
         .try_borrow_data()
         .map_err(|_| error!(SraError::ActionAccountMismatch))?;
-    let mint = StateWithExtensions::<Mint>::unpack(&data)
+    mint_data_is_permissioned(&data)
+}
+
+/// The extension scan over a Token-2022 mint's serialized data, split out from the
+/// `AccountInfo` owner check so it is unit-testable against packed mint buffers.
+fn mint_data_is_permissioned(data: &[u8]) -> Result<bool> {
+    let mint = StateWithExtensions::<Mint>::unpack(data)
         .map_err(|_| error!(SraError::ActionAccountMismatch))?;
     for ext in mint
         .get_extension_types()
@@ -545,5 +551,83 @@ mod tests {
         let mut data = ed25519_data(&[7u8; 32], &[9u8; 64], b"message");
         data.push(0xaa);
         assert!(parse_ed25519_self_contained(&data).is_none());
+    }
+
+    // ---- mint_is_permissioned (Token-2022 extension scan) ----
+
+    use anchor_lang::solana_program::program_option::COption;
+    use anchor_spl::token_2022::spl_token_2022::extension::pausable::PausableConfig;
+    use anchor_spl::token_2022::spl_token_2022::extension::permanent_delegate::PermanentDelegate;
+    use anchor_spl::token_2022::spl_token_2022::extension::{
+        BaseStateWithExtensionsMut, StateWithExtensionsMut,
+    };
+
+    /// Pack a Token-2022 mint buffer carrying `exts`, letting `set` fill each
+    /// extension after allocation — the same layout the token program writes, so the
+    /// scan reads real TLV data (the canonical build order from spl-token-2022).
+    fn packed_mint(
+        exts: &[ExtensionType],
+        set: impl FnOnce(&mut StateWithExtensionsMut<Mint>),
+    ) -> Vec<u8> {
+        let len = ExtensionType::try_calculate_account_len::<Mint>(exts).unwrap();
+        let mut buf = vec![0u8; len];
+        {
+            let mut state = StateWithExtensionsMut::<Mint>::unpack_uninitialized(&mut buf).unwrap();
+            set(&mut state);
+            state.base = Mint {
+                mint_authority: COption::None,
+                supply: 0,
+                decimals: 6,
+                is_initialized: true,
+                freeze_authority: COption::None,
+            };
+            state.pack_base();
+            state.init_account_type().unwrap();
+        }
+        buf
+    }
+
+    #[test]
+    fn base_token_2022_mint_is_not_permissioned() {
+        let data = packed_mint(&[], |_| {});
+        assert!(!mint_data_is_permissioned(&data).unwrap());
+    }
+
+    #[test]
+    fn permanent_delegate_mint_is_permissioned() {
+        let data = packed_mint(&[ExtensionType::PermanentDelegate], |m| {
+            m.init_extension::<PermanentDelegate>(true).unwrap();
+        });
+        assert!(mint_data_is_permissioned(&data).unwrap());
+    }
+
+    #[test]
+    fn pausable_mint_is_permissioned() {
+        // The hazard is the issuer's *ability* to pause, so presence of the extension
+        // is enough — paused state is not required.
+        let data = packed_mint(&[ExtensionType::Pausable], |m| {
+            m.init_extension::<PausableConfig>(true).unwrap();
+        });
+        assert!(mint_data_is_permissioned(&data).unwrap());
+    }
+
+    #[test]
+    fn default_frozen_mint_is_permissioned() {
+        let data = packed_mint(&[ExtensionType::DefaultAccountState], |m| {
+            m.init_extension::<DefaultAccountState>(true).unwrap().state =
+                AccountState::Frozen as u8;
+        });
+        assert!(mint_data_is_permissioned(&data).unwrap());
+    }
+
+    #[test]
+    fn default_initialized_mint_is_not_permissioned() {
+        // DefaultAccountState present but == Initialized: no default freeze armed, so
+        // not a custody hazard — discriminates the Frozen-state check from mere presence.
+        let data = packed_mint(&[ExtensionType::DefaultAccountState], |m| {
+            m.init_extension::<DefaultAccountState>(true).unwrap().state =
+                AccountState::Initialized as u8;
+        });
+        assert!(!mint_data_is_permissioned(&data).unwrap());
     }
 }
