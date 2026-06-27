@@ -1727,6 +1727,14 @@ pub fn deploy_extra_adapter(svm: &mut LiteSVM) -> Pubkey {
 /// reject paths are representative (the account exists but is not a program).
 pub fn plant_non_executable_account(svm: &mut LiteSVM) -> Pubkey {
     let key = Pubkey::new_unique();
+    plant_non_executable_at(svm, key);
+    key
+}
+
+/// Overwrite `key` with a non-executable, system-owned account — e.g. to plant a
+/// bogus account at a committed program id so the loader-owned-executable check (not
+/// just the identity check) is the one that fires.
+pub fn plant_non_executable_at(svm: &mut LiteSVM, key: Pubkey) {
     let account = solana_sdk::account::Account {
         lamports: svm.minimum_balance_for_rent_exemption(8),
         data: vec![0u8; 8],
@@ -1735,7 +1743,6 @@ pub fn plant_non_executable_account(svm: &mut LiteSVM) -> Pubkey {
         rent_epoch: 0,
     };
     svm.set_account(key, account).unwrap();
-    key
 }
 
 /// Build a `manage_route` instruction. When `params.adapters` is `Some`, its
