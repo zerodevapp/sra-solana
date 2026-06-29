@@ -3505,7 +3505,7 @@
             "name": "protocol_fee_amount",
             "docs": [
               "Protocol fee collected on the source. Zero when fees are",
-              "disabled globally, the app has no fee config, or the deposit is",
+              "disabled globally, no protocol-fee config is set, or the deposit is",
               "sponsored."
             ],
             "type": "u64"
