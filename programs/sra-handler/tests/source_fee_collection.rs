@@ -1,7 +1,7 @@
 //! Source protocol fee collection through `validate_and_prepare`.
 //!
-//! The fee is resolved from the COMMITTED `handler_data.app_id` plus live
-//! admin fee state, equality-checked against the attested
+//! The fee is resolved from the single global admin fee state,
+//! equality-checked against the attested
 //! `params.protocol_fee_amount` (`FeeMismatch`), collected from the SRA vault
 //! into the canonical recipient ATA, and the NET (input - fee) is forwarded
 //! into adapter custody and bridged. Slippage keeps flooring on the GROSS
@@ -36,8 +36,8 @@ fn fee_params(fx: &ValidatePrepareFixture, protocol_fee_amount: u64) -> PrepareP
     params
 }
 
-/// Configures live fee state: recipient set + per-app protocol fee for the
-/// fixture's committed app_id. Returns the canonical recipient fee ATA.
+/// Configures live fee state: recipient set + the single global protocol fee.
+/// Returns the canonical recipient fee ATA.
 fn enable_protocol_fee(
     svm: &mut LiteSVM,
     fx: &ValidatePrepareFixture,
@@ -52,7 +52,6 @@ fn enable_protocol_fee(
             set_protocol_fee_ix(
                 &fx.payer.pubkey(),
                 &fx.fee_admin.pubkey(),
-                fx.handler_data.app_id,
                 default_fee_bps,
                 allow_override,
             ),
@@ -186,7 +185,6 @@ fn stale_fee_after_admin_update_fails_closed() {
         &[set_protocol_fee_ix(
             &fx.payer.pubkey(),
             &fx.fee_admin.pubkey(),
-            fx.handler_data.app_id,
             50,
             false,
         )],
@@ -284,7 +282,6 @@ fn asset_tier_applied_over_default() {
         &[set_asset_fee_tier_ix(
             &fx.payer.pubkey(),
             &fx.fee_admin.pubkey(),
-            fx.handler_data.app_id,
             fx.source_mint,
             500_000, // INPUT >= threshold → above_or_equal_bps
             10,
@@ -313,10 +310,7 @@ fn removed_protocol_fee_charges_zero() {
     let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false);
     send_instructions(
         &mut svm,
-        &[remove_protocol_fee_ix(
-            &fx.fee_admin.pubkey(),
-            fx.handler_data.app_id,
-        )],
+        &[remove_protocol_fee_ix(&fx.fee_admin.pubkey())],
         &fx.payer,
         &[&fx.fee_admin],
     )
@@ -342,7 +336,6 @@ fn recipient_unset_charges_zero() {
         &[set_protocol_fee_ix(
             &fx.payer.pubkey(),
             &fx.fee_admin.pubkey(),
-            fx.handler_data.app_id,
             DEFAULT_FEE_BPS,
             false,
         )],
@@ -417,12 +410,12 @@ fn fee_config_pda_substitution_rejected() {
             "substituted fee_config must reject",
         ),
         (
-            derive_protocol_fee_pda(&fx.handler_data.app_id).0,
+            derive_protocol_fee_pda().0,
             ANCHOR_CONSTRAINT_SEEDS,
             "substituted protocol_fee_config must fail ConstraintSeeds",
         ),
         (
-            derive_asset_fee_tier_pda(&fx.handler_data.app_id, &fx.source_mint).0,
+            derive_asset_fee_tier_pda(&fx.source_mint).0,
             ANCHOR_CONSTRAINT_SEEDS,
             "substituted asset_fee_tier must fail ConstraintSeeds",
         ),

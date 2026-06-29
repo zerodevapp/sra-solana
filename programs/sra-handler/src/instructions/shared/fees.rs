@@ -1,5 +1,5 @@
-//! Fee admin: a per-app tiered PROTOCOL fee paid to one global
-//! `fee_recipient`. Apps are fee payers, never payees.
+//! Fee admin: a single global tiered PROTOCOL fee paid to one
+//! `fee_recipient`. Depositors are fee payers, never payees.
 
 use anchor_lang::prelude::*;
 use sra_common::{
@@ -87,7 +87,6 @@ pub(crate) fn set_fee_recipient_handler(
 // ---------------------------------------------------------------------------
 
 #[derive(Accounts)]
-#[instruction(app_id: [u8; 32])]
 pub struct SetProtocolFee<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -98,30 +97,27 @@ pub struct SetProtocolFee<'info> {
         init_if_needed,
         payer = payer,
         space = 8 + ProtocolFeeConfig::INIT_SPACE,
-        seeds = [SEED_PROTOCOL_FEE, app_id.as_ref()],
+        seeds = [SEED_PROTOCOL_FEE],
         bump,
     )]
     pub protocol_fee_config: Account<'info, ProtocolFeeConfig>,
     pub system_program: Program<'info, System>,
 }
 
-/// Upsert. Any `app_id` is registrable, including zero — `protocolFeeConfig[bytes32(0)]` prices app-less deposits.
+/// Upsert the single global protocol fee config.
 pub(crate) fn set_protocol_fee_handler(
     ctx: Context<SetProtocolFee>,
-    app_id: [u8; 32],
     default_fee_bps: u16,
     allow_override: bool,
 ) -> Result<()> {
     require!(default_fee_bps <= MAX_FEE_BPS, SraError::FeeTooHigh);
 
     let protocol_fee_config = &mut ctx.accounts.protocol_fee_config;
-    protocol_fee_config.app_id = app_id;
     protocol_fee_config.default_fee_bps = default_fee_bps;
     protocol_fee_config.allow_override = allow_override;
     protocol_fee_config.bump = ctx.bumps.protocol_fee_config;
 
     emit!(ProtocolFeeUpdated {
-        app_id: protocol_fee_config.app_id,
         default_fee_bps: protocol_fee_config.default_fee_bps,
         allow_override: protocol_fee_config.allow_override,
     });
@@ -130,7 +126,6 @@ pub(crate) fn set_protocol_fee_handler(
 }
 
 #[derive(Accounts)]
-#[instruction(app_id: [u8; 32])]
 pub struct RemoveProtocolFee<'info> {
     /// Receives the closed PDA's rent.
     #[account(mut)]
@@ -140,20 +135,15 @@ pub struct RemoveProtocolFee<'info> {
     #[account(
         mut,
         close = admin,
-        seeds = [SEED_PROTOCOL_FEE, app_id.as_ref()],
+        seeds = [SEED_PROTOCOL_FEE],
         bump = protocol_fee_config.bump,
     )]
     pub protocol_fee_config: Account<'info, ProtocolFeeConfig>,
 }
 
 /// Existing `AssetFeeTier` PDAs survive while no config exists, revived by re-registration.
-pub(crate) fn remove_protocol_fee_handler(
-    ctx: Context<RemoveProtocolFee>,
-    _app_id: [u8; 32],
-) -> Result<()> {
-    emit!(ProtocolFeeRemoved {
-        app_id: ctx.accounts.protocol_fee_config.app_id,
-    });
+pub(crate) fn remove_protocol_fee_handler(_ctx: Context<RemoveProtocolFee>) -> Result<()> {
+    emit!(ProtocolFeeRemoved {});
     Ok(())
 }
 
@@ -162,20 +152,20 @@ pub(crate) fn remove_protocol_fee_handler(
 // ---------------------------------------------------------------------------
 
 #[derive(Accounts)]
-#[instruction(app_id: [u8; 32], mint: Pubkey)]
+#[instruction(mint: Pubkey)]
 pub struct SetAssetFeeTier<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     pub admin: Signer<'info>,
     #[account(seeds = [SEED_FEE_CONFIG], bump = fee_config.bump, has_one = admin)]
     pub fee_config: Account<'info, FeeConfig>,
-    #[account(seeds = [SEED_PROTOCOL_FEE, app_id.as_ref()], bump = protocol_fee_config.bump)]
+    #[account(seeds = [SEED_PROTOCOL_FEE], bump = protocol_fee_config.bump)]
     pub protocol_fee_config: Account<'info, ProtocolFeeConfig>,
     #[account(
         init_if_needed,
         payer = payer,
         space = 8 + AssetFeeTier::INIT_SPACE,
-        seeds = [SEED_ASSET_FEE_TIER, app_id.as_ref(), mint.as_ref()],
+        seeds = [SEED_ASSET_FEE_TIER, mint.as_ref()],
         bump,
     )]
     pub asset_fee_tier: Account<'info, AssetFeeTier>,
@@ -185,7 +175,6 @@ pub struct SetAssetFeeTier<'info> {
 /// `mint` is a key, not a validated account — registration is admin-gated either way.
 pub(crate) fn set_asset_fee_tier_handler(
     ctx: Context<SetAssetFeeTier>,
-    app_id: [u8; 32],
     mint: Pubkey,
     threshold: u64,
     below_bps: u16,
@@ -197,7 +186,6 @@ pub(crate) fn set_asset_fee_tier_handler(
     );
 
     let asset_fee_tier = &mut ctx.accounts.asset_fee_tier;
-    asset_fee_tier.app_id = app_id;
     asset_fee_tier.mint = mint;
     asset_fee_tier.threshold = threshold;
     asset_fee_tier.below_bps = below_bps;
@@ -205,7 +193,6 @@ pub(crate) fn set_asset_fee_tier_handler(
     asset_fee_tier.bump = ctx.bumps.asset_fee_tier;
 
     emit!(AssetFeeTierUpdated {
-        app_id: asset_fee_tier.app_id,
         mint: asset_fee_tier.mint,
         threshold: asset_fee_tier.threshold,
         below_bps: asset_fee_tier.below_bps,
@@ -217,7 +204,7 @@ pub(crate) fn set_asset_fee_tier_handler(
 
 /// Deliberately does NOT require a live `ProtocolFeeConfig` (vs EVM's `ProtocolFeeNotSet`).
 #[derive(Accounts)]
-#[instruction(app_id: [u8; 32], mint: Pubkey)]
+#[instruction(mint: Pubkey)]
 pub struct RemoveAssetFeeTier<'info> {
     /// Receives the closed PDA's rent.
     #[account(mut)]
@@ -227,7 +214,7 @@ pub struct RemoveAssetFeeTier<'info> {
     #[account(
         mut,
         close = admin,
-        seeds = [SEED_ASSET_FEE_TIER, app_id.as_ref(), mint.as_ref()],
+        seeds = [SEED_ASSET_FEE_TIER, mint.as_ref()],
         bump = asset_fee_tier.bump,
     )]
     pub asset_fee_tier: Account<'info, AssetFeeTier>,
@@ -235,12 +222,10 @@ pub struct RemoveAssetFeeTier<'info> {
 
 pub(crate) fn remove_asset_fee_tier_handler(
     ctx: Context<RemoveAssetFeeTier>,
-    _app_id: [u8; 32],
     _mint: Pubkey,
 ) -> Result<()> {
     let asset_fee_tier = &ctx.accounts.asset_fee_tier;
     emit!(AssetFeeTierRemoved {
-        app_id: asset_fee_tier.app_id,
         mint: asset_fee_tier.mint,
     });
     Ok(())

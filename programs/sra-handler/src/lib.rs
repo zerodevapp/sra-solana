@@ -126,25 +126,18 @@ pub mod sra_handler {
 
     pub fn set_protocol_fee(
         ctx: Context<SetProtocolFee>,
-        app_id: [u8; 32],
         default_fee_bps: u16,
         allow_override: bool,
     ) -> Result<()> {
-        instructions::shared::fees::set_protocol_fee_handler(
-            ctx,
-            app_id,
-            default_fee_bps,
-            allow_override,
-        )
+        instructions::shared::fees::set_protocol_fee_handler(ctx, default_fee_bps, allow_override)
     }
 
-    pub fn remove_protocol_fee(ctx: Context<RemoveProtocolFee>, app_id: [u8; 32]) -> Result<()> {
-        instructions::shared::fees::remove_protocol_fee_handler(ctx, app_id)
+    pub fn remove_protocol_fee(ctx: Context<RemoveProtocolFee>) -> Result<()> {
+        instructions::shared::fees::remove_protocol_fee_handler(ctx)
     }
 
     pub fn set_asset_fee_tier(
         ctx: Context<SetAssetFeeTier>,
-        app_id: [u8; 32],
         mint: Pubkey,
         threshold: u64,
         below_bps: u16,
@@ -152,7 +145,6 @@ pub mod sra_handler {
     ) -> Result<()> {
         instructions::shared::fees::set_asset_fee_tier_handler(
             ctx,
-            app_id,
             mint,
             threshold,
             below_bps,
@@ -160,12 +152,8 @@ pub mod sra_handler {
         )
     }
 
-    pub fn remove_asset_fee_tier(
-        ctx: Context<RemoveAssetFeeTier>,
-        app_id: [u8; 32],
-        mint: Pubkey,
-    ) -> Result<()> {
-        instructions::shared::fees::remove_asset_fee_tier_handler(ctx, app_id, mint)
+    pub fn remove_asset_fee_tier(ctx: Context<RemoveAssetFeeTier>, mint: Pubkey) -> Result<()> {
+        instructions::shared::fees::remove_asset_fee_tier_handler(ctx, mint)
     }
 
     pub fn set_pending_admin(

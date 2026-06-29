@@ -1397,10 +1397,6 @@
               },
               {
                 "kind": "arg",
-                "path": "app_id"
-              },
-              {
-                "kind": "arg",
                 "path": "mint"
               }
             ]
@@ -1408,15 +1404,6 @@
         }
       ],
       "args": [
-        {
-          "name": "app_id",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        },
         {
           "name": "mint",
           "type": "pubkey"
@@ -1490,26 +1477,12 @@
                   101,
                   101
                 ]
-              },
-              {
-                "kind": "arg",
-                "path": "app_id"
               }
             ]
           }
         }
       ],
-      "args": [
-        {
-          "name": "app_id",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        }
-      ]
+      "args": []
     },
     {
       "name": "retry_actions",
@@ -1901,10 +1874,6 @@
                   101,
                   101
                 ]
-              },
-              {
-                "kind": "arg",
-                "path": "app_id"
               }
             ]
           }
@@ -1935,10 +1904,6 @@
               },
               {
                 "kind": "arg",
-                "path": "app_id"
-              },
-              {
-                "kind": "arg",
                 "path": "mint"
               }
             ]
@@ -1950,15 +1915,6 @@
         }
       ],
       "args": [
-        {
-          "name": "app_id",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        },
         {
           "name": "mint",
           "type": "pubkey"
@@ -2147,10 +2103,6 @@
                   101,
                   101
                 ]
-              },
-              {
-                "kind": "arg",
-                "path": "app_id"
               }
             ]
           }
@@ -2161,15 +2113,6 @@
         }
       ],
       "args": [
-        {
-          "name": "app_id",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        },
         {
           "name": "default_fee_bps",
           "type": "u16"
@@ -2593,7 +2536,7 @@
         {
           "name": "protocol_fee_config",
           "docs": [
-            "empty data == no fee for this app — existence is read in-body, never",
+            "== no protocol fee configured — existence is read in-body, never",
             "caller-claimed."
           ],
           "pda": {
@@ -2614,10 +2557,6 @@
                   101,
                   101
                 ]
-              },
-              {
-                "kind": "arg",
-                "path": "handler_data.app_id"
               }
             ]
           }
@@ -2625,7 +2564,7 @@
         {
           "name": "asset_fee_tier",
           "docs": [
-            "canonical bump; empty data == no tier, fall back to `default_fee_bps`."
+            "data == no tier, fall back to `default_fee_bps`."
           ],
           "pda": {
             "seeds": [
@@ -2647,10 +2586,6 @@
                   101,
                   114
                 ]
-              },
-              {
-                "kind": "arg",
-                "path": "handler_data.app_id"
               },
               {
                 "kind": "account",
@@ -3401,21 +3336,12 @@
     {
       "name": "AssetFeeTier",
       "docs": [
-        "Per-(app, mint) volume tier (EVM `assetFeeTiers[appId][asset]`).",
-        "PDA seeds: [\"asset_fee_tier\", app_id, mint]"
+        "Per-mint volume tier (EVM `assetFeeConfigs[asset]`).",
+        "PDA seeds: [\"asset_fee_tier\", mint]"
       ],
       "type": {
         "kind": "struct",
         "fields": [
-          {
-            "name": "app_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
           {
             "name": "mint",
             "type": "pubkey"
@@ -3454,15 +3380,6 @@
         "kind": "struct",
         "fields": [
           {
-            "name": "app_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
             "name": "mint",
             "type": "pubkey"
           }
@@ -3474,15 +3391,6 @@
       "type": {
         "kind": "struct",
         "fields": [
-          {
-            "name": "app_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
           {
             "name": "mint",
             "type": "pubkey"
@@ -3518,15 +3426,6 @@
           {
             "name": "expected_mint",
             "type": "pubkey"
-          },
-          {
-            "name": "app_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
           },
           {
             "name": "action_config",
@@ -3671,18 +3570,6 @@
             }
           },
           {
-            "name": "app_id",
-            "docs": [
-              "Runtime app identifier from `PrepareParams`."
-            ],
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
             "name": "target_token",
             "docs": [
               "Per-deposit target token identifier. Stored as raw bytes32 so Solana",
@@ -3693,15 +3580,6 @@
                 "u8",
                 32
               ]
-            }
-          },
-          {
-            "name": "action_idxs",
-            "docs": [
-              "Action indices selected for the destination execution."
-            ],
-            "type": {
-              "vec": "u64"
             }
           }
         ]
@@ -4123,27 +4001,12 @@
             }
           },
           {
-            "name": "app_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
             "name": "target_token",
             "type": {
               "array": [
                 "u8",
                 32
               ]
-            }
-          },
-          {
-            "name": "action_idxs",
-            "type": {
-              "vec": "u64"
             }
           },
           {
@@ -4170,22 +4033,13 @@
     {
       "name": "ProtocolFeeConfig",
       "docs": [
-        "Per-app protocol fee (EVM `protocolFeeConfig[appId]`). The app is the fee",
+        "Single global protocol fee (EVM `protocolFeeConfig`). Deposits are the fee",
         "payer, never a payee — all fees go to `FeeConfig.fee_recipient`.",
-        "PDA seeds: [\"protocol_fee\", app_id]"
+        "PDA seeds: [\"protocol_fee\"]"
       ],
       "type": {
         "kind": "struct",
         "fields": [
-          {
-            "name": "app_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
           {
             "name": "default_fee_bps",
             "docs": [
@@ -4211,17 +4065,7 @@
       "name": "ProtocolFeeRemoved",
       "type": {
         "kind": "struct",
-        "fields": [
-          {
-            "name": "app_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          }
-        ]
+        "fields": []
       }
     },
     {
@@ -4229,15 +4073,6 @@
       "type": {
         "kind": "struct",
         "fields": [
-          {
-            "name": "app_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
           {
             "name": "default_fee_bps",
             "type": "u16"
@@ -4272,15 +4107,6 @@
           {
             "name": "expected_mint",
             "type": "pubkey"
-          },
-          {
-            "name": "app_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
           },
           {
             "name": "action_config_hash",
@@ -4456,7 +4282,7 @@
       "docs": [
         "Deterministic destination address for EVM->Solana fills.",
         "PDA seeds: [\"sra_route\", owner, config_hash, salt]",
-        "config_hash = keccak256(borsh(owner, source_chain_id, expected_mint, app_id, action_config))"
+        "config_hash = keccak256(borsh(owner, source_chain_id, expected_mint, action_config))"
       ],
       "type": {
         "kind": "struct",
@@ -4472,15 +4298,6 @@
           {
             "name": "expected_mint",
             "type": "pubkey"
-          },
-          {
-            "name": "app_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
           },
           {
             "name": "action_config_hash",
@@ -4529,7 +4346,7 @@
         "`handler_data_hash` (folded into the SRA's PDA identity) and re-supplied,",
         "then re-authenticated, on every deposit. The routing tuple",
         "(`target_chain_id` / `target_handler` / `target_adapter` / `recipient` /",
-        "`app_id` / `target_token`) is part of the immutable identity, mirroring the",
+        "`target_token`) is part of the immutable identity, mirroring the",
         "EVM `RouteConfig` that `trigger()` reads from storage and a caller cannot",
         "redirect (see `sra-stx/src/handler/SRAHandler.sol`). Every deposit must echo",
         "this exact routing in `PrepareParams`; `validate_and_prepare` rejects any",
@@ -4567,15 +4384,6 @@
           },
           {
             "name": "recipient",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "app_id",
             "type": {
               "array": [
                 "u8",

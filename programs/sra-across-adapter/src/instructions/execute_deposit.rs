@@ -99,7 +99,6 @@ pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) 
         &ctx.accounts.input_mint.key(),
         &prepare,
         &params,
-        prepared_nonce,
     )?;
 
     require_keys_eq!(
@@ -167,7 +166,6 @@ pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) 
         input_amount: params.input_amount,
         output_amount: params.output_amount,
         target_token: params.target_token,
-        action_idxs: params.action_idxs,
         exclusive_relayer: params.exclusive_relayer,
         fill_deadline_offset: params.fill_deadline_offset,
         exclusivity_period: params.exclusivity_period,

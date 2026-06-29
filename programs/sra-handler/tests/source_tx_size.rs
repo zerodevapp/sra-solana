@@ -13,7 +13,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::VersionedTransaction,
 };
-use sra_common::{abi::u256_from_u64, constants::MAX_ACTION_IDXS, source_deposit::PrepareParams};
+use sra_common::{abi::u256_from_u64, source_deposit::PrepareParams};
 
 const INPUT: u64 = 1_000_000;
 const OUTPUT_WITHIN_SLIPPAGE: u64 = 999_500;
@@ -31,7 +31,6 @@ fn build_source_versioned_tx_with_lookup_tables(
         &fetch_sra_config(svm, &fx.sra_config),
         &params,
         across_params_for(fx, &params),
-        current_nonce(svm, &fx.accounts.mint_nonce),
     );
     let validate_ix = validate_and_prepare_ix(
         &fx.payer.pubkey(),
@@ -71,7 +70,6 @@ fn build_source_versioned_tx(
         &fetch_sra_config(svm, &fx.sra_config),
         &params,
         across_params_for(fx, &params),
-        current_nonce(svm, &fx.accounts.mint_nonce),
     );
     let validate_ix = validate_and_prepare_ix(
         &fx.payer.pubkey(),
@@ -101,24 +99,23 @@ fn build_source_versioned_tx_without_alt(
 }
 
 #[test]
-fn source_2ix_versioned_tx_max_action_idxs_fits_within_packet_limit() {
+fn source_2ix_versioned_tx_fits_within_packet_limit() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
 
-    // Worst case: max action_idxs (`MAX_ACTION_IDXS` entries × 8 bytes each,
-    // plus the 4-byte vector length prefix, vs ~12 bytes for the typical
-    // 2-entry case).
+    // The source params are now fixed-size (no variable-length action_idxs), so
+    // there is a single payload shape to budget. A regression here points at
+    // static-account growth, not routing-payload bloat.
     let params = PrepareParams {
         input_amount: INPUT,
         output_amount: u256_from_u64(OUTPUT_WITHIN_SLIPPAGE),
-        action_idxs: (0..MAX_ACTION_IDXS as u64).collect(),
         ..sample_prepare_params(fx.target_token)
     };
 
     let tx = build_source_versioned_tx(&mut svm, &fx, params);
     let size = bincode::serialize(&tx).expect("bincode serialize tx").len();
 
-    println!("source 2-IX versioned tx (max action_idxs): {size} / {PACKET_DATA_SIZE} bytes");
+    println!("source 2-IX versioned tx: {size} / {PACKET_DATA_SIZE} bytes");
     assert!(
         size <= PACKET_DATA_SIZE,
         "source 2-IX versioned tx is {size} bytes, exceeds {PACKET_DATA_SIZE}-byte packet limit",
@@ -126,39 +123,13 @@ fn source_2ix_versioned_tx_max_action_idxs_fits_within_packet_limit() {
 }
 
 #[test]
-fn source_2ix_versioned_tx_empty_action_idxs_fits_within_packet_limit() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-
-    // Best case: empty action_idxs. Sanity-check that the floor is also under
-    // budget; a regression here would point at static-account growth, not at
-    // routing-payload bloat.
-    let params = PrepareParams {
-        input_amount: INPUT,
-        output_amount: u256_from_u64(OUTPUT_WITHIN_SLIPPAGE),
-        action_idxs: vec![],
-        ..sample_prepare_params(fx.target_token)
-    };
-
-    let tx = build_source_versioned_tx(&mut svm, &fx, params);
-    let size = bincode::serialize(&tx).expect("bincode serialize tx").len();
-
-    println!("source 2-IX versioned tx (empty action_idxs): {size} / {PACKET_DATA_SIZE} bytes");
-    assert!(
-        size <= PACKET_DATA_SIZE,
-        "source 2-IX versioned tx is {size} bytes, exceeds {PACKET_DATA_SIZE}-byte packet limit",
-    );
-}
-
-#[test]
-fn source_2ix_versioned_tx_empty_action_idxs_exceeds_packet_limit_without_alt() {
+fn source_2ix_versioned_tx_exceeds_packet_limit_without_alt() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
 
     let params = PrepareParams {
         input_amount: INPUT,
         output_amount: u256_from_u64(OUTPUT_WITHIN_SLIPPAGE),
-        action_idxs: vec![],
         ..sample_prepare_params(fx.target_token)
     };
 

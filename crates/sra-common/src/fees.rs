@@ -72,7 +72,6 @@ mod tests {
 
     fn cfg(allow_override: bool, default_fee_bps: u16) -> ProtocolFeeConfig {
         ProtocolFeeConfig {
-            app_id: [0x44u8; 32],
             default_fee_bps,
             allow_override,
             bump: 254,
@@ -81,7 +80,6 @@ mod tests {
 
     fn tier(threshold: u64, below_bps: u16, above_or_equal_bps: u16) -> AssetFeeTier {
         AssetFeeTier {
-            app_id: [0x44u8; 32],
             mint: Pubkey::new_unique(),
             threshold,
             below_bps,

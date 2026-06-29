@@ -470,7 +470,6 @@ impl SurfpoolSourceFixture {
                 EXCLUSIVITY_PERIOD_SECS,
             )
             .expect("prepare params must produce a valid net amount"),
-            current_nonce,
         );
         let validate_ix = validate_and_prepare_ix(
             &self.payer.pubkey(),

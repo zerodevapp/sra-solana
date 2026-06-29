@@ -1005,12 +1005,6 @@
             }
           },
           {
-            "name": "action_idxs",
-            "type": {
-              "vec": "u64"
-            }
-          },
-          {
             "name": "exclusive_relayer",
             "type": "pubkey"
           },
@@ -1075,27 +1069,12 @@
             }
           },
           {
-            "name": "app_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
             "name": "target_token",
             "type": {
               "array": [
                 "u8",
                 32
               ]
-            }
-          },
-          {
-            "name": "action_idxs",
-            "type": {
-              "vec": "u64"
             }
           },
           {
@@ -1270,7 +1249,7 @@
       "docs": [
         "Deterministic destination address for EVM->Solana fills.",
         "PDA seeds: [\"sra_route\", owner, config_hash, salt]",
-        "config_hash = keccak256(borsh(owner, source_chain_id, expected_mint, app_id, action_config))"
+        "config_hash = keccak256(borsh(owner, source_chain_id, expected_mint, action_config))"
       ],
       "type": {
         "kind": "struct",
@@ -1286,15 +1265,6 @@
           {
             "name": "expected_mint",
             "type": "pubkey"
-          },
-          {
-            "name": "app_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
           },
           {
             "name": "action_config_hash",

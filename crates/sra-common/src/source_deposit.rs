@@ -12,9 +12,7 @@ pub struct PrepareParams {
     pub target_handler: [u8; 32],
     pub target_adapter: [u8; 32],
     pub recipient: [u8; 32],
-    pub app_id: [u8; 32],
     pub target_token: [u8; 32],
-    pub action_idxs: Vec<u64>,
     pub protocol_fee_amount: u64,
     /// Owner-signed assertion that skips the protocol fee.
     pub is_sponsor: bool,
@@ -41,9 +39,7 @@ pub struct AcrossDepositParams {
     pub target_handler: [u8; 32],
     pub target_adapter: [u8; 32],
     pub recipient: [u8; 32],
-    pub app_id: [u8; 32],
     pub target_token: [u8; 32],
-    pub action_idxs: Vec<u64>,
     pub exclusive_relayer: Pubkey,
     pub fill_deadline_offset: u32,
     pub exclusivity_period: u32,
@@ -58,9 +54,7 @@ impl PrepareParams {
         target_handler: [u8; 32],
         target_adapter: [u8; 32],
         recipient: [u8; 32],
-        app_id: [u8; 32],
         target_token: [u8; 32],
-        action_idxs: Vec<u64>,
         protocol_fee_amount: u64,
         is_sponsor: bool,
         protocol_fee_bps_override: u16,
@@ -72,9 +66,7 @@ impl PrepareParams {
             target_handler,
             target_adapter,
             recipient,
-            app_id,
             target_token,
-            action_idxs,
             protocol_fee_amount,
             is_sponsor,
             protocol_fee_bps_override,
@@ -104,9 +96,7 @@ impl AcrossDepositParams {
             target_handler: prepare.target_handler,
             target_adapter: prepare.target_adapter,
             recipient: prepare.recipient,
-            app_id: prepare.app_id,
             target_token: prepare.target_token,
-            action_idxs: prepare.action_idxs.clone(),
             exclusive_relayer,
             fill_deadline_offset,
             exclusivity_period,
@@ -189,9 +179,7 @@ mod tests {
             [0x11u8; 32],
             [0x22u8; 32],
             [0x33u8; 32],
-            [0x44u8; 32],
             [0xABu8; 32],
-            vec![1, 2],
             protocol_fee_amount,
             false,
             NO_FEE_BPS_OVERRIDE,
@@ -238,7 +226,7 @@ mod tests {
 
     #[test]
     fn prepare_params_wire_appends_fee_fields_in_order() {
-        // The Borsh tail after `action_idxs` is the cross-program attestation
+        // The Borsh tail after `target_token` is the cross-program attestation
         // contract: protocol_fee_amount (u64 LE) ‖ is_sponsor (u8) ‖
         // protocol_fee_bps_override (u16 LE). Drift breaks the adapter decode.
         let mut prepare = fee_prepare(100, 0x0102030405060708);

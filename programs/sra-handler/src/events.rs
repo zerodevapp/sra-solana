@@ -39,19 +39,15 @@ pub struct FeeRecipientUpdated {
 
 #[event]
 pub struct ProtocolFeeUpdated {
-    pub app_id: [u8; 32],
     pub default_fee_bps: u16,
     pub allow_override: bool,
 }
 
 #[event]
-pub struct ProtocolFeeRemoved {
-    pub app_id: [u8; 32],
-}
+pub struct ProtocolFeeRemoved {}
 
 #[event]
 pub struct AssetFeeTierUpdated {
-    pub app_id: [u8; 32],
     pub mint: Pubkey,
     pub threshold: u64,
     pub below_bps: u16,
@@ -60,7 +56,6 @@ pub struct AssetFeeTierUpdated {
 
 #[event]
 pub struct AssetFeeTierRemoved {
-    pub app_id: [u8; 32],
     pub mint: Pubkey,
 }
 
@@ -83,7 +78,6 @@ pub struct RouteCreated {
     pub owner: Pubkey,
     pub source_chain_id: u64,
     pub expected_mint: Pubkey,
-    pub app_id: [u8; 32],
     /// keccak256(borsh(action_config)) — committed by hash, not stored inline.
     pub action_config_hash: [u8; 32],
     pub salt: [u8; 32],
@@ -185,11 +179,7 @@ pub struct DepositPrepared {
     pub target_adapter: [u8; 32],
     /// Destination account / recipient identifier.
     pub recipient: [u8; 32],
-    /// Runtime app identifier from `PrepareParams`.
-    pub app_id: [u8; 32],
     /// Per-deposit target token identifier. Stored as raw bytes32 so Solana
     /// pubkeys and other non-EVM ids are not truncated.
     pub target_token: [u8; 32],
-    /// Action indices selected for the destination execution.
-    pub action_idxs: Vec<u64>,
 }

@@ -36,7 +36,6 @@ use sra_common::{
         SEED_PROTOCOL_FEE, SEED_SRA, SEED_SRA_ROUTE, SEED_VERIFIED_FILL,
     },
     source_deposit::{AcrossDepositParams, PrepareParams},
-    test_utils::DEFAULT_ACTION_IDXS,
     types::{
         AccountTemplate, AddressBookEntry, AddressBookRoot, AssetFeeTier, CreateRouteParams,
         ExecutionStatus, FeeConfig, FillReceipt, FixedRole, ManageRouteParams, MintNonce,
@@ -208,7 +207,6 @@ pub fn sample_handler_data(address_book_root: Pubkey) -> SourceHandlerData {
         target_handler: evm_bytes32(0x11),
         target_adapter: evm_bytes32(0x22),
         recipient: evm_bytes32(0x33),
-        app_id: [0x44u8; 32],
         target_token: sample_target_token(),
         allowed_slippage_bps: 50,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
@@ -223,9 +221,7 @@ pub fn sample_prepare_params(target_token: [u8; 32]) -> PrepareParams {
         evm_bytes32(0x11),
         evm_bytes32(0x22),
         evm_bytes32(0x33),
-        [0x44u8; 32],
         target_token,
-        DEFAULT_ACTION_IDXS.to_vec(),
         0,
         false,
         sra_common::constants::NO_FEE_BPS_OVERRIDE,
@@ -591,12 +587,12 @@ pub fn derive_fee_config_pda() -> (Pubkey, u8) {
     Pubkey::find_program_address(&[SEED_FEE_CONFIG], &PROGRAM_ID)
 }
 
-pub fn derive_protocol_fee_pda(app_id: &[u8; 32]) -> (Pubkey, u8) {
-    Pubkey::find_program_address(&[SEED_PROTOCOL_FEE, app_id], &PROGRAM_ID)
+pub fn derive_protocol_fee_pda() -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[SEED_PROTOCOL_FEE], &PROGRAM_ID)
 }
 
-pub fn derive_asset_fee_tier_pda(app_id: &[u8; 32], mint: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(&[SEED_ASSET_FEE_TIER, app_id, mint.as_ref()], &PROGRAM_ID)
+pub fn derive_asset_fee_tier_pda(mint: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[SEED_ASSET_FEE_TIER, mint.as_ref()], &PROGRAM_ID)
 }
 
 pub fn initialize_fee_config_ix(
@@ -634,12 +630,11 @@ pub fn set_fee_recipient_ix(admin: &Pubkey, new_recipient: Pubkey) -> Instructio
 pub fn set_protocol_fee_ix(
     payer: &Pubkey,
     admin: &Pubkey,
-    app_id: [u8; 32],
     default_fee_bps: u16,
     allow_override: bool,
 ) -> Instruction {
     let (fee_config, _) = derive_fee_config_pda();
-    let (protocol_fee_config, _) = derive_protocol_fee_pda(&app_id);
+    let (protocol_fee_config, _) = derive_protocol_fee_pda();
     Instruction {
         program_id: PROGRAM_ID,
         accounts: sra_handler::accounts::SetProtocolFee {
@@ -651,7 +646,6 @@ pub fn set_protocol_fee_ix(
         }
         .to_account_metas(None),
         data: sra_handler::instruction::SetProtocolFee {
-            app_id,
             default_fee_bps,
             allow_override,
         }
@@ -659,9 +653,9 @@ pub fn set_protocol_fee_ix(
     }
 }
 
-pub fn remove_protocol_fee_ix(admin: &Pubkey, app_id: [u8; 32]) -> Instruction {
+pub fn remove_protocol_fee_ix(admin: &Pubkey) -> Instruction {
     let (fee_config, _) = derive_fee_config_pda();
-    let (protocol_fee_config, _) = derive_protocol_fee_pda(&app_id);
+    let (protocol_fee_config, _) = derive_protocol_fee_pda();
     Instruction {
         program_id: PROGRAM_ID,
         accounts: sra_handler::accounts::RemoveProtocolFee {
@@ -670,22 +664,21 @@ pub fn remove_protocol_fee_ix(admin: &Pubkey, app_id: [u8; 32]) -> Instruction {
             protocol_fee_config,
         }
         .to_account_metas(None),
-        data: sra_handler::instruction::RemoveProtocolFee { app_id }.data(),
+        data: sra_handler::instruction::RemoveProtocolFee {}.data(),
     }
 }
 
 pub fn set_asset_fee_tier_ix(
     payer: &Pubkey,
     admin: &Pubkey,
-    app_id: [u8; 32],
     mint: Pubkey,
     threshold: u64,
     below_bps: u16,
     above_or_equal_bps: u16,
 ) -> Instruction {
     let (fee_config, _) = derive_fee_config_pda();
-    let (protocol_fee_config, _) = derive_protocol_fee_pda(&app_id);
-    let (asset_fee_tier, _) = derive_asset_fee_tier_pda(&app_id, &mint);
+    let (protocol_fee_config, _) = derive_protocol_fee_pda();
+    let (asset_fee_tier, _) = derive_asset_fee_tier_pda(&mint);
     Instruction {
         program_id: PROGRAM_ID,
         accounts: sra_handler::accounts::SetAssetFeeTier {
@@ -698,7 +691,6 @@ pub fn set_asset_fee_tier_ix(
         }
         .to_account_metas(None),
         data: sra_handler::instruction::SetAssetFeeTier {
-            app_id,
             mint,
             threshold,
             below_bps,
@@ -708,9 +700,9 @@ pub fn set_asset_fee_tier_ix(
     }
 }
 
-pub fn remove_asset_fee_tier_ix(admin: &Pubkey, app_id: [u8; 32], mint: Pubkey) -> Instruction {
+pub fn remove_asset_fee_tier_ix(admin: &Pubkey, mint: Pubkey) -> Instruction {
     let (fee_config, _) = derive_fee_config_pda();
-    let (asset_fee_tier, _) = derive_asset_fee_tier_pda(&app_id, &mint);
+    let (asset_fee_tier, _) = derive_asset_fee_tier_pda(&mint);
     Instruction {
         program_id: PROGRAM_ID,
         accounts: sra_handler::accounts::RemoveAssetFeeTier {
@@ -719,7 +711,7 @@ pub fn remove_asset_fee_tier_ix(admin: &Pubkey, app_id: [u8; 32], mint: Pubkey) 
             asset_fee_tier,
         }
         .to_account_metas(None),
-        data: sra_handler::instruction::RemoveAssetFeeTier { app_id, mint }.data(),
+        data: sra_handler::instruction::RemoveAssetFeeTier { mint }.data(),
     }
 }
 
@@ -1101,9 +1093,8 @@ pub fn validate_and_prepare_ix(
             address_book_root: *address_book_root,
             address_book_entry: *address_book_entry,
             fee_config: derive_fee_config_pda().0,
-            protocol_fee_config: derive_protocol_fee_pda(&handler_data.app_id).0,
-            asset_fee_tier: derive_asset_fee_tier_pda(&handler_data.app_id, &accounts.source_mint)
-                .0,
+            protocol_fee_config: derive_protocol_fee_pda().0,
+            asset_fee_tier: derive_asset_fee_tier_pda(&accounts.source_mint).0,
             fee_recipient_token_account,
             token_program: TOKEN_PROGRAM_ID,
             associated_token_program: ATA_PROGRAM_ID,
@@ -1217,7 +1208,6 @@ impl ValidatePrepareFixture {
             target_handler: evm_bytes32(0x11),
             target_adapter: evm_bytes32(0x22),
             recipient: evm_bytes32(0x33),
-            app_id: [0x44u8; 32],
             target_token,
             allowed_slippage_bps,
             allowed_adapters,
@@ -1388,7 +1378,6 @@ impl ValidatePrepareFixture {
             &fetch_sra_config(svm, &self.sra_config),
             &params,
             across_params_for(self, &params),
-            current_nonce(svm, &self.accounts.mint_nonce),
         );
         let address_book_entry =
             self.address_book_entry(params.target_chain_id, &params.target_token);
@@ -1434,7 +1423,6 @@ pub fn execute_deposit_across_ix(
     sra_config: &SraConfig,
     prepare: &PrepareParams,
     params: AcrossDepositParams,
-    prepared_nonce: u64,
 ) -> Instruction {
     let bundle = sra_across_adapter::utils::build_deposit_now_bundle(
         &fx.accounts.adapter_authority,
@@ -1442,7 +1430,6 @@ pub fn execute_deposit_across_ix(
         &fx.source_mint,
         prepare,
         &params,
-        prepared_nonce,
     )
     .expect("build deposit-now bundle");
 
@@ -1520,7 +1507,6 @@ pub fn invoke_execute_only(
         &fetch_sra_config(svm, &fx.sra_config),
         prepare,
         params,
-        current_nonce(svm, &fx.accounts.mint_nonce),
     );
     send_instructions(svm, &[ix], &fx.payer, &[])
 }
@@ -1589,7 +1575,6 @@ pub fn route_config_hash_for(owner: &Pubkey, params: &CreateRouteParams) -> [u8;
         owner,
         params.source_chain_id,
         &params.expected_mint,
-        &params.app_id,
         &params.action_config,
     )
     .expect("route_config_hash should not exceed the action bound")
@@ -1663,7 +1648,6 @@ pub fn sample_create_route_params(expected_mint: Pubkey, salt: [u8; 32]) -> Crea
     CreateRouteParams {
         source_chain_id: 42_161,
         expected_mint,
-        app_id: [0x44u8; 32],
         action_config: vec![SolanaAction::SplTransfer {
             recipient: Pubkey::new_unique(),
             amount_bps: 10_000,

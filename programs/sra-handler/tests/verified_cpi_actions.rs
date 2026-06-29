@@ -132,7 +132,6 @@ fn stage(
     let params = CreateRouteParams {
         source_chain_id: SOURCE_CHAIN_ID,
         expected_mint: input_mint,
-        app_id: [0x55u8; 32],
         action_config: action_config.clone(),
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],

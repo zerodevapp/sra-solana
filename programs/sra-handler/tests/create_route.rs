@@ -38,7 +38,6 @@ fn create_route_happy_path() {
     assert_eq!(route.owner, owner.pubkey());
     assert_eq!(route.source_chain_id, params.source_chain_id);
     assert_eq!(route.expected_mint, mint);
-    assert_eq!(route.app_id, params.app_id);
     assert_eq!(route.action_config_hash, action_config_hash_for(&params));
     assert_eq!(route.salt, params.salt);
     assert_eq!(route.allowed_adapters, vec![ADAPTER_PROGRAM_ID]);
@@ -75,7 +74,6 @@ fn create_route_emits_route_created() {
     assert_eq!(ev.owner, owner.pubkey());
     assert_eq!(ev.source_chain_id, params.source_chain_id);
     assert_eq!(ev.expected_mint, mint);
-    assert_eq!(ev.app_id, params.app_id);
     assert_eq!(ev.action_config_hash, action_config_hash_for(&params));
     assert_eq!(ev.salt, params.salt);
     assert_eq!(ev.allowed_adapters, vec![ADAPTER_PROGRAM_ID]);

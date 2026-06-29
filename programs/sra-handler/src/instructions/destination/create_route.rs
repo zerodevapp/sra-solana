@@ -79,7 +79,6 @@ pub(crate) fn handler(
         &ctx.accounts.owner.key(),
         params.source_chain_id,
         &params.expected_mint,
-        &params.app_id,
         &params.action_config,
     )?;
     require!(
@@ -93,7 +92,6 @@ pub(crate) fn handler(
     route.owner = ctx.accounts.owner.key();
     route.source_chain_id = params.source_chain_id;
     route.expected_mint = params.expected_mint;
-    route.app_id = params.app_id;
     route.action_config_hash = action_hash;
     route.salt = params.salt;
     route.allowed_adapters = params.allowed_adapters;
@@ -105,7 +103,6 @@ pub(crate) fn handler(
         owner: route.owner,
         source_chain_id: route.source_chain_id,
         expected_mint: route.expected_mint,
-        app_id: route.app_id,
         action_config_hash: route.action_config_hash,
         salt: route.salt,
         allowed_adapters: route.allowed_adapters.clone(),

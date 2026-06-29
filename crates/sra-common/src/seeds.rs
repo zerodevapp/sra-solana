@@ -73,23 +73,21 @@ pub fn config_hash(
 
 /// Compute the config_hash for a destination route PDA.
 /// PDA seeds: ["sra_route", owner, config_hash, salt]
-/// config_hash = keccak256(borsh(owner, source_chain_id, expected_mint, app_id, action_config))
+/// config_hash = keccak256(borsh(owner, source_chain_id, expected_mint, action_config))
 pub fn route_config_hash(
     owner: &Pubkey,
     source_chain_id: u64,
     expected_mint: &Pubkey,
-    app_id: &[u8; 32],
     action_config: &[SolanaAction],
 ) -> Result<[u8; 32]> {
     require!(
         action_config.len() <= crate::constants::MAX_ACTION_IDXS,
         crate::errors::SraError::TooManyActionIdxs,
     );
-    let mut data = Vec::with_capacity(32 + 8 + 32 + 32 + 4 + action_config.len() * 35);
+    let mut data = Vec::with_capacity(32 + 8 + 32 + 4 + action_config.len() * 35);
     data.extend_from_slice(owner.as_ref());
     data.extend_from_slice(&source_chain_id.to_le_bytes());
     data.extend_from_slice(expected_mint.as_ref());
-    data.extend_from_slice(app_id);
     // Borsh-serialize the action_config Vec
     let serialized = action_config
         .try_to_vec()
@@ -132,15 +130,10 @@ mod tests {
             target_handler: [4u8; 32],
             target_adapter: [5u8; 32],
             recipient: [6u8; 32],
-            app_id: [7u8; 32],
             target_token: [8u8; 32],
             allowed_slippage_bps: 50,
             allowed_adapters: vec![Pubkey::new_from_array([9u8; 32])],
         }
-    }
-
-    fn test_app_id() -> [u8; 32] {
-        [5u8; 32]
     }
 
     #[test]
@@ -265,8 +258,8 @@ mod tests {
             recipient: Pubkey::new_from_array([20u8; 32]),
             amount_bps: 10000,
         }];
-        let h1 = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions).unwrap();
-        let h2 = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions).unwrap();
+        let h1 = route_config_hash(&test_owner(), 42161, &mint, &actions).unwrap();
+        let h2 = route_config_hash(&test_owner(), 42161, &mint, &actions).unwrap();
         assert_eq!(h1, h2);
         assert_ne!(h1, [0u8; 32]);
     }
@@ -275,8 +268,8 @@ mod tests {
     fn route_config_hash_different_chain() {
         let mint = Pubkey::new_from_array([10u8; 32]);
         let actions = vec![];
-        let h1 = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions).unwrap();
-        let h2 = route_config_hash(&test_owner(), 10, &mint, &test_app_id(), &actions).unwrap();
+        let h1 = route_config_hash(&test_owner(), 42161, &mint, &actions).unwrap();
+        let h2 = route_config_hash(&test_owner(), 10, &mint, &actions).unwrap();
         assert_ne!(h1, h2);
     }
 
@@ -291,15 +284,15 @@ mod tests {
             recipient: Pubkey::new_from_array([20u8; 32]),
             amount_bps: 10000,
         }];
-        let h1 = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions1).unwrap();
-        let h2 = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions2).unwrap();
+        let h1 = route_config_hash(&test_owner(), 42161, &mint, &actions1).unwrap();
+        let h2 = route_config_hash(&test_owner(), 42161, &mint, &actions2).unwrap();
         assert_ne!(h1, h2);
     }
 
     #[test]
     fn route_config_hash_empty_actions() {
         let mint = Pubkey::new_from_array([10u8; 32]);
-        let h1 = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &[]).unwrap();
+        let h1 = route_config_hash(&test_owner(), 42161, &mint, &[]).unwrap();
         assert_ne!(h1, [0u8; 32]);
     }
 
@@ -318,7 +311,7 @@ mod tests {
                 amount_bps: 10_000,
             },
         ];
-        let h = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions).unwrap();
+        let h = route_config_hash(&test_owner(), 42161, &mint, &actions).unwrap();
         assert_ne!(h, [0u8; 32]);
     }
 
@@ -328,15 +321,15 @@ mod tests {
 
     #[test]
     fn route_config_hash_golden_vector_empty_actions() {
-        // owner=[1]*32, chain_id=42161 (LE), mint=[10]*32, app_id=[5]*32,
+        // owner=[1]*32, chain_id=42161 (LE), mint=[10]*32,
         // actions=[] (borsh: u32 LE 0)
         let expected: [u8; 32] = [
-            0x2c, 0x8f, 0xf9, 0x4f, 0x33, 0xff, 0x37, 0x3c, 0x25, 0xc5, 0x33, 0xad, 0x96, 0x37,
-            0x46, 0x65, 0x8c, 0xf8, 0xc0, 0xa9, 0xac, 0x76, 0xbf, 0xd0, 0x95, 0x9b, 0x5e, 0x85,
-            0xee, 0x8c, 0xf7, 0x24,
+            0xb6, 0xf0, 0xcf, 0x88, 0x29, 0x03, 0x5a, 0x59, 0xa5, 0x92, 0x94, 0x5b, 0xee, 0x90,
+            0xc2, 0x24, 0xf0, 0x61, 0x52, 0x53, 0x41, 0x98, 0xd5, 0x0b, 0x97, 0x98, 0x03, 0x80,
+            0xfe, 0x99, 0xf6, 0x22,
         ];
         let mint = Pubkey::new_from_array([10u8; 32]);
-        let h = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &[]).unwrap();
+        let h = route_config_hash(&test_owner(), 42161, &mint, &[]).unwrap();
         assert_eq!(
             h, expected,
             "route_config_hash (empty) golden vector mismatch"
@@ -345,20 +338,20 @@ mod tests {
 
     #[test]
     fn route_config_hash_golden_vector_one_action() {
-        // owner=[1]*32, chain_id=42161 (LE), mint=[10]*32, app_id=[5]*32,
+        // owner=[1]*32, chain_id=42161 (LE), mint=[10]*32,
         // actions=[SplTransfer { recipient=[20]*32, amount_bps=10000 }]
         // borsh: u32 LE 1 + u8 0 (variant disc) + [20]*32 + u16 LE 10000
         let expected: [u8; 32] = [
-            0x0e, 0xe0, 0x16, 0xda, 0xd3, 0xaf, 0xc7, 0x6e, 0xc1, 0xf2, 0x95, 0x60, 0xbb, 0x67,
-            0xb0, 0xfc, 0xe5, 0x45, 0x1c, 0x12, 0x4c, 0x5b, 0x01, 0x91, 0x1e, 0xf3, 0x00, 0xde,
-            0xdb, 0x5c, 0x79, 0xa9,
+            0x13, 0x98, 0x9f, 0x29, 0xc8, 0xb0, 0x45, 0x51, 0xcf, 0x52, 0x85, 0x73, 0x1c, 0x1b,
+            0x8f, 0xd4, 0xa7, 0xa5, 0xe0, 0xf9, 0x97, 0x0f, 0x72, 0xb2, 0x6b, 0x3e, 0x87, 0x84,
+            0x54, 0xe1, 0x0d, 0xe2,
         ];
         let mint = Pubkey::new_from_array([10u8; 32]);
         let actions = vec![SolanaAction::SplTransfer {
             recipient: Pubkey::new_from_array([20u8; 32]),
             amount_bps: 10000,
         }];
-        let h = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions).unwrap();
+        let h = route_config_hash(&test_owner(), 42161, &mint, &actions).unwrap();
         assert_eq!(
             h, expected,
             "route_config_hash (1 action) golden vector mismatch"
@@ -377,7 +370,7 @@ mod tests {
             })
             .collect();
         // Should not panic
-        let _ = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions);
+        let _ = route_config_hash(&test_owner(), 42161, &mint, &actions);
     }
 
     #[test]
@@ -391,7 +384,7 @@ mod tests {
             .collect();
 
         let result = std::panic::catch_unwind(|| {
-            let _ = route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions);
+            let _ = route_config_hash(&test_owner(), 42161, &mint, &actions);
         });
 
         assert!(
@@ -410,8 +403,7 @@ mod tests {
             })
             .collect();
 
-        let err =
-            route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions).unwrap_err();
+        let err = route_config_hash(&test_owner(), 42161, &mint, &actions).unwrap_err();
 
         match err {
             anchor_lang::error::Error::AnchorError(anchor_err) => {
@@ -464,13 +456,13 @@ mod tests {
     #[test]
     fn action_config_hash_hashes_actions_alone_not_the_route_tuple() {
         // The action-config commitment must be over the action list ONLY, so
-        // execute_actions can verify it without reconstructing owner/chain/mint/
-        // app_id. It must therefore differ from route_config_hash over the same
-        // actions (which folds in the full route identity).
+        // execute_actions can verify it without reconstructing the
+        // owner/chain/mint route tuple. It must therefore differ from
+        // route_config_hash over the same actions (which folds in the full
+        // route identity).
         let mint = Pubkey::new_from_array([10u8; 32]);
         let actions = sample_actions();
-        let route =
-            route_config_hash(&test_owner(), 42161, &mint, &test_app_id(), &actions).unwrap();
+        let route = route_config_hash(&test_owner(), 42161, &mint, &actions).unwrap();
         assert_ne!(action_config_hash(&actions).unwrap(), route);
     }
 

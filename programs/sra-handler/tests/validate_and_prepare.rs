@@ -6,9 +6,7 @@ use solana_sdk::{
     instruction::InstructionError, pubkey::Pubkey, signature::Keypair, signer::Signer,
     transaction::TransactionError,
 };
-use sra_common::{
-    abi::u256_from_u64, constants::MAX_ACTION_IDXS, errors::SraError, source_deposit::PrepareParams,
-};
+use sra_common::{abi::u256_from_u64, errors::SraError, source_deposit::PrepareParams};
 
 const INPUT: u64 = 1_000_000;
 // 50 bps slippage tolerance -> min acceptable = 995_000 for INPUT = 1_000_000.
@@ -16,23 +14,6 @@ const OUTPUT_WITHIN_SLIPPAGE: u64 = 999_500;
 
 fn default_prepare_params(fx: &ValidatePrepareFixture) -> PrepareParams {
     sample_prepare_params(fx.target_token)
-}
-
-fn build_deposit_bundle(
-    fx: &ValidatePrepareFixture,
-    svm: &LiteSVM,
-    params: &PrepareParams,
-    prepared_nonce: u64,
-) -> sra_across_adapter::utils::DepositNowBuild {
-    sra_across_adapter::utils::build_deposit_now_bundle(
-        &fx.accounts.adapter_authority,
-        &fetch_sra_config(svm, &fx.sra_config),
-        &fx.source_mint,
-        params,
-        &across_params_for(fx, params),
-        prepared_nonce,
-    )
-    .expect("build deposit-now bundle")
 }
 
 fn invoke_source_flow(
@@ -58,7 +39,6 @@ fn invoke_source_flow(
         &fetch_sra_config(svm, &fx.sra_config),
         &params,
         across,
-        current_nonce(svm, &fx.accounts.mint_nonce),
     );
     let validate_ix = validate_and_prepare_ix(
         &payer.pubkey(),
@@ -123,9 +103,7 @@ fn validate_and_prepare_happy_path() {
     assert_eq!(ev.target_handler, params.target_handler);
     assert_eq!(ev.target_adapter, params.target_adapter);
     assert_eq!(ev.recipient, params.recipient);
-    assert_eq!(ev.app_id, params.app_id);
     assert_eq!(ev.target_token, params.target_token);
-    assert_eq!(ev.action_idxs, params.action_idxs);
 }
 
 #[test]
@@ -169,7 +147,6 @@ fn execute_deposit_emits_across_deposit_executed() {
     assert_eq!(ev.input_amount, params.input_amount);
     assert_eq!(ev.output_amount, params.output_amount);
     assert_eq!(ev.target_token, params.target_token);
-    assert_eq!(ev.action_idxs, params.action_idxs);
     assert_eq!(ev.exclusive_relayer, fx.payer.pubkey());
     assert_eq!(ev.fill_deadline_offset, 3_600);
     assert_eq!(ev.exclusivity_period, 900);
@@ -187,7 +164,6 @@ fn validate_and_prepare_standalone_rejected() {
         &fetch_sra_config(&svm, &fx.sra_config),
         &prepare,
         across_params_for(&fx, &prepare),
-        current_nonce(&svm, &fx.accounts.mint_nonce),
     );
     let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let ix = validate_and_prepare_ix(
@@ -228,7 +204,6 @@ fn validate_and_prepare_wrong_next_ix_program_rejected() {
         &fetch_sra_config(&svm, &fx.sra_config),
         &params,
         across_params_for(&fx, &params),
-        current_nonce(&svm, &fx.accounts.mint_nonce),
     );
     bad_ix.program_id = PROGRAM_ID;
 
@@ -265,7 +240,9 @@ fn validate_and_prepare_wrong_next_ix_routing_rejected() {
     let fx = ValidatePrepareFixture::new(&mut svm);
     let prepare = default_prepare_params(&fx);
     let mut across = across_params_for(&fx, &prepare);
-    across.action_idxs[1] += 1;
+    // Diverge a routing field the adapter re-derives from the attested prepare,
+    // so the adapter's `expected_deposit == *deposit` check rejects it.
+    across.recipient = evm_bytes32(0x99);
 
     let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
     let execute_ix = execute_deposit_across_ix(
@@ -274,7 +251,6 @@ fn validate_and_prepare_wrong_next_ix_routing_rejected() {
         &fetch_sra_config(&svm, &fx.sra_config),
         &prepare,
         across,
-        current_nonce(&svm, &fx.accounts.mint_nonce),
     );
     let validate_ix = validate_and_prepare_ix(
         &fx.payer.pubkey(),
@@ -321,7 +297,6 @@ fn validate_and_prepare_wrong_next_ix_sra_config_rejected() {
         &fetch_sra_config(&svm, &fx.sra_config),
         &prepare,
         across,
-        current_nonce(&svm, &fx.accounts.mint_nonce),
     );
     // ADAPTER_ACCT_SRA_CONFIG = 2 in the adapter ix layout.
     execute_ix.accounts[2].pubkey = solana_sdk::pubkey::Pubkey::new_unique();
@@ -371,7 +346,6 @@ fn validate_and_prepare_wrong_next_ix_source_mint_rejected() {
         &fetch_sra_config(&svm, &fx.sra_config),
         &prepare,
         across,
-        current_nonce(&svm, &fx.accounts.mint_nonce),
     );
     // ADAPTER_ACCT_INPUT_MINT = 6 in the adapter ix layout.
     execute_ix.accounts[6].pubkey = solana_sdk::pubkey::Pubkey::new_unique();
@@ -419,7 +393,6 @@ fn validate_and_prepare_wrong_next_ix_exclusive_relayer_rejected() {
         &fetch_sra_config(&svm, &fx.sra_config),
         &prepare,
         base_across.clone(),
-        current_nonce(&svm, &fx.accounts.mint_nonce),
     );
 
     let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
@@ -444,7 +417,6 @@ fn validate_and_prepare_wrong_next_ix_exclusive_relayer_rejected() {
         &fetch_sra_config(&svm, &fx.sra_config),
         &prepare,
         mutated_across,
-        current_nonce(&svm, &fx.accounts.mint_nonce),
     );
 
     let err = send_instructions(
@@ -480,7 +452,6 @@ fn validate_and_prepare_malformed_next_ix_data_rejected() {
         &fetch_sra_config(&svm, &fx.sra_config),
         &prepare,
         across,
-        current_nonce(&svm, &fx.accounts.mint_nonce),
     );
     // Wrong discriminator: zero out the leading 8 bytes so decode rejects
     // before any field comparison.
@@ -593,7 +564,6 @@ fn execute_deposit_wrong_prev_ix_program_rejected() {
         &fetch_sra_config(&svm, &fx.sra_config),
         &prepare,
         across_params_for(&fx, &prepare),
-        current_nonce(&svm, &fx.accounts.mint_nonce),
     );
 
     let err = send_instructions(&mut svm, &[compute_budget_ix(), execute_ix], &fx.payer, &[])
@@ -648,7 +618,6 @@ fn execute_deposit_wrong_prev_handler_call_rejected() {
         &fetch_sra_config(&svm, &fx.sra_config),
         &prepare,
         across_params_for(&fx, &prepare),
-        current_nonce(&svm, &fx.accounts.mint_nonce),
     );
 
     let err = send_instructions(
@@ -978,37 +947,6 @@ fn validate_and_prepare_large_target_decimal_gap_rejects_as_slippage() {
 }
 
 #[test]
-fn validate_and_prepare_too_many_action_idxs_rejected() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-
-    let too_many = (0..=MAX_ACTION_IDXS as u64).collect::<Vec<_>>();
-    let err = fx
-        .invoke(
-            &mut svm,
-            PrepareParams {
-                action_idxs: too_many,
-                ..default_prepare_params(&fx)
-            },
-        )
-        .expect_err("too many action idxs must reject")
-        .err
-        .clone();
-
-    assert_eq!(
-        err,
-        TransactionError::InstructionError(
-            0,
-            InstructionError::Custom(SraError::TooManyActionIdxs.into()),
-        )
-    );
-    assert_eq!(
-        fetch_token_balance(&svm, &fx.owner_ata),
-        OWNER_STARTING_BALANCE
-    );
-}
-
-#[test]
 fn validate_and_prepare_insufficient_balance_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
@@ -1058,7 +996,6 @@ fn validate_and_prepare_sequential_nonce_increments() {
             "deposit #{expected_pre_nonce} carries pre-increment nonce",
         );
         assert_eq!(ev.target_token, params.target_token);
-        assert_eq!(ev.action_idxs, params.action_idxs);
 
         let n = fetch_mint_nonce(&svm, &fx.accounts.mint_nonce);
         assert_eq!(
@@ -1094,34 +1031,6 @@ fn validate_and_prepare_slippage_boundary_succeeds() {
     assert_eq!(ev.output_amount, u256_from_u64(min_acceptable));
     assert_eq!(ev.nonce, 0);
     assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 1);
-}
-
-#[test]
-fn validate_and_prepare_max_action_idxs_happy_path() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-    let action_idxs = vec![0, 1, 2, u64::MAX];
-    let params = PrepareParams {
-        action_idxs: action_idxs.clone(),
-        ..default_prepare_params(&fx)
-    };
-
-    let meta = fx
-        .invoke(&mut svm, params.clone())
-        .expect("MAX_ACTION_IDXS deposit must succeed");
-
-    let ev = extract_deposit_prepared(&meta.logs).expect("DepositPrepared event");
-    assert_eq!(ev.action_idxs, action_idxs);
-
-    let build = build_deposit_bundle(&fx, &svm, &params, ev.nonce);
-    assert_eq!(
-        build.message.action_idxs,
-        action_idxs
-            .iter()
-            .copied()
-            .map(u256_from_u64)
-            .collect::<Vec<_>>()
-    );
 }
 
 #[test]
@@ -1240,7 +1149,7 @@ fn validate_and_prepare_route_mismatch_rejected() {
     // compromised tx-builder must not be able to redirect a deposit the way it
     // could on a Solana port that left routing as free per-deposit input.
     type RouteMutator = fn(&mut PrepareParams);
-    let cases: [(&str, RouteMutator); 6] = [
+    let cases: [(&str, RouteMutator); 5] = [
         ("target_chain_id", |params| params.target_chain_id = 10),
         ("target_handler", |params| {
             params.target_handler = evm_bytes32(0x12)
@@ -1249,7 +1158,6 @@ fn validate_and_prepare_route_mismatch_rejected() {
             params.target_adapter = evm_bytes32(0x23)
         }),
         ("recipient", |params| params.recipient = evm_bytes32(0x34)),
-        ("app_id", |params| params.app_id = [0x45u8; 32]),
         ("target_token", |params| {
             params.target_token = evm_bytes32(0xBC)
         }),
