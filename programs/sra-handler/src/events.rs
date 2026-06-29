@@ -162,7 +162,7 @@ pub struct DepositPrepared {
     /// `input_amount - protocol_fee_amount`.
     pub input_amount: u64,
     /// Protocol fee collected on the source. Zero when fees are
-    /// disabled globally, the app has no fee config, or the deposit is
+    /// disabled globally, no protocol-fee config is set, or the deposit is
     /// sponsored.
     pub protocol_fee_amount: u64,
     /// Minimum output amount the destination must honor; enforced here via

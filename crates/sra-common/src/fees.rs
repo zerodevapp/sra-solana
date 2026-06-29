@@ -34,7 +34,7 @@ pub fn resolve_protocol_fee_bps(
 }
 
 /// Computes the protocol fee for a deposit. The zero paths — sponsored
-/// deposit, no global fee recipient, no fee config for the app — return
+/// deposit, no global fee recipient, no global protocol-fee config — return
 /// before any bps resolution (so an out-of-bounds override cannot error on
 /// them); otherwise `fee = floor(amount * bps / 10_000)`.
 ///
