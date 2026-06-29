@@ -649,3 +649,54 @@ fn finalize_fill_non_adapter_owner_rejected() {
         custom_error(SraError::AdapterNotAllowed)
     );
 }
+
+#[test]
+fn finalize_cannot_consume_donated_route_vault() {
+    // A route vault holds protocol funds only transiently — finalize moves the
+    // full verified amount straight to the execution vault. The only way it can
+    // carry a resting balance is an out-of-band ATA donation, and that donation
+    // has no spending path: with no genuine fill there is no adapter-owned
+    // VerifiedFill, so finalize cannot be driven to consume it. This pins the
+    // balance-conservation half that finalize_fill_non_adapter_owner_rejected
+    // (which runs over an unfunded vault) does not.
+    let mut svm = setup_svm();
+    let fix = setup_fab(&mut svm);
+
+    // Donate directly to the route vault ATA (created empty by create_route).
+    let route_vault = derive_ata(&fix.route, &fix.mint);
+    mint_to(
+        &mut svm,
+        &fix.payer,
+        &fix.payer,
+        &fix.mint,
+        &route_vault,
+        AMOUNT,
+    );
+    assert_eq!(fetch_token_balance(&svm, &route_vault), AMOUNT);
+
+    // The only "evidence" a donor can supply without a real fill is a
+    // non-adapter-owned account; the owner ∈ allowed_adapters check rejects it
+    // before any transfer.
+    let fill_id = [0x77; 32];
+    let vf = sample_verified_fill_data(fix.route, fix.mint, fill_id, AMOUNT);
+    assert_eq!(
+        fabricate_and_expect_err(
+            &mut svm,
+            &fix,
+            solana_sdk::system_program::ID,
+            fill_id,
+            fill_id,
+            verified_fill_account_bytes(&vf),
+            "donated route vault must not be consumable",
+        ),
+        custom_error(SraError::AdapterNotAllowed)
+    );
+
+    // The donation is conserved: the rejected finalize moved nothing.
+    assert_eq!(fetch_token_balance(&svm, &route_vault), AMOUNT);
+    let (execution_authority, _) = derive_execution_authority_pda(&fix.route);
+    assert_eq!(
+        fetch_token_balance(&svm, &derive_ata(&execution_authority, &fix.mint)),
+        0
+    );
+}
