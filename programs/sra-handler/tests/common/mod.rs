@@ -1987,20 +1987,18 @@ pub fn verified_fill_account_bytes(vf: &sra_common::types::VerifiedFillData) -> 
     data
 }
 
-/// Plant a `verified_fill`-shaped account at the verified-fill PDA for `fill_id`,
-/// owned by `owner`, holding `data`. The handler reads `verified_fill` as a raw
-/// `UncheckedAccount` (no seed/owner constraint), so the address is cosmetic —
-/// `fill_id` picks a stable, realistic one. Used to inject forged/edge evidence
-/// the genuine `verify_across_fill` flow can never produce.
-pub fn fabricate_verified_fill(
+/// Plant a `verified_fill`-shaped account at an explicit `address`, owned by
+/// `owner`, holding `data`. Used to inject forged/edge evidence the genuine
+/// `verify_across_fill` flow can never produce — including evidence at a
+/// NON-canonical address, to exercise `finalize_fill`'s PDA-address pin.
+pub fn fabricate_verified_fill_at(
     svm: &mut LiteSVM,
-    fill_id: [u8; 32],
+    address: Pubkey,
     owner: Pubkey,
     data: Vec<u8>,
 ) -> Pubkey {
-    let (pda, _) = derive_verified_fill_pda(&fill_id);
     svm.set_account(
-        pda,
+        address,
         solana_sdk::account::Account {
             lamports: svm.minimum_balance_for_rent_exemption(data.len().max(1)),
             data,
@@ -2010,7 +2008,21 @@ pub fn fabricate_verified_fill(
         },
     )
     .unwrap();
-    pda
+    address
+}
+
+/// Plant forged/edge evidence at the CANONICAL verified-fill PDA for `fill_id`.
+/// `finalize_fill` pins this address, so field/layout forgery tests place evidence
+/// here (the genuine address) and exercise the in-body checks; use
+/// `fabricate_verified_fill_at` to test the address pin with a non-canonical one.
+pub fn fabricate_verified_fill(
+    svm: &mut LiteSVM,
+    fill_id: [u8; 32],
+    owner: Pubkey,
+    data: Vec<u8>,
+) -> Pubkey {
+    let (pda, _) = derive_verified_fill_pda(&fill_id);
+    fabricate_verified_fill_at(svm, pda, owner, data)
 }
 
 // --- Destination action execution (execute_actions) ---

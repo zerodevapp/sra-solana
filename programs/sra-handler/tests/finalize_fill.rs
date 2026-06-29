@@ -654,15 +654,19 @@ fn finalize_fill_non_adapter_owner_rejected() {
 fn finalize_cannot_consume_donated_route_vault() {
     // A route vault holds protocol funds only transiently — finalize moves the
     // full verified amount straight to the execution vault. The only way it can
-    // carry a resting balance is an out-of-band ATA donation, and that donation
-    // has no spending path: with no genuine fill there is no adapter-owned
-    // VerifiedFill, so finalize cannot be driven to consume it. This pins the
-    // balance-conservation half that finalize_fill_non_adapter_owner_rejected
-    // (which runs over an unfunded vault) does not.
+    // carry a resting balance is an out-of-band ATA donation, which has no
+    // spending path through finalize. A donor can fabricate evidence two ways and
+    // both are rejected with funds intact:
+    //   (a) a non-adapter-owned account           -> AdapterNotAllowed (owner check)
+    //   (b) an allowlisted-adapter-owned account with valid bytes but NOT at the
+    //       canonical VerifiedFill PDA            -> InvalidFill (address pin)
+    // The one input that would pass — a real VerifiedFill at the canonical PDA —
+    // can only be created by the adapter's verify_across_fill, which requires a
+    // genuine Across FillStatusAccount (see verify_across_fill.rs); a donation has
+    // none. The vault is funded so a missing check would actually move funds.
     let mut svm = setup_svm();
     let fix = setup_fab(&mut svm);
 
-    // Donate directly to the route vault ATA (created empty by create_route).
     let route_vault = derive_ata(&fix.route, &fix.mint);
     mint_to(
         &mut svm,
@@ -674,11 +678,13 @@ fn finalize_cannot_consume_donated_route_vault() {
     );
     assert_eq!(fetch_token_balance(&svm, &route_vault), AMOUNT);
 
-    // The only "evidence" a donor can supply without a real fill is a
-    // non-adapter-owned account; the owner ∈ allowed_adapters check rejects it
-    // before any transfer.
     let fill_id = [0x77; 32];
+    // Fully valid evidence for this route/mint/fill — only the placement varies.
     let vf = sample_verified_fill_data(fix.route, fix.mint, fill_id, AMOUNT);
+    let (execution_authority, _) = derive_execution_authority_pda(&fix.route);
+    let execution_vault = derive_ata(&execution_authority, &fix.mint);
+
+    // (a) non-adapter-owned evidence (planted at the canonical PDA) -> AdapterNotAllowed.
     assert_eq!(
         fabricate_and_expect_err(
             &mut svm,
@@ -687,16 +693,42 @@ fn finalize_cannot_consume_donated_route_vault() {
             fill_id,
             fill_id,
             verified_fill_account_bytes(&vf),
-            "donated route vault must not be consumable",
+            "non-adapter-owned evidence",
         ),
         custom_error(SraError::AdapterNotAllowed)
     );
 
-    // The donation is conserved: the rejected finalize moved nothing.
-    assert_eq!(fetch_token_balance(&svm, &route_vault), AMOUNT);
-    let (execution_authority, _) = derive_execution_authority_pda(&fix.route);
-    assert_eq!(
-        fetch_token_balance(&svm, &derive_ata(&execution_authority, &fix.mint)),
-        0
+    // (b) adapter-owned, valid bytes, but planted at a NON-canonical address.
+    let forged = fabricate_verified_fill_at(
+        &mut svm,
+        Pubkey::new_unique(),
+        ADAPTER_PROGRAM_ID,
+        verified_fill_account_bytes(&vf),
     );
+    assert_eq!(
+        send_ix_expect_err(
+            &mut svm,
+            finalize_fill_ix(
+                &fix.payer.pubkey(),
+                &fix.route,
+                fix.route_config_hash,
+                &forged,
+                fill_id,
+                &fix.mint,
+            ),
+            &fix.payer,
+            &[],
+            "adapter-owned evidence at a non-canonical address must reject",
+        ),
+        custom_error(SraError::InvalidFill)
+    );
+    assert!(
+        svm.get_account(&derive_fill_receipt_pda(&fix.route, &fill_id).0)
+            .is_none(),
+        "no receipt may be written"
+    );
+
+    // The donation is conserved across both rejections: nothing moved.
+    assert_eq!(fetch_token_balance(&svm, &route_vault), AMOUNT);
+    assert_eq!(fetch_token_balance(&svm, &execution_vault), 0);
 }

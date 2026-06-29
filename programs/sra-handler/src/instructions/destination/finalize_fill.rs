@@ -15,7 +15,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked};
 use sra_common::{
     errors::SraError,
-    seeds::{SEED_EXECUTION, SEED_FILL_RECEIPT, SEED_SRA_ROUTE},
+    seeds::{SEED_EXECUTION, SEED_FILL_RECEIPT, SEED_SRA_ROUTE, SEED_VERIFIED_FILL},
     types::{ExecutionStatus, FillReceipt, SolanaSraRoute, VerifiedFillData},
 };
 
@@ -35,10 +35,9 @@ pub struct FinalizeFill<'info> {
         bump = route.bump,
     )]
     pub route: Box<Account<'info, SolanaSraRoute>>,
-    /// CHECK: adapter-owned `VerifiedFill`. Read as raw bytes — the owner is
-    /// checked against `route.allowed_adapters` and the layout is validated by
-    /// `VerifiedFillData::deserialize_from_account` in the body (discriminator +
-    /// exact-length), so no Anchor type/owner check applies here.
+    /// CHECK: adapter-owned `VerifiedFill`, read as raw bytes. The body checks the
+    /// owner ∈ `route.allowed_adapters`, pins the account to its canonical PDA, and
+    /// validates the layout via `VerifiedFillData::deserialize_from_account`.
     pub verified_fill: UncheckedAccount<'info>,
     /// The replay marker. `init` (never `init_if_needed`) — a second
     /// finalization of the same fill collides on this PDA and aborts.
@@ -91,6 +90,22 @@ pub(crate) fn handler(
         SraError::AdapterNotAllowed
     );
 
+    // 2b. Pin the evidence to its canonical PDA. The owner check alone is not
+    //     enough: an account merely *owned* by an allowlisted adapter can be
+    //     fabricated (create-elsewhere-then-reassign), but only the adapter's own
+    //     `verify_across_fill` init can place data at this PDA, and that requires
+    //     a genuine Across fill. The address is bound to the same `fill_id` arg
+    //     that seeds the receipt, so the receipt and the evidence name one fill.
+    let (expected_verified_fill, _) = Pubkey::find_program_address(
+        &[SEED_VERIFIED_FILL, verified_fill_owner.as_ref(), &fill_id],
+        &verified_fill_owner,
+    );
+    require_keys_eq!(
+        ctx.accounts.verified_fill.key(),
+        expected_verified_fill,
+        SraError::InvalidFill
+    );
+
     // 3. Decode the `VerifiedFill` (discriminator + exact-layout checks; type-confusion defense).
     let verified = {
         let data = ctx.accounts.verified_fill.try_borrow_data()?;
@@ -99,6 +114,9 @@ pub(crate) fn handler(
 
     // 4-8. Re-check every committed field against the route (defense-in-depth across the adapter boundary).
     let route_key = ctx.accounts.route.key();
+    // The self-declared adapter must match the account's real program-owner (the
+    // PDA pin above already binds it; this also rejects stale/cross-adapter bytes).
+    require_keys_eq!(verified.adapter, verified_fill_owner, SraError::InvalidFill);
     require!(fill_id == verified.fill_id, SraError::InvalidFill);
     require!(verified.route == route_key, SraError::InvalidFill);
     require!(
