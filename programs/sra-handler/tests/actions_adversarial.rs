@@ -66,6 +66,7 @@ fn finalize_route(
         action_config,
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
+        allowed_executors: vec![payer.pubkey()],
     };
     let route_config_hash = route_config_hash_for(&owner.pubkey(), &params);
     let (route, _) = derive_route_pda(&owner.pubkey(), &route_config_hash, &salt);
@@ -178,7 +179,14 @@ fn action_drain_at_full_bps_drains_vault_without_overflow() {
 
     send_ix(
         &mut svm,
-        execute_actions_ix(&fr.route, fr.fill_id, action_config, &mint, &atas),
+        execute_actions_ix(
+            &payer.pubkey(),
+            &fr.route,
+            fr.fill_id,
+            action_config,
+            &mint,
+            &atas,
+        ),
         &payer,
         &[],
     )
@@ -218,6 +226,7 @@ fn bps_sum_over_10000_rejected_at_create_and_uninjectable_at_execution() {
         action_config: over.clone(),
         salt: [8u8; 32],
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
+        allowed_executors: vec![payer.pubkey()],
     };
     let hash = route_config_hash_for(&owner.pubkey(), &params);
     let err = send_ix_expect_err(
@@ -244,7 +253,14 @@ fn bps_sum_over_10000_rejected_at_create_and_uninjectable_at_execution() {
     // Pass the tampered over-100% list to execute_actions.
     let err = send_ix_expect_err(
         &mut svm,
-        execute_actions_ix(&fr.route, fr.fill_id, over, &mint, &[ata_a, ata_b]),
+        execute_actions_ix(
+            &payer.pubkey(),
+            &fr.route,
+            fr.fill_id,
+            over,
+            &mint,
+            &[ata_a, ata_b],
+        ),
         &payer,
         &[],
         "tampered action list",
@@ -286,6 +302,7 @@ fn recipient_ata_frozen_soft_fails_then_recovers() {
     send_ix(
         &mut svm,
         execute_actions_ix(
+            &payer.pubkey(),
             &fr.route,
             fr.fill_id,
             action_config,
@@ -364,6 +381,7 @@ fn unsolicited_topup_of_execution_vault_distributed_deterministically() {
     send_ix(
         &mut svm,
         execute_actions_ix(
+            &payer.pubkey(),
             &fr.route,
             fr.fill_id,
             action_config,
@@ -439,6 +457,7 @@ fn double_finalize_rejected_and_execute_after_success_rejected() {
     send_ix(
         &mut svm,
         execute_actions_ix(
+            &payer.pubkey(),
             &fr.route,
             fr.fill_id,
             action_config.clone(),
@@ -459,6 +478,7 @@ fn double_finalize_rejected_and_execute_after_success_rejected() {
     let err = send_ix_expect_err(
         &mut svm,
         execute_actions_ix(
+            &payer.pubkey(),
             &fr.route,
             fr.fill_id,
             action_config,
@@ -563,7 +583,14 @@ fn stranded_funds_inventory_holds() {
     );
     send_ix(
         &mut svm,
-        execute_actions_ix(&fr2.route, fr2.fill_id, failed_config, &mint, &[frozen_ata]),
+        execute_actions_ix(
+            &payer.pubkey(),
+            &fr2.route,
+            fr2.fill_id,
+            failed_config,
+            &mint,
+            &[frozen_ata],
+        ),
         &payer,
         &[],
     )
@@ -601,7 +628,14 @@ fn stranded_funds_inventory_holds() {
     );
     send_ix(
         &mut svm,
-        execute_actions_ix(&fr3.route, fr3.fill_id, succ_config, &mint, &[succ_ata]),
+        execute_actions_ix(
+            &payer.pubkey(),
+            &fr3.route,
+            fr3.fill_id,
+            succ_config,
+            &mint,
+            &[succ_ata],
+        ),
         &payer,
         &[],
     )
@@ -682,6 +716,7 @@ fn stage_verified(
         action_config: action_config.clone(),
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
+        allowed_executors: vec![payer.pubkey()],
     };
     let hash = route_config_hash_for(&owner.pubkey(), &params);
     let (route, _) = derive_route_pda(&owner.pubkey(), &hash, &salt);
@@ -833,6 +868,7 @@ fn malicious_cpi_target_rejected_funds_safe() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         s.fill_id,
         s.action_config.clone(),
@@ -864,6 +900,7 @@ fn verified_cpi_source_slot_substitution_rejected() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         s.fill_id,
         s.action_config.clone(),
@@ -898,6 +935,7 @@ fn verified_cpi_signing_authority_substitution_rejected() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         s.fill_id,
         s.action_config.clone(),
@@ -932,6 +970,7 @@ fn verified_cpi_hostile_account_set_bounded_by_input_bps() {
     // The inner swap is told to pull the full scratch balance — the maximum a
     // hostile account set could attempt.
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         s.fill_id,
         s.action_config.clone(),
@@ -992,6 +1031,7 @@ fn verified_cpi_prefunded_scratch_swept_to_vault() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, out_amount, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         s.fill_id,
         s.action_config.clone(),
@@ -1046,6 +1086,7 @@ fn mixed_variant_combined_draw_over_100pct_reverts_funds_safe() {
     let mut remaining = vec![AccountMeta::new(recipient_ata, false)];
     remaining.extend(s.honest_metas());
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         s.fill_id,
         s.action_config.clone(),

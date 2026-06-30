@@ -334,6 +334,13 @@
       ],
       "accounts": [
         {
+          "name": "executor",
+          "docs": [
+            "Must be in the route's `allowed_executors`; gated in the handler."
+          ],
+          "signer": true
+        },
+        {
           "name": "route",
           "docs": [
             "The route whose committed actions run. Not seed-bound here (that needs",
@@ -3451,6 +3458,15 @@
             "type": {
               "vec": "pubkey"
             }
+          },
+          {
+            "name": "allowed_executors",
+            "docs": [
+              "Executor allowlist; empty allowed."
+            ],
+            "type": {
+              "vec": "pubkey"
+            }
           }
         ]
       }
@@ -3874,6 +3890,17 @@
                 "vec": "pubkey"
               }
             }
+          },
+          {
+            "name": "executors",
+            "docs": [
+              "Whole-list replace, mirroring `adapters`; `Some(vec![])` clears (freezes execution)."
+            ],
+            "type": {
+              "option": {
+                "vec": "pubkey"
+              }
+            }
           }
         ]
       }
@@ -4136,6 +4163,12 @@
             }
           },
           {
+            "name": "allowed_executors",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
             "name": "paused",
             "type": "bool"
           }
@@ -4145,7 +4178,7 @@
     {
       "name": "RouteManaged",
       "docs": [
-        "Emitted by `manage_route` with the post-write adapter list and paused flag."
+        "Emitted by `manage_route` with the post-write allowlists and paused flag."
       ],
       "type": {
         "kind": "struct",
@@ -4160,6 +4193,12 @@
           },
           {
             "name": "allowed_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "allowed_executors",
             "type": {
               "vec": "pubkey"
             }
@@ -4324,6 +4363,16 @@
           },
           {
             "name": "allowed_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "allowed_executors",
+            "docs": [
+              "Owner-managed; not in `route_config_hash` (mutable, like `allowed_adapters`).",
+              "Empty = no caller can `execute_actions`."
+            ],
             "type": {
               "vec": "pubkey"
             }

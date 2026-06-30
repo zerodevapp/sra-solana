@@ -15,6 +15,7 @@ use sra_common::{
 
 use crate::events::RouteCreated;
 use crate::utils::adapter::{require_distinct_adapters, validate_adapter_accounts};
+use crate::utils::executor::validate_executors;
 
 #[derive(Accounts)]
 #[instruction(route_config_hash: [u8; 32], params: CreateRouteParams)]
@@ -70,6 +71,8 @@ pub(crate) fn handler(
         SraError::TooManyAdapters
     );
     require_distinct_adapters(&params.allowed_adapters)?;
+    // Shape-only (bounded/non-zero/distinct); no loader check, empty allowed.
+    validate_executors(&params.allowed_executors)?;
 
     validate_adapter_accounts(&params.allowed_adapters, ctx.remaining_accounts)?;
 
@@ -95,6 +98,8 @@ pub(crate) fn handler(
     route.action_config_hash = action_hash;
     route.salt = params.salt;
     route.allowed_adapters = params.allowed_adapters;
+    // Not in route_config_hash (mutable, like allowed_adapters).
+    route.allowed_executors = params.allowed_executors;
     route.paused = false;
     route.bump = ctx.bumps.route;
 
@@ -106,6 +111,7 @@ pub(crate) fn handler(
         action_config_hash: route.action_config_hash,
         salt: route.salt,
         allowed_adapters: route.allowed_adapters.clone(),
+        allowed_executors: route.allowed_executors.clone(),
         paused: route.paused,
     });
 

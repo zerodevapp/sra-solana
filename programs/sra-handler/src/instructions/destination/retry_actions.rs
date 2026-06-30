@@ -60,6 +60,8 @@ pub(crate) fn handler<'info>(
         ctx.accounts.fill_receipt.execution_status == ExecutionStatus::ActionsFailed,
         SraError::InvalidExecutionStatus
     );
+    // Pause gate (settlement path); stays owner-gated. recover_funds is NOT pause-gated.
+    require!(!ctx.accounts.route.paused, SraError::RoutePaused);
 
     let route = ctx.accounts.route.key();
     let accounts = ActionAccounts {

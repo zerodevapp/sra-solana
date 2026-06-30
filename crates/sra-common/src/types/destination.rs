@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::constants::MAX_ADAPTERS;
+use crate::constants::{MAX_ADAPTERS, MAX_EXECUTORS};
 use crate::types::actions::{AccountTemplate, MinOut};
 
 /// A pre-registered action to execute on the destination chain after fill
@@ -53,6 +53,10 @@ pub struct SolanaSraRoute {
     // Mutable
     #[max_len(MAX_ADAPTERS)]
     pub allowed_adapters: Vec<Pubkey>,
+    /// Owner-managed; not in `route_config_hash` (mutable, like `allowed_adapters`).
+    /// Empty = no caller can `execute_actions`.
+    #[max_len(MAX_EXECUTORS)]
+    pub allowed_executors: Vec<Pubkey>,
     pub paused: bool,
     pub bump: u8,
 }
@@ -66,6 +70,8 @@ pub struct CreateRouteParams {
     pub action_config: Vec<SolanaAction>,
     pub salt: [u8; 32],
     pub allowed_adapters: Vec<Pubkey>,
+    /// Executor allowlist; empty allowed.
+    pub allowed_executors: Vec<Pubkey>,
 }
 
 /// Inputs to `manage_route` — the route's only mutable policy (identity fields
@@ -78,6 +84,8 @@ pub struct ManageRouteParams {
     /// `Some` replaces the whole adapter allowlist (EVM `_installAdapters`
     /// parity); `Some(vec![])` clears it; `None` leaves it unchanged.
     pub adapters: Option<Vec<Pubkey>>,
+    /// Whole-list replace, mirroring `adapters`; `Some(vec![])` clears (freezes execution).
+    pub executors: Option<Vec<Pubkey>>,
 }
 
 /// Per-`VerifiedCpi`-action runtime data the relayer supplies to `execute_actions`,
@@ -177,9 +185,10 @@ mod tests {
     fn solana_sra_route_init_space() {
         // 32 owner + 8 source_chain_id + 32 expected_mint
         // + 32 action_config_hash + 32 salt
-        // + 4 + (32 * 8) allowed_adapters + 1 paused + 1 bump
-        // = 32 + 8 + 32 + 32 + 32 + 260 + 1 + 1 = 398
-        assert_eq!(SolanaSraRoute::INIT_SPACE, 398);
+        // + 4 + (32 * 8) allowed_adapters
+        // + 4 + (32 * 8) allowed_executors + 1 paused + 1 bump
+        // = 32 + 8 + 32 + 32 + 32 + 260 + 260 + 1 + 1 = 658
+        assert_eq!(SolanaSraRoute::INIT_SPACE, 658);
     }
 
     #[test]
@@ -193,6 +202,7 @@ mod tests {
             action_config_hash: [7u8; 32],
             salt: [0u8; 32],
             allowed_adapters: vec![],
+            allowed_executors: vec![],
             paused: false,
             bump: 255,
         };

@@ -155,4 +155,17 @@ pub enum SraError {
 
     #[msg("Output mint is permissioned (permanent-delegate / pausable / default-frozen) and the action did not opt in")]
     PermissionedOutputNotAllowed,
+
+    // -- Destination: executor allowlist --
+    #[msg("Caller is not in the route's allowed_executors list")]
+    ExecutorNotAllowed,
+
+    #[msg("Allowed executors list exceeds maximum")]
+    TooManyExecutors,
+
+    #[msg("Executor pubkey must be non-zero")]
+    InvalidExecutor,
+
+    #[msg("Executor already present in the allowlist")]
+    DuplicateExecutor,
 }

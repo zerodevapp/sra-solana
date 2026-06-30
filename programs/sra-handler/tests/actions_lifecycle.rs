@@ -71,6 +71,7 @@ fn create_route_and_finalize(
         action_config,
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
+        allowed_executors: vec![payer.pubkey()],
     };
     let route_config_hash = route_config_hash_for(&owner.pubkey(), &params);
     let (route, _) = derive_route_pda(&owner.pubkey(), &route_config_hash, &salt);
@@ -169,7 +170,14 @@ fn lifecycle_finalize_execute_fail_retry_fail_recover() {
     let missing = derive_ata(&recipient, &mint);
     send_ix(
         &mut svm,
-        execute_actions_ix(&f.route, f.fill_id, cfg.clone(), &mint, &[missing]),
+        execute_actions_ix(
+            &payer.pubkey(),
+            &f.route,
+            f.fill_id,
+            cfg.clone(),
+            &mint,
+            &[missing],
+        ),
         &payer,
         &[],
     )
@@ -184,7 +192,14 @@ fn lifecycle_finalize_execute_fail_retry_fail_recover() {
     // Finalized); the only forward op is retry_actions (or recover_funds).
     let reexec = send_ix_expect_err(
         &mut svm,
-        execute_actions_ix(&f.route, f.fill_id, cfg.clone(), &mint, &[missing]),
+        execute_actions_ix(
+            &payer.pubkey(),
+            &f.route,
+            f.fill_id,
+            cfg.clone(),
+            &mint,
+            &[missing],
+        ),
         &payer,
         &[],
         "execute_actions on an ActionsFailed receipt must reject",
@@ -245,7 +260,14 @@ fn lifecycle_finalize_execute_succeed_terminal() {
     let recipient_ata = create_ata(&mut svm, &payer, &recipient, &mint);
     send_ix(
         &mut svm,
-        execute_actions_ix(&f.route, f.fill_id, cfg, &mint, &[recipient_ata]),
+        execute_actions_ix(
+            &payer.pubkey(),
+            &f.route,
+            f.fill_id,
+            cfg,
+            &mint,
+            &[recipient_ata],
+        ),
         &payer,
         &[],
     )
@@ -273,7 +295,14 @@ fn lifecycle_finalize_execute_fail_retry_succeed_terminal() {
     let missing = derive_ata(&recipient, &mint);
     send_ix(
         &mut svm,
-        execute_actions_ix(&f.route, f.fill_id, cfg.clone(), &mint, &[missing]),
+        execute_actions_ix(
+            &payer.pubkey(),
+            &f.route,
+            f.fill_id,
+            cfg.clone(),
+            &mint,
+            &[missing],
+        ),
         &payer,
         &[],
     )
@@ -355,10 +384,17 @@ fn assert_all_ops_rejected(
     let before = status(svm, &f.fill_receipt);
     let vault_before = fetch_token_balance(svm, &f.execution_vault);
 
-    // execute_actions is permissionless; the status gate fires first.
+    // Status gate fires before the executor/pause gates.
     let err = send_ix_expect_err(
         svm,
-        execute_actions_ix(&f.route, f.fill_id, cfg.to_vec(), &mint, &[recipient_ata]),
+        execute_actions_ix(
+            &payer.pubkey(),
+            &f.route,
+            f.fill_id,
+            cfg.to_vec(),
+            &mint,
+            &[recipient_ata],
+        ),
         payer,
         &[],
         "execute on a terminal receipt must reject",
@@ -418,6 +454,7 @@ fn lifecycle_terminal_states_reject_further_ops() {
     send_ix(
         &mut svm,
         execute_actions_ix(
+            &payer.pubkey(),
             &fa.route,
             fa.fill_id,
             cfg_a.clone(),
@@ -479,7 +516,7 @@ fn lifecycle_empty_action_config_actions_succeeded_immediately() {
 
     send_ix(
         &mut svm,
-        execute_actions_ix(&f.route, f.fill_id, vec![], &mint, &[]),
+        execute_actions_ix(&payer.pubkey(), &f.route, f.fill_id, vec![], &mint, &[]),
         &payer,
         &[],
     )
@@ -657,6 +694,7 @@ fn lifecycle_finalize_verified_cpi_swap_succeed_terminal() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &v.quote_message(0, AMOUNT, min_out, expiry));
     let exec = execute_actions_ix_full(
+        &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
         v.action_config.clone(),
@@ -693,6 +731,7 @@ fn lifecycle_verified_cpi_below_min_out_reverts_then_reexecutes() {
     // Quote demands 3_000_000 but the swap only delivers 2_000_000 -> hard revert.
     let ed_short = ed25519_quote_ix(&quoter, &v.quote_message(0, AMOUNT, 3_000_000, expiry));
     let exec_short = execute_actions_ix_full(
+        &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
         v.action_config.clone(),
@@ -718,6 +757,7 @@ fn lifecycle_verified_cpi_below_min_out_reverts_then_reexecutes() {
     let min_out = 2_900_000;
     let ed_ok = ed25519_quote_ix(&quoter, &v.quote_message(0, AMOUNT, min_out, expiry));
     let exec_ok = execute_actions_ix_full(
+        &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
         v.action_config.clone(),
@@ -746,6 +786,7 @@ fn lifecycle_verified_cpi_missing_destination_soft_fail_retry_succeed() {
 
     let ed_ix = ed25519_quote_ix(&quoter, &v.quote_message(0, AMOUNT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
+        &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
         v.action_config.clone(),
@@ -858,6 +899,7 @@ fn lifecycle_mixed_spl_transfer_and_verified_cpi_in_one_route() {
     let mut remaining = vec![AccountMeta::new(recipient_ata, false)];
     remaining.extend(v.verified_metas(v.destination));
     let exec = execute_actions_ix_full(
+        &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
         action_config,
