@@ -32,9 +32,6 @@ pub enum SraError {
     #[msg("Fill amount below expected amount")]
     FillAmountTooLow,
 
-    #[msg("Fill already finalized (replay detected)")]
-    ReplayDetected,
-
     #[msg("Vault balance insufficient for fill amount")]
     InsufficientVaultBalance,
 
@@ -52,22 +49,12 @@ pub enum SraError {
     #[msg("Fee exceeds maximum allowed (10%)")]
     FeeTooHigh,
 
-    // -- Adapter: fill verification --
-    #[msg("Across fill status is not Filled")]
-    FillNotCompleted,
-
-    #[msg("Relay hash does not match derived value")]
-    RelayHashMismatch,
-
     // -- General --
     #[msg("Slippage bps exceeds maximum")]
     InvalidSlippage,
 
     #[msg("Arithmetic overflow")]
     ArithmeticOverflow,
-
-    #[msg("bytes32 value cannot be narrowed to a 20-byte EVM address")]
-    InvalidEvmAddress,
 
     // -- Source: paired instruction attestation (appended to keep prior codes stable) --
     #[msg("Expected neighboring paired instruction is missing")]
@@ -90,11 +77,6 @@ pub enum SraError {
 
     #[msg("Deposit routing does not match the committed SRA route")]
     RouteMismatch,
-
-    // Reserved — no longer raised (any app_id is registrable, EVM parity);
-    // kept so later codes stay stable.
-    #[msg("app_id must be non-zero")]
-    InvalidAppId,
 
     #[msg("Pending admin must be non-default")]
     InvalidPendingAdmin,
