@@ -1,10 +1,9 @@
-//! Wire-encoding helpers for the Across bridge boundary.
+//! Wire-encoding helper for the Across bridge boundary.
 //!
-//! The two-transaction target-execution model bridges an empty Across
-//! envelope, so the cross-chain SRA `Message` ABI and its replay encoders are
-//! gone. What remains is the single widener used to render a `u64` as the
-//! big-endian `uint256` that Across's `deposit_now` `output_amount` field
-//! expects (and that `source_deposit::decode_output_amount` reads back).
+//! `u256_from_u64` renders a `u64` as the big-endian `uint256` word that
+//! Across's `deposit_now` `output_amount` field expects (and that
+//! `source_deposit::decode_output_amount` reads back). The bridged
+//! `deposit_now` message is empty, so no cross-chain message encoder is needed.
 
 /// Size of a big-endian `uint256` word in bytes.
 const WORD: usize = 32;
