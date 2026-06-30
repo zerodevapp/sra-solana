@@ -34,7 +34,7 @@ pub fn resolve_protocol_fee_bps(
 }
 
 /// Computes the protocol fee for a deposit. The zero paths — sponsored
-/// deposit, no global fee recipient, no fee config for the app — return
+/// deposit, no global fee recipient, no global protocol-fee config — return
 /// before any bps resolution (so an out-of-bounds override cannot error on
 /// them); otherwise `fee = floor(amount * bps / 10_000)`.
 ///
@@ -72,7 +72,6 @@ mod tests {
 
     fn cfg(allow_override: bool, default_fee_bps: u16) -> ProtocolFeeConfig {
         ProtocolFeeConfig {
-            app_id: [0x44u8; 32],
             default_fee_bps,
             allow_override,
             bump: 254,
@@ -81,7 +80,6 @@ mod tests {
 
     fn tier(threshold: u64, below_bps: u16, above_or_equal_bps: u16) -> AssetFeeTier {
         AssetFeeTier {
-            app_id: [0x44u8; 32],
             mint: Pubkey::new_unique(),
             threshold,
             below_bps,

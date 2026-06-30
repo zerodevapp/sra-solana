@@ -4,7 +4,7 @@ use anchor_spl::{
     token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked},
 };
 use sra_common::{
-    constants::{BPS_DENOMINATOR, MAX_ACTION_IDXS},
+    constants::BPS_DENOMINATOR,
     errors::SraError,
     fees::compute_protocol_fee,
     seeds::{
@@ -133,20 +133,19 @@ pub struct ValidateAndPrepare<'info> {
         bump = fee_config.bump,
     )]
     pub fee_config: Box<Account<'info, FeeConfig>>,
-    /// CHECK: PDA ["protocol_fee", handler_data.app_id] at the canonical bump;
-    /// empty data == no fee for this app — existence is read in-body, never
+    /// CHECK: singleton PDA ["protocol_fee"] at the canonical bump; empty data
+    /// == no protocol fee configured — existence is read in-body, never
     /// caller-claimed.
     #[account(
-        seeds = [SEED_PROTOCOL_FEE, handler_data.app_id.as_ref()],
+        seeds = [SEED_PROTOCOL_FEE],
         bump,
     )]
     pub protocol_fee_config: UncheckedAccount<'info>,
-    /// CHECK: PDA ["asset_fee_tier", handler_data.app_id, source_mint] at the
-    /// canonical bump; empty data == no tier, fall back to `default_fee_bps`.
+    /// CHECK: PDA ["asset_fee_tier", source_mint] at the canonical bump; empty
+    /// data == no tier, fall back to `default_fee_bps`.
     #[account(
         seeds = [
             SEED_ASSET_FEE_TIER,
-            handler_data.app_id.as_ref(),
             source_mint.key().as_ref(),
         ],
         bump,
@@ -193,10 +192,6 @@ pub(crate) fn handler(
     params: PrepareParams,
     paired_adapter_ix_data_hash: [u8; 32],
 ) -> Result<()> {
-    require!(
-        params.action_idxs.len() <= MAX_ACTION_IDXS,
-        SraError::TooManyActionIdxs
-    );
     require!(params.input_amount > 0, SraError::ZeroInputAmount);
     handler_data.validate()?;
     require!(
@@ -217,7 +212,6 @@ pub(crate) fn handler(
             && handler_data.target_handler == params.target_handler
             && handler_data.target_adapter == params.target_adapter
             && handler_data.recipient == params.recipient
-            && handler_data.app_id == params.app_id
             && handler_data.target_token == params.target_token,
         SraError::RouteMismatch
     );
@@ -366,9 +360,7 @@ pub(crate) fn handler(
         target_handler: params.target_handler,
         target_adapter: params.target_adapter,
         recipient: params.recipient,
-        app_id: params.app_id,
         target_token: params.target_token,
-        action_idxs: params.action_idxs,
     });
 
     Ok(())

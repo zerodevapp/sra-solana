@@ -36,7 +36,7 @@ pub enum SolanaAction {
 
 /// Deterministic destination address for EVM->Solana fills.
 /// PDA seeds: ["sra_route", owner, config_hash, salt]
-/// config_hash = keccak256(borsh(owner, source_chain_id, expected_mint, app_id, action_config))
+/// config_hash = keccak256(borsh(owner, source_chain_id, expected_mint, action_config))
 #[account]
 #[derive(InitSpace)]
 pub struct SolanaSraRoute {
@@ -44,7 +44,6 @@ pub struct SolanaSraRoute {
     pub owner: Pubkey,
     pub source_chain_id: u64,
     pub expected_mint: Pubkey,
-    pub app_id: [u8; 32],
     /// keccak256(borsh(action_config)). The action list is also folded into the
     /// route's config_hash, but stored only as this digest; callers re-supply the
     /// list as ix data and verify it against this hash, keeping the account small.
@@ -64,7 +63,6 @@ pub struct SolanaSraRoute {
 pub struct CreateRouteParams {
     pub source_chain_id: u64,
     pub expected_mint: Pubkey,
-    pub app_id: [u8; 32],
     pub action_config: Vec<SolanaAction>,
     pub salt: [u8; 32],
     pub allowed_adapters: Vec<Pubkey>,
@@ -177,11 +175,11 @@ mod tests {
 
     #[test]
     fn solana_sra_route_init_space() {
-        // 32 owner + 8 source_chain_id + 32 expected_mint + 32 app_id
+        // 32 owner + 8 source_chain_id + 32 expected_mint
         // + 32 action_config_hash + 32 salt
         // + 4 + (32 * 8) allowed_adapters + 1 paused + 1 bump
-        // = 32 + 8 + 32 + 32 + 32 + 32 + 260 + 1 + 1 = 430
-        assert_eq!(SolanaSraRoute::INIT_SPACE, 430);
+        // = 32 + 8 + 32 + 32 + 32 + 260 + 1 + 1 = 398
+        assert_eq!(SolanaSraRoute::INIT_SPACE, 398);
     }
 
     #[test]
@@ -192,7 +190,6 @@ mod tests {
             owner: Pubkey::new_unique(),
             source_chain_id: 1,
             expected_mint: Pubkey::new_unique(),
-            app_id: [0u8; 32],
             action_config_hash: [7u8; 32],
             salt: [0u8; 32],
             allowed_adapters: vec![],

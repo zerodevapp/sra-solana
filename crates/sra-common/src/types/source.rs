@@ -9,7 +9,7 @@ use crate::{
 /// `handler_data_hash` (folded into the SRA's PDA identity) and re-supplied,
 /// then re-authenticated, on every deposit. The routing tuple
 /// (`target_chain_id` / `target_handler` / `target_adapter` / `recipient` /
-/// `app_id` / `target_token`) is part of the immutable identity, mirroring the
+/// `target_token`) is part of the immutable identity, mirroring the
 /// EVM `RouteConfig` that `trigger()` reads from storage and a caller cannot
 /// redirect (see `sra-stx/src/handler/SRAHandler.sol`). Every deposit must echo
 /// this exact routing in `PrepareParams`; `validate_and_prepare` rejects any
@@ -22,7 +22,6 @@ pub struct SourceHandlerData {
     pub target_handler: [u8; 32],
     pub target_adapter: [u8; 32],
     pub recipient: [u8; 32],
-    pub app_id: [u8; 32],
     pub target_token: [u8; 32],
     pub allowed_slippage_bps: u16,
     #[max_len(MAX_ADAPTERS)]
@@ -126,9 +125,9 @@ mod tests {
     #[test]
     fn source_handler_data_init_space() {
         // 32 address_book_root + 8 target_chain_id + 32 target_handler
-        // + 32 target_adapter + 32 recipient + 32 app_id + 32 target_token
-        // + 2 allowed_slippage_bps + 4 + (32 * 8) allowed_adapters = 462
-        assert_eq!(SourceHandlerData::INIT_SPACE, 462);
+        // + 32 target_adapter + 32 recipient + 32 target_token
+        // + 2 allowed_slippage_bps + 4 + (32 * 8) allowed_adapters = 430
+        assert_eq!(SourceHandlerData::INIT_SPACE, 430);
     }
 
     #[test]

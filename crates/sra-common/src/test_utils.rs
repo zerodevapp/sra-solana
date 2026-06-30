@@ -14,8 +14,6 @@ use anchor_lang::{
 
 use crate::source_deposit::{AcrossDepositParams, PrepareParams};
 
-pub const DEFAULT_ACTION_IDXS: [u64; 2] = [3, 7];
-
 fn evm_bytes32(byte: u8) -> [u8; 32] {
     let mut out = [0u8; 32];
     out[12..].fill(byte);
@@ -72,9 +70,7 @@ pub fn sample_prepare_params() -> PrepareParams {
         evm_bytes32(0x11),
         evm_bytes32(0x22),
         evm_bytes32(0x33),
-        [0x44u8; 32],
         evm_bytes32(0xAB),
-        DEFAULT_ACTION_IDXS.to_vec(),
         0,
         false,
         crate::constants::NO_FEE_BPS_OVERRIDE,

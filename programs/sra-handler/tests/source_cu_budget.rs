@@ -22,7 +22,7 @@ mod common;
 use common::*;
 use litesvm::LiteSVM;
 use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey, signer::Signer};
-use sra_common::{constants::MAX_ACTION_IDXS, source_deposit::PrepareParams};
+use sra_common::source_deposit::PrepareParams;
 
 // `SOURCE_CU_BUDGET` (the production-requested 400k limit) is the shared
 // constant from `common` — the same value `compute_budget_ix` requests.
@@ -47,7 +47,6 @@ fn measure_source_2ix_cu(
         &fetch_sra_config(svm, &fx.sra_config),
         &params,
         across_params_for(fx, &params),
-        current_nonce(svm, &fx.accounts.mint_nonce),
     );
     let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
     let validate_ix = validate_and_prepare_ix(
@@ -87,8 +86,8 @@ fn assert_under_budget(consumed: u64, label: &str) {
     );
 }
 
-/// Enables a global recipient + a default protocol fee for the fixture's
-/// committed app_id, and returns the canonical recipient fee ATA.
+/// Enables a global recipient + a default (global) protocol fee, and returns
+/// the canonical recipient fee ATA.
 fn enable_protocol_fee(svm: &mut LiteSVM, fx: &ValidatePrepareFixture) -> Pubkey {
     let recipient = Pubkey::new_unique();
     send_instructions(
@@ -98,7 +97,6 @@ fn enable_protocol_fee(svm: &mut LiteSVM, fx: &ValidatePrepareFixture) -> Pubkey
             set_protocol_fee_ix(
                 &fx.payer.pubkey(),
                 &fx.fee_admin.pubkey(),
-                fx.handler_data.app_id,
                 DEFAULT_FEE_BPS,
                 false,
             ),
@@ -108,13 +106,6 @@ fn enable_protocol_fee(svm: &mut LiteSVM, fx: &ValidatePrepareFixture) -> Pubkey
     )
     .expect("fee state setup must succeed");
     create_ata(svm, &fx.payer, &recipient, &fx.source_mint)
-}
-
-fn max_action_idxs_params(target_token: [u8; 32]) -> PrepareParams {
-    PrepareParams {
-        action_idxs: (0..MAX_ACTION_IDXS as u64).collect(),
-        ..sample_prepare_params(target_token)
-    }
 }
 
 #[test]
@@ -127,28 +118,16 @@ fn source_2ix_flow_under_cu_budget() {
 }
 
 #[test]
-fn source_2ix_flow_max_action_idxs_under_cu_budget() {
-    let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
-
-    // Largest routing payload: MAX_ACTION_IDXS entries
-    let consumed =
-        measure_source_2ix_cu(&mut svm, &fx, max_action_idxs_params(fx.target_token), None);
-    assert_under_budget(consumed, "max action_idxs, no fee");
-}
-
-#[test]
-fn source_2ix_flow_with_fee_max_action_idxs_under_cu_budget() {
+fn source_2ix_flow_with_fee_under_cu_budget() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
     let fee_ata = enable_protocol_fee(&mut svm, &fx);
 
     // Heaviest production path: protocol fee ON adds a second token CPI
-    // (vault -> fee-recipient `transfer_checked`) on top of the max-action_idxs
-    // payload.
-    let mut params = max_action_idxs_params(fx.target_token);
+    // (vault -> fee-recipient `transfer_checked`).
+    let mut params = sample_prepare_params(fx.target_token);
     params.protocol_fee_amount = DEFAULT_FEE;
 
     let consumed = measure_source_2ix_cu(&mut svm, &fx, params, Some(fee_ata));
-    assert_under_budget(consumed, "fee on + max action_idxs");
+    assert_under_budget(consumed, "fee on");
 }

@@ -63,7 +63,6 @@ fn finalize_route(
     let params = CreateRouteParams {
         source_chain_id: SOURCE_CHAIN_ID,
         expected_mint: mint,
-        app_id: [0x44u8; 32],
         action_config,
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
@@ -216,7 +215,6 @@ fn bps_sum_over_10000_rejected_at_create_and_uninjectable_at_execution() {
     let params = CreateRouteParams {
         source_chain_id: SOURCE_CHAIN_ID,
         expected_mint: mint,
-        app_id: [0x44u8; 32],
         action_config: over.clone(),
         salt: [8u8; 32],
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
@@ -681,7 +679,6 @@ fn stage_verified(
     let params = CreateRouteParams {
         source_chain_id: SOURCE_CHAIN_ID,
         expected_mint: input_mint,
-        app_id: [0x55u8; 32],
         action_config: action_config.clone(),
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
