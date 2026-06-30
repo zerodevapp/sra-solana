@@ -11,7 +11,7 @@ use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey, signature::Keypair, s
 use sra_common::{
     errors::SraError,
     quote::{action_context_hash, signed_quote_message},
-    types::{CreateRouteParams, ExecutionStatus, MinOut, SolanaAction},
+    types::{CreateRouteParams, ExecutionStatus, ManageRouteParams, MinOut, SolanaAction},
 };
 
 const AMOUNT: u64 = 4_000_000;
@@ -49,6 +49,7 @@ fn stage(
         action_config: action_config.clone(),
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
+        allowed_executors: vec![payer.pubkey()],
     };
     let hash = route_config_hash_for(&owner.pubkey(), &params);
     let (route, _) = derive_route_pda(&owner.pubkey(), &hash, &salt);
@@ -98,6 +99,7 @@ fn retry_actions_after_fix_succeeds() {
     // First execution soft-fails: the recipient ATA does not exist yet.
     let missing = derive_ata(&recipient, &s.mint);
     let exec = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -310,6 +312,61 @@ fn retry_actions_non_owner_rejected() {
 }
 
 #[test]
+fn retry_actions_paused_route_rejected() {
+    let mut svm = setup_svm();
+    let recipient = Pubkey::new_unique();
+    let s = stage(
+        &mut svm,
+        vec![spl(recipient, 10_000)],
+        AMOUNT,
+        ExecutionStatus::ActionsFailed,
+    );
+    let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
+
+    // Pause the route; retry is pause-gated.
+    send_ix(
+        &mut svm,
+        manage_route_ix(
+            &s.owner.pubkey(),
+            &s.route,
+            ManageRouteParams {
+                pause: Some(true),
+                adapters: None,
+                executors: None,
+            },
+            &[],
+        ),
+        &s.payer,
+        &[&s.owner],
+    )
+    .expect("pause should succeed");
+
+    let retry = retry_actions_ix(
+        &s.owner.pubkey(),
+        &s.route,
+        FILL_ID,
+        s.action_config.clone(),
+        &s.mint,
+        &[recipient_ata],
+    );
+    let err = send_ix_expect_err(
+        &mut svm,
+        retry,
+        &s.payer,
+        &[&s.owner],
+        "a paused route must reject retry_actions",
+    );
+    assert_eq!(err, custom_error(SraError::RoutePaused));
+
+    // Funds + status untouched.
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
+    assert_eq!(
+        status(&svm, &s.fill_receipt),
+        ExecutionStatus::ActionsFailed
+    );
+}
+
+#[test]
 fn retry_actions_spl_transfer_substitution_rejected() {
     let mut svm = setup_svm();
     let recipient = Pubkey::new_unique();
@@ -430,6 +487,7 @@ fn stage_verified(svm: &mut litesvm::LiteSVM, quoter: &Keypair) -> VerifiedStage
         action_config: action_config.clone(),
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
+        allowed_executors: vec![payer.pubkey()],
     };
     let hash = route_config_hash_for(&owner.pubkey(), &params);
     let (route, _) = derive_route_pda(&owner.pubkey(), &hash, &salt);

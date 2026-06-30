@@ -82,15 +82,17 @@ pub struct RouteCreated {
     pub action_config_hash: [u8; 32],
     pub salt: [u8; 32],
     pub allowed_adapters: Vec<Pubkey>,
+    pub allowed_executors: Vec<Pubkey>,
     pub paused: bool,
 }
 
-/// Emitted by `manage_route` with the post-write adapter list and paused flag.
+/// Emitted by `manage_route` with the post-write allowlists and paused flag.
 #[event]
 pub struct RouteManaged {
     pub route: Pubkey,
     pub owner: Pubkey,
     pub allowed_adapters: Vec<Pubkey>,
+    pub allowed_executors: Vec<Pubkey>,
     pub paused: bool,
 }
 

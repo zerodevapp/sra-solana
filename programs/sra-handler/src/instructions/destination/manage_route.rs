@@ -7,6 +7,7 @@ use sra_common::{
 
 use crate::events::RouteManaged;
 use crate::utils::adapter::{require_distinct_adapters, validate_adapter_accounts};
+use crate::utils::executor::validate_executors;
 
 #[derive(Accounts)]
 pub struct ManageRoute<'info> {
@@ -31,10 +32,17 @@ pub(crate) fn handler(ctx: Context<ManageRoute>, params: ManageRouteParams) -> R
         route.allowed_adapters = adapters;
     }
 
+    // Whole-list replace (mirrors adapters); Some(vec![]) clears.
+    if let Some(executors) = params.executors {
+        validate_executors(&executors)?;
+        route.allowed_executors = executors;
+    }
+
     emit!(RouteManaged {
         route: route.key(),
         owner: route.owner,
         allowed_adapters: route.allowed_adapters.clone(),
+        allowed_executors: route.allowed_executors.clone(),
         paused: route.paused,
     });
 

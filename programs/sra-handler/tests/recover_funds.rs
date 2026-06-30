@@ -13,7 +13,10 @@ use common::*;
 use solana_sdk::{
     pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::TransactionError,
 };
-use sra_common::{errors::SraError, types::ExecutionStatus};
+use sra_common::{
+    errors::SraError,
+    types::{ExecutionStatus, ManageRouteParams},
+};
 
 const AMOUNT: u64 = 4_000_000;
 const FILL_ID: [u8; 32] = [0x55; 32];
@@ -100,6 +103,37 @@ fn recover_from_finalized_transfers_to_owner() {
 
     r.recover(&mut svm)
         .expect("recover from Finalized should succeed");
+
+    assert_eq!(fetch_token_balance(&svm, &r.execution_vault), 0);
+    assert_eq!(fetch_token_balance(&svm, &r.owner_ata), AMOUNT);
+    assert_eq!(r.status(&svm), ExecutionStatus::Recovered);
+}
+
+#[test]
+fn recover_funds_succeeds_while_paused() {
+    let mut svm = setup_svm();
+    let r = setup_recoverable(&mut svm, ExecutionStatus::Finalized, AMOUNT);
+
+    // Pause the route; recover_funds must still work (it's not pause-gated).
+    send_ix(
+        &mut svm,
+        manage_route_ix(
+            &r.owner.pubkey(),
+            &r.route,
+            ManageRouteParams {
+                pause: Some(true),
+                adapters: None,
+                executors: None,
+            },
+            &[],
+        ),
+        &r.owner,
+        &[],
+    )
+    .expect("pause should succeed");
+
+    r.recover(&mut svm)
+        .expect("recover must succeed on a paused route");
 
     assert_eq!(fetch_token_balance(&svm, &r.execution_vault), 0);
     assert_eq!(fetch_token_balance(&svm, &r.owner_ata), AMOUNT);

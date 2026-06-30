@@ -526,6 +526,7 @@ fn verify_across_fill_paused_route_allowed() {
             ManageRouteParams {
                 pause: Some(true),
                 adapters: None,
+                executors: None,
             },
             &[],
         ),
