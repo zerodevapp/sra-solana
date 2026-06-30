@@ -71,8 +71,7 @@ pub(crate) fn handler(
         SraError::TooManyAdapters
     );
     require_distinct_adapters(&params.allowed_adapters)?;
-    // Executors are caller authorities, not programs — validate shape only
-    // (bounded + non-zero + distinct), no loader check. Empty is permitted.
+    // Shape-only (bounded/non-zero/distinct); no loader check, empty allowed.
     validate_executors(&params.allowed_executors)?;
 
     validate_adapter_accounts(&params.allowed_adapters, ctx.remaining_accounts)?;
@@ -99,7 +98,7 @@ pub(crate) fn handler(
     route.action_config_hash = action_hash;
     route.salt = params.salt;
     route.allowed_adapters = params.allowed_adapters;
-    // Mutable policy, NOT folded into route_config_hash (mirrors allowed_adapters).
+    // Not in route_config_hash (mutable, like allowed_adapters).
     route.allowed_executors = params.allowed_executors;
     route.paused = false;
     route.bump = ctx.bumps.route;

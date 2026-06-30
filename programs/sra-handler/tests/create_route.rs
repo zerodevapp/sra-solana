@@ -86,7 +86,7 @@ fn create_route_emits_route_created() {
 }
 
 // --------------------------------------------------------------------------
-// allowed_executors (init + shape validation; not in route_config_hash)
+// allowed_executors (init + shape validation)
 // --------------------------------------------------------------------------
 
 #[test]
@@ -98,8 +98,7 @@ fn create_route_persists_allowed_executors() {
 
     let executors = vec![Pubkey::new_unique(), Pubkey::new_unique()];
     let mut params = sample_create_route_params(mint, [20u8; 32]);
-    // Executors are NOT in route_config_hash — setting them on the same params
-    // must not change the hash (mutable policy, not part of route identity).
+    // Executors are not in route_config_hash, so setting them can't change the hash.
     let hash_without = route_config_hash_for(&owner.pubkey(), &params);
     params.allowed_executors = executors.clone();
     let hash = route_config_hash_for(&owner.pubkey(), &params);
@@ -127,8 +126,7 @@ fn create_route_empty_executors_allowed() {
     let owner = funded_keypair(&mut svm, SOL);
     let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
 
-    // The sample already carries an empty executor set; create must accept it
-    // (empty = no caller can execute_actions; owner can still recover_funds).
+    // The sample carries an empty executor set; create must accept it.
     let params = sample_create_route_params(mint, [21u8; 32]);
     let hash = route_config_hash_for(&owner.pubkey(), &params);
     let (route_pda, _) = derive_route_pda(&owner.pubkey(), &hash, &params.salt);

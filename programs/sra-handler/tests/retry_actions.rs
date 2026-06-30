@@ -323,8 +323,7 @@ fn retry_actions_paused_route_rejected() {
     );
     let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
 
-    // Owner pauses the route; retry is pause-gated like execute_actions (the
-    // owner's unwind path is recover_funds, which is NOT pause-gated).
+    // Pause the route; retry is pause-gated.
     send_ix(
         &mut svm,
         manage_route_ix(
@@ -359,7 +358,7 @@ fn retry_actions_paused_route_rejected() {
     );
     assert_eq!(err, custom_error(SraError::RoutePaused));
 
-    // Funds + status untouched; the fill is retryable again after unpause.
+    // Funds + status untouched.
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
     assert_eq!(
         status(&svm, &s.fill_receipt),

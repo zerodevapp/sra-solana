@@ -384,8 +384,7 @@ fn assert_all_ops_rejected(
     let before = status(svm, &f.fill_receipt);
     let vault_before = fetch_token_balance(svm, &f.execution_vault);
 
-    // The status gate fires before the executor/pause gates, so a terminal
-    // receipt is rejected on status regardless of the (authorized) caller.
+    // Status gate fires before the executor/pause gates.
     let err = send_ix_expect_err(
         svm,
         execute_actions_ix(

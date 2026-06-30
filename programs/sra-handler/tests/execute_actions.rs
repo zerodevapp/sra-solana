@@ -82,9 +82,7 @@ fn stage(svm: &mut litesvm::LiteSVM, action_config: Vec<SolanaAction>, amount: u
         action_config: action_config.clone(),
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
-        // The fee payer is the authorized executor (the tx submitter — faithful
-        // to EVM's relayer/initiator model). Gate-specific tests below use
-        // distinct keypairs to prove curation / rejection / freeze.
+        // Fee payer is the authorized executor; gate tests below use distinct keypairs.
         allowed_executors: vec![payer.pubkey()],
     };
     let hash = route_config_hash_for(&owner.pubkey(), &params);
@@ -587,12 +585,10 @@ fn execute_actions_cu_exhaustion_leaves_receipt_retryable() {
 }
 
 // --------------------------------------------------------------------------
-// Executor allowlist + pause gates (the Solana analog of EVM
-// `executeOnTarget`'s route-active + isInitiator gates)
+// Executor allowlist + pause gates
 // --------------------------------------------------------------------------
 
-/// Owner-set executor sets via manage_route (no remaining accounts — executors
-/// are signer pubkeys, not programs).
+/// Set the route's executor allowlist via manage_route.
 fn set_executors(svm: &mut litesvm::LiteSVM, s: &Staged, executors: Vec<Pubkey>) {
     send_ix(
         svm,
@@ -638,8 +634,7 @@ fn execute_actions_authorized_distinct_executor_succeeds() {
     let s = stage(&mut svm, vec![spl(recipient, 10_000)], AMOUNT);
     let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
 
-    // A curated executor that is neither the payer nor the owner — the route
-    // owner authorizes it explicitly (mirrors EVM's per-account initiator set).
+    // A curated executor distinct from payer/owner.
     let executor = Keypair::new();
     set_executors(&mut svm, &s, vec![executor.pubkey()]);
 
@@ -668,7 +663,7 @@ fn execute_actions_unauthorized_caller_rejected() {
     let s = stage(&mut svm, vec![spl(recipient, 10_000)], AMOUNT);
     let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
 
-    // A signer absent from allowed_executors (the route authorizes only the payer).
+    // A signer not in allowed_executors (route authorizes only the payer).
     let intruder = Keypair::new();
     let ix = execute_actions_ix(
         &intruder.pubkey(),
@@ -687,7 +682,7 @@ fn execute_actions_unauthorized_caller_rejected() {
     );
     assert_eq!(err, custom_error(SraError::ExecutorNotAllowed));
 
-    // Funds untouched; the receipt stays Finalized (an authorized caller can still run).
+    // Funds untouched; receipt stays Finalized.
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
     assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
 }
@@ -699,10 +694,10 @@ fn execute_actions_empty_executors_freezes() {
     let s = stage(&mut svm, vec![spl(recipient, 10_000)], AMOUNT);
     let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
 
-    // Owner clears the allowlist — execution is frozen for every caller.
+    // Owner clears the allowlist (freezes execution).
     set_executors(&mut svm, &s, vec![]);
 
-    // Even the previously-authorized payer is now rejected.
+    // Even the payer is now rejected.
     let ix = execute_actions_ix(
         &s.payer.pubkey(),
         &s.route,
@@ -731,8 +726,7 @@ fn execute_actions_paused_route_rejected() {
     let s = stage(&mut svm, vec![spl(recipient, 10_000)], AMOUNT);
     let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
 
-    // Owner pauses the route; the payer is still an authorized executor, so the
-    // pause gate (checked first) is what rejects.
+    // Paused; payer is authorized, so the pause gate (checked first) rejects.
     set_paused(&mut svm, &s, true);
 
     let ix = execute_actions_ix(
@@ -752,7 +746,7 @@ fn execute_actions_paused_route_rejected() {
     );
     assert_eq!(err, custom_error(SraError::RoutePaused));
 
-    // Funds + receipt untouched — the fill stays recoverable/executable after unpause.
+    // Funds + receipt untouched.
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
     assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
 }

@@ -1,16 +1,8 @@
 use anchor_lang::prelude::*;
 use sra_common::{constants::MAX_EXECUTORS, errors::SraError};
 
-/// Validate a route's `allowed_executors` set. Executors are arbitrary caller
-/// authorities (not programs), so they can't be loader-checked like adapters;
-/// the structural invariants that DO apply are enforced here:
-/// - bounded by `MAX_EXECUTORS` (account rent),
-/// - non-zero (a default pubkey is an unusable dead slot — mirrors EVM
-///   `SRA.setInitiatorOverride`'s `_initiator != address(0)` reject),
-/// - distinct (the allowlist is a set).
-///
-/// Empty is permitted: it freezes `execute_actions` (owner can still
-/// `recover_funds`) — the owner's deliberate create-time choice.
+/// Validate `allowed_executors`: bounded by `MAX_EXECUTORS`, non-zero, distinct.
+/// Empty is permitted (freezes `execute_actions`).
 pub(crate) fn validate_executors(executors: &[Pubkey]) -> Result<()> {
     require!(executors.len() <= MAX_EXECUTORS, SraError::TooManyExecutors);
     for (i, executor) in executors.iter().enumerate() {

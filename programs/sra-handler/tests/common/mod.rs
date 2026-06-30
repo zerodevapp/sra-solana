@@ -1654,7 +1654,7 @@ pub fn sample_create_route_params(expected_mint: Pubkey, salt: [u8; 32]) -> Crea
         }],
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
-        // Empty by default; tests exercising execute_actions set this explicitly.
+        // Empty by default; execute_actions tests set this.
         allowed_executors: vec![],
     }
 }

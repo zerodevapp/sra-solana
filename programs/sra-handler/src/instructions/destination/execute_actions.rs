@@ -41,8 +41,7 @@ use crate::events::{ActionsExecuted, ActionsFailed};
 #[derive(Accounts)]
 #[instruction(fill_id: [u8; 32])]
 pub struct ExecuteActions<'info> {
-    /// Must be in the route's `allowed_executors` (owner-curated caller set —
-    /// the Solana analog of EVM `isInitiator`). Gated in the handler.
+    /// Must be in the route's `allowed_executors`; gated in the handler.
     pub executor: Signer<'info>,
     /// The route whose committed actions run. Not seed-bound here (that needs
     /// `route_config_hash`, which `execute_actions` does not require): the
@@ -130,9 +129,7 @@ pub(crate) fn handler<'info>(
         ctx.accounts.fill_receipt.execution_status == ExecutionStatus::Finalized,
         SraError::InvalidExecutionStatus
     );
-    // Liveness + authorization gates (EVM `executeOnTarget`: route-active then
-    // initiator). A paused route blocks settlement; the caller must be a curated
-    // executor. `route` stays read-only — these are pure reads.
+    // Pause + executor gates (EVM executeOnTarget parity); route stays read-only.
     require!(!ctx.accounts.route.paused, SraError::RoutePaused);
     require!(
         ctx.accounts

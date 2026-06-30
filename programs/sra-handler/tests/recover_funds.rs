@@ -114,8 +114,7 @@ fn recover_funds_succeeds_while_paused() {
     let mut svm = setup_svm();
     let r = setup_recoverable(&mut svm, ExecutionStatus::Finalized, AMOUNT);
 
-    // Pause the route. recover_funds is the owner's unwind path and must work
-    // while paused — unlike execute_actions / retry_actions, which are pause-gated.
+    // Pause the route; recover_funds must still work (it's not pause-gated).
     send_ix(
         &mut svm,
         manage_route_ix(

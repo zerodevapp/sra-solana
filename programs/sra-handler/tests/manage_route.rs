@@ -17,7 +17,7 @@ fn mr_params(pause: Option<bool>, adapters: Option<Vec<Pubkey>>) -> ManageRouteP
     }
 }
 
-/// Build params that only replace the executor allowlist (pause/adapters unchanged).
+/// Params that replace only the executor allowlist.
 fn mr_executors(executors: Vec<Pubkey>) -> ManageRouteParams {
     ManageRouteParams {
         pause: None,
@@ -278,7 +278,7 @@ fn manage_route_duplicate_adapters_rejected() {
 }
 
 // --------------------------------------------------------------------------
-// executor set (whole-list replace, mirrors the adapter set)
+// executor set (whole-list replace)
 // --------------------------------------------------------------------------
 
 #[test]
@@ -337,7 +337,7 @@ fn manage_route_executors_edit_preserves_pause_and_adapters() {
     let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
     let route = create_sample_route(&mut svm, &payer, &owner, mint, [22u8; 32]);
 
-    // Pause first, then an executors-only edit must leave pause + adapters intact.
+    // Pause first; an executors-only edit must preserve pause + adapters.
     send_ix(
         &mut svm,
         manage_route_ix(&owner.pubkey(), &route, mr_params(Some(true), None), &[]),

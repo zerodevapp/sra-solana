@@ -32,8 +32,7 @@ pub(crate) fn handler(ctx: Context<ManageRoute>, params: ManageRouteParams) -> R
         route.allowed_adapters = adapters;
     }
 
-    // Whole-list replace, mirroring adapters: validate shape (bounded + non-zero
-    // + distinct), then swap. `Some(vec![])` clears (freezes execute_actions).
+    // Whole-list replace (mirrors adapters); Some(vec![]) clears.
     if let Some(executors) = params.executors {
         validate_executors(&executors)?;
         route.allowed_executors = executors;

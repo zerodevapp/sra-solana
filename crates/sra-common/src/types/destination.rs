@@ -53,10 +53,8 @@ pub struct SolanaSraRoute {
     // Mutable
     #[max_len(MAX_ADAPTERS)]
     pub allowed_adapters: Vec<Pubkey>,
-    /// Caller authorities permitted to run `execute_actions` for this route's
-    /// fills. Owner-managed, NOT in `route_config_hash` (mutable, like
-    /// `allowed_adapters`). Empty = no caller can execute (owner-recoverable
-    /// only) — the Solana analog of EVM's per-account initiator set.
+    /// Owner-managed; not in `route_config_hash` (mutable, like `allowed_adapters`).
+    /// Empty = no caller can `execute_actions`.
     #[max_len(MAX_EXECUTORS)]
     pub allowed_executors: Vec<Pubkey>,
     pub paused: bool,
@@ -72,8 +70,7 @@ pub struct CreateRouteParams {
     pub action_config: Vec<SolanaAction>,
     pub salt: [u8; 32],
     pub allowed_adapters: Vec<Pubkey>,
-    /// Caller authorities permitted to run `execute_actions`. Empty is allowed
-    /// (no executor can run; owner can still `recover_funds`).
+    /// Executor allowlist; empty allowed.
     pub allowed_executors: Vec<Pubkey>,
 }
 
@@ -87,8 +84,7 @@ pub struct ManageRouteParams {
     /// `Some` replaces the whole adapter allowlist (EVM `_installAdapters`
     /// parity); `Some(vec![])` clears it; `None` leaves it unchanged.
     pub adapters: Option<Vec<Pubkey>>,
-    /// `Some` replaces the whole executor allowlist; `Some(vec![])` clears it
-    /// (freezes `execute_actions`); `None` leaves it unchanged. Mirrors `adapters`.
+    /// Whole-list replace, mirroring `adapters`; `Some(vec![])` clears (freezes execution).
     pub executors: Option<Vec<Pubkey>>,
 }
 
