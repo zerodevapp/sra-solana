@@ -16,12 +16,14 @@
 mod common;
 
 use common::*;
-use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey, signer::Signer};
+use solana_sdk::{
+    compute_budget::ComputeBudgetInstruction, pubkey::Pubkey, signature::Keypair, signer::Signer,
+};
 use sra_common::{
     errors::SraError,
     types::{
-        AccountTemplate, CreateRouteParams, ExecutionStatus, FixedRole, MinOut, SlotRole,
-        SolanaAction,
+        AccountTemplate, CreateRouteParams, ExecutionStatus, FixedRole, ManageRouteParams, MinOut,
+        SlotRole, SolanaAction,
     },
 };
 
@@ -57,6 +59,7 @@ fn verified_cpi() -> SolanaAction {
 
 struct Staged {
     payer: solana_sdk::signature::Keypair,
+    owner: solana_sdk::signature::Keypair,
     mint: Pubkey,
     route: Pubkey,
     execution_vault: Pubkey,
@@ -79,6 +82,10 @@ fn stage(svm: &mut litesvm::LiteSVM, action_config: Vec<SolanaAction>, amount: u
         action_config: action_config.clone(),
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
+        // The fee payer is the authorized executor (the tx submitter — faithful
+        // to EVM's relayer/initiator model). Gate-specific tests below use
+        // distinct keypairs to prove curation / rejection / freeze.
+        allowed_executors: vec![payer.pubkey()],
     };
     let hash = route_config_hash_for(&owner.pubkey(), &params);
     let (route, _) = derive_route_pda(&owner.pubkey(), &hash, &salt);
@@ -101,6 +108,7 @@ fn stage(svm: &mut litesvm::LiteSVM, action_config: Vec<SolanaAction>, amount: u
 
     Staged {
         payer,
+        owner,
         mint,
         route,
         execution_vault,
@@ -121,6 +129,7 @@ fn execute_actions_single_spl_transfer_succeeds() {
     let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
 
     let ix = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -147,6 +156,7 @@ fn execute_actions_multiple_all_succeed() {
     let a2 = create_ata(&mut svm, &s.payer, &r2, &s.mint);
 
     let ix = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -170,7 +180,7 @@ fn execute_actions_empty_action_config_immediately_succeeds() {
     let mut svm = setup_svm();
     let s = stage(&mut svm, vec![], AMOUNT);
 
-    let ix = execute_actions_ix(&s.route, FILL_ID, vec![], &s.mint, &[]);
+    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, vec![], &s.mint, &[]);
     send_ix(&mut svm, ix, &s.payer, &[]).expect("empty action_config is a no-op success");
 
     // No actions, no transfers — funds stay staged, status is terminal-success.
@@ -193,6 +203,7 @@ fn execute_actions_partial_bps_sum_leaves_dust_and_succeeds() {
     let a2 = create_ata(&mut svm, &s.payer, &r2, &s.mint);
 
     let ix = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -218,6 +229,7 @@ fn execute_actions_emits_actions_executed() {
     let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
 
     let ix = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -244,6 +256,7 @@ fn execute_actions_failure_sets_actions_failed_and_preserves_funds() {
     let recipient_ata = derive_ata(&recipient, &s.mint);
 
     let ix = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -275,6 +288,7 @@ fn execute_actions_frozen_recipient_ata_sets_actions_failed() {
     freeze_token_account(&mut svm, &recipient_ata);
 
     let ix = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -304,6 +318,7 @@ fn execute_actions_frozen_source_vault_sets_actions_failed() {
     freeze_token_account(&mut svm, &s.execution_vault);
 
     let ix = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -336,6 +351,7 @@ fn execute_actions_partial_failure_atomic() {
     let a3 = create_ata(&mut svm, &s.payer, &r3, &s.mint);
 
     let ix = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -362,6 +378,7 @@ fn execute_actions_emits_actions_failed() {
     let recipient_ata = derive_ata(&recipient, &s.mint); // not created
 
     let ix = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -388,6 +405,7 @@ fn execute_actions_non_finalized_status_rejected() {
     let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
 
     let ix = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -402,6 +420,7 @@ fn execute_actions_non_finalized_status_rejected() {
 
     // A second execute on an already-succeeded receipt is rejected.
     let ix2 = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -421,7 +440,14 @@ fn execute_actions_action_config_must_hash_match_committed() {
 
     // Same recipient, different amount_bps -> different action_config_hash.
     let tampered = vec![spl(recipient, 5_000)];
-    let ix = execute_actions_ix(&s.route, FILL_ID, tampered, &s.mint, &[recipient_ata]);
+    let ix = execute_actions_ix(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        tampered,
+        &s.mint,
+        &[recipient_ata],
+    );
     let err = send_ix_expect_err(
         &mut svm,
         ix,
@@ -446,6 +472,7 @@ fn execute_actions_spl_transfer_remaining_accounts_substitution_rejected() {
     let wrong_ata = derive_ata(&Pubkey::new_unique(), &s.mint);
 
     let ix = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -466,6 +493,7 @@ fn execute_actions_spl_transfer_non_writable_recipient_rejected() {
     let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
 
     let mut ix = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -492,7 +520,14 @@ fn execute_actions_verified_cpi_action_unsupported() {
     let mut svm = setup_svm();
     let s = stage(&mut svm, vec![verified_cpi()], AMOUNT);
 
-    let ix = execute_actions_ix(&s.route, FILL_ID, s.action_config.clone(), &s.mint, &[]);
+    let ix = execute_actions_ix(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        s.action_config.clone(),
+        &s.mint,
+        &[],
+    );
     let err = send_ix_expect_err(
         &mut svm,
         ix,
@@ -518,6 +553,7 @@ fn execute_actions_cu_exhaustion_leaves_receipt_retryable() {
     // A CU limit far below what execute_actions needs aborts the whole tx.
     let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_000);
     let exec_ix = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -534,6 +570,7 @@ fn execute_actions_cu_exhaustion_leaves_receipt_retryable() {
 
     // Retry with a normal budget succeeds.
     let retry = execute_actions_ix(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -547,4 +584,175 @@ fn execute_actions_cu_exhaustion_leaves_receipt_retryable() {
         status(&svm, &s.fill_receipt),
         ExecutionStatus::ActionsSucceeded
     );
+}
+
+// --------------------------------------------------------------------------
+// Executor allowlist + pause gates (the Solana analog of EVM
+// `executeOnTarget`'s route-active + isInitiator gates)
+// --------------------------------------------------------------------------
+
+/// Owner-set executor sets via manage_route (no remaining accounts — executors
+/// are signer pubkeys, not programs).
+fn set_executors(svm: &mut litesvm::LiteSVM, s: &Staged, executors: Vec<Pubkey>) {
+    send_ix(
+        svm,
+        manage_route_ix(
+            &s.owner.pubkey(),
+            &s.route,
+            ManageRouteParams {
+                pause: None,
+                adapters: None,
+                executors: Some(executors),
+            },
+            &[],
+        ),
+        &s.payer,
+        &[&s.owner],
+    )
+    .expect("manage_route (executors) should succeed");
+}
+
+fn set_paused(svm: &mut litesvm::LiteSVM, s: &Staged, paused: bool) {
+    send_ix(
+        svm,
+        manage_route_ix(
+            &s.owner.pubkey(),
+            &s.route,
+            ManageRouteParams {
+                pause: Some(paused),
+                adapters: None,
+                executors: None,
+            },
+            &[],
+        ),
+        &s.payer,
+        &[&s.owner],
+    )
+    .expect("manage_route (pause) should succeed");
+}
+
+#[test]
+fn execute_actions_authorized_distinct_executor_succeeds() {
+    let mut svm = setup_svm();
+    let recipient = Pubkey::new_unique();
+    let s = stage(&mut svm, vec![spl(recipient, 10_000)], AMOUNT);
+    let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
+
+    // A curated executor that is neither the payer nor the owner — the route
+    // owner authorizes it explicitly (mirrors EVM's per-account initiator set).
+    let executor = Keypair::new();
+    set_executors(&mut svm, &s, vec![executor.pubkey()]);
+
+    let ix = execute_actions_ix(
+        &executor.pubkey(),
+        &s.route,
+        FILL_ID,
+        s.action_config.clone(),
+        &s.mint,
+        &[recipient_ata],
+    );
+    send_ix(&mut svm, ix, &s.payer, &[&executor])
+        .expect("a curated executor can run execute_actions");
+
+    assert_eq!(fetch_token_balance(&svm, &recipient_ata), AMOUNT);
+    assert_eq!(
+        status(&svm, &s.fill_receipt),
+        ExecutionStatus::ActionsSucceeded
+    );
+}
+
+#[test]
+fn execute_actions_unauthorized_caller_rejected() {
+    let mut svm = setup_svm();
+    let recipient = Pubkey::new_unique();
+    let s = stage(&mut svm, vec![spl(recipient, 10_000)], AMOUNT);
+    let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
+
+    // A signer absent from allowed_executors (the route authorizes only the payer).
+    let intruder = Keypair::new();
+    let ix = execute_actions_ix(
+        &intruder.pubkey(),
+        &s.route,
+        FILL_ID,
+        s.action_config.clone(),
+        &s.mint,
+        &[recipient_ata],
+    );
+    let err = send_ix_expect_err(
+        &mut svm,
+        ix,
+        &s.payer,
+        &[&intruder],
+        "an unauthorized executor must be rejected",
+    );
+    assert_eq!(err, custom_error(SraError::ExecutorNotAllowed));
+
+    // Funds untouched; the receipt stays Finalized (an authorized caller can still run).
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
+    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+}
+
+#[test]
+fn execute_actions_empty_executors_freezes() {
+    let mut svm = setup_svm();
+    let recipient = Pubkey::new_unique();
+    let s = stage(&mut svm, vec![spl(recipient, 10_000)], AMOUNT);
+    let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
+
+    // Owner clears the allowlist — execution is frozen for every caller.
+    set_executors(&mut svm, &s, vec![]);
+
+    // Even the previously-authorized payer is now rejected.
+    let ix = execute_actions_ix(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        s.action_config.clone(),
+        &s.mint,
+        &[recipient_ata],
+    );
+    let err = send_ix_expect_err(
+        &mut svm,
+        ix,
+        &s.payer,
+        &[],
+        "an empty executor allowlist freezes execute_actions",
+    );
+    assert_eq!(err, custom_error(SraError::ExecutorNotAllowed));
+
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
+    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+}
+
+#[test]
+fn execute_actions_paused_route_rejected() {
+    let mut svm = setup_svm();
+    let recipient = Pubkey::new_unique();
+    let s = stage(&mut svm, vec![spl(recipient, 10_000)], AMOUNT);
+    let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
+
+    // Owner pauses the route; the payer is still an authorized executor, so the
+    // pause gate (checked first) is what rejects.
+    set_paused(&mut svm, &s, true);
+
+    let ix = execute_actions_ix(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        s.action_config.clone(),
+        &s.mint,
+        &[recipient_ata],
+    );
+    let err = send_ix_expect_err(
+        &mut svm,
+        ix,
+        &s.payer,
+        &[],
+        "a paused route must reject execute_actions",
+    );
+    assert_eq!(err, custom_error(SraError::RoutePaused));
+
+    // Funds + receipt untouched — the fill stays recoverable/executable after unpause.
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
+    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
 }

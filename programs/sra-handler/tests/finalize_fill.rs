@@ -138,6 +138,7 @@ impl Finalizable {
             ManageRouteParams {
                 pause: Some(paused),
                 adapters: None,
+                executors: None,
             },
             &[],
         );
@@ -150,6 +151,7 @@ impl Finalizable {
             ManageRouteParams {
                 pause: None,
                 adapters: Some(adapters.to_vec()),
+                executors: None,
             },
             adapters,
         );

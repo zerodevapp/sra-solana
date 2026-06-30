@@ -6,6 +6,12 @@ use anchor_lang::pubkey;
 /// EVM has no equivalent limit (uses linked list).
 pub const MAX_ADAPTERS: usize = 8;
 
+/// Max executor signer pubkeys in a `SolanaSraRoute`'s `allowed_executors`.
+/// Bounds the route account size for rent. Matches `MAX_ADAPTERS` in value but is
+/// a distinct concept — executors are caller authorities, not adapter programs.
+/// The EVM analog (per-account initiator) is a single override, not a list.
+pub const MAX_EXECUTORS: usize = 8;
+
 /// Max actions in a destination route's committed `action_config`.
 /// Solana-specific: bounds the route account size and the per-fill action list
 /// re-supplied as instruction data. EVM has no equivalent limit.

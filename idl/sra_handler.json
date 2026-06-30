@@ -334,6 +334,14 @@
       ],
       "accounts": [
         {
+          "name": "executor",
+          "docs": [
+            "Must be in the route's `allowed_executors` (owner-curated caller set —",
+            "the Solana analog of EVM `isInitiator`). Gated in the handler."
+          ],
+          "signer": true
+        },
+        {
           "name": "route",
           "docs": [
             "The route whose committed actions run. Not seed-bound here (that needs",
@@ -3451,6 +3459,16 @@
             "type": {
               "vec": "pubkey"
             }
+          },
+          {
+            "name": "allowed_executors",
+            "docs": [
+              "Caller authorities permitted to run `execute_actions`. Empty is allowed",
+              "(no executor can run; owner can still `recover_funds`)."
+            ],
+            "type": {
+              "vec": "pubkey"
+            }
           }
         ]
       }
@@ -3874,6 +3892,18 @@
                 "vec": "pubkey"
               }
             }
+          },
+          {
+            "name": "executors",
+            "docs": [
+              "`Some` replaces the whole executor allowlist; `Some(vec![])` clears it",
+              "(freezes `execute_actions`); `None` leaves it unchanged. Mirrors `adapters`."
+            ],
+            "type": {
+              "option": {
+                "vec": "pubkey"
+              }
+            }
           }
         ]
       }
@@ -4136,6 +4166,12 @@
             }
           },
           {
+            "name": "allowed_executors",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
             "name": "paused",
             "type": "bool"
           }
@@ -4145,7 +4181,7 @@
     {
       "name": "RouteManaged",
       "docs": [
-        "Emitted by `manage_route` with the post-write adapter list and paused flag."
+        "Emitted by `manage_route` with the post-write allowlists and paused flag."
       ],
       "type": {
         "kind": "struct",
@@ -4160,6 +4196,12 @@
           },
           {
             "name": "allowed_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "allowed_executors",
             "type": {
               "vec": "pubkey"
             }
@@ -4324,6 +4366,18 @@
           },
           {
             "name": "allowed_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "allowed_executors",
+            "docs": [
+              "Caller authorities permitted to run `execute_actions` for this route's",
+              "fills. Owner-managed, NOT in `route_config_hash` (mutable, like",
+              "`allowed_adapters`). Empty = no caller can execute (owner-recoverable",
+              "only) — the Solana analog of EVM's per-account initiator set."
+            ],
             "type": {
               "vec": "pubkey"
             }

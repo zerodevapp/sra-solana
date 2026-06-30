@@ -3,7 +3,7 @@ mod common;
 use common::*;
 use solana_sdk::{pubkey::Pubkey, signer::Signer};
 use sra_common::{
-    constants::{MAX_ACTION_IDXS, MAX_ADAPTERS},
+    constants::{MAX_ACTION_IDXS, MAX_ADAPTERS, MAX_EXECUTORS},
     errors::SraError,
     types::{AccountTemplate, FixedRole, MinOut, SlotRole, SolanaAction},
 };
@@ -41,6 +41,10 @@ fn create_route_happy_path() {
     assert_eq!(route.action_config_hash, action_config_hash_for(&params));
     assert_eq!(route.salt, params.salt);
     assert_eq!(route.allowed_adapters, vec![ADAPTER_PROGRAM_ID]);
+    assert!(
+        route.allowed_executors.is_empty(),
+        "the sample route starts with no executors"
+    );
     assert!(!route.paused, "paused must start false");
     assert_ne!(route.bump, 0, "canonical bump stamped");
 
@@ -77,7 +81,134 @@ fn create_route_emits_route_created() {
     assert_eq!(ev.action_config_hash, action_config_hash_for(&params));
     assert_eq!(ev.salt, params.salt);
     assert_eq!(ev.allowed_adapters, vec![ADAPTER_PROGRAM_ID]);
+    assert!(ev.allowed_executors.is_empty());
     assert!(!ev.paused, "event carries post-write state");
+}
+
+// --------------------------------------------------------------------------
+// allowed_executors (init + shape validation; not in route_config_hash)
+// --------------------------------------------------------------------------
+
+#[test]
+fn create_route_persists_allowed_executors() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+
+    let executors = vec![Pubkey::new_unique(), Pubkey::new_unique()];
+    let mut params = sample_create_route_params(mint, [20u8; 32]);
+    // Executors are NOT in route_config_hash — setting them on the same params
+    // must not change the hash (mutable policy, not part of route identity).
+    let hash_without = route_config_hash_for(&owner.pubkey(), &params);
+    params.allowed_executors = executors.clone();
+    let hash = route_config_hash_for(&owner.pubkey(), &params);
+    assert_eq!(
+        hash, hash_without,
+        "allowed_executors must not affect route_config_hash"
+    );
+    let (route_pda, _) = derive_route_pda(&owner.pubkey(), &hash, &params.salt);
+
+    let ix = create_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    send_ix(&mut svm, ix, &payer, &[&owner]).expect("create_route with executors should succeed");
+
+    assert_eq!(fetch_route(&svm, &route_pda).allowed_executors, executors);
+}
+
+#[test]
+fn create_route_empty_executors_allowed() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+
+    // The sample already carries an empty executor set; create must accept it
+    // (empty = no caller can execute_actions; owner can still recover_funds).
+    let params = sample_create_route_params(mint, [21u8; 32]);
+    let hash = route_config_hash_for(&owner.pubkey(), &params);
+    let (route_pda, _) = derive_route_pda(&owner.pubkey(), &hash, &params.salt);
+
+    let ix = create_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    send_ix(&mut svm, ix, &payer, &[&owner]).expect("empty allowed_executors is permitted");
+
+    assert!(fetch_route(&svm, &route_pda).allowed_executors.is_empty());
+}
+
+#[test]
+fn create_route_too_many_executors_rejected() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+
+    let mut params = sample_create_route_params(mint, [22u8; 32]);
+    params.allowed_executors = (0..=MAX_EXECUTORS).map(|_| Pubkey::new_unique()).collect();
+
+    let ix = create_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    let err = send_ix(&mut svm, ix, &payer, &[&owner])
+        .expect_err("oversized allowed_executors must be rejected")
+        .err;
+    assert_eq!(err, custom_error(SraError::TooManyExecutors));
+}
+
+#[test]
+fn create_route_duplicate_executor_rejected() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+
+    let dup = Pubkey::new_unique();
+    let mut params = sample_create_route_params(mint, [23u8; 32]);
+    params.allowed_executors = vec![dup, dup];
+
+    let ix = create_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    let err = send_ix(&mut svm, ix, &payer, &[&owner])
+        .expect_err("a duplicate executor must be rejected")
+        .err;
+    assert_eq!(err, custom_error(SraError::DuplicateExecutor));
+}
+
+#[test]
+fn create_route_zero_executor_rejected() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+
+    let mut params = sample_create_route_params(mint, [24u8; 32]);
+    params.allowed_executors = vec![Pubkey::default()];
+
+    let ix = create_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    let err = send_ix(&mut svm, ix, &payer, &[&owner])
+        .expect_err("a zero executor pubkey must be rejected")
+        .err;
+    assert_eq!(err, custom_error(SraError::InvalidExecutor));
 }
 
 // --------------------------------------------------------------------------

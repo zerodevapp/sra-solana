@@ -135,6 +135,7 @@ fn stage(
         action_config: action_config.clone(),
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
+        allowed_executors: vec![payer.pubkey()],
     };
     let hash = route_config_hash_for(&owner.pubkey(), &params);
     let (route, _) = derive_route_pda(&owner.pubkey(), &hash, &salt);
@@ -271,6 +272,7 @@ fn verified_cpi_swap_succeeds() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, min_out, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -306,6 +308,7 @@ fn verified_cpi_sweeps_unspent_input() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, out_amount, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -340,6 +343,7 @@ fn verified_cpi_emits_actions_executed() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -368,6 +372,7 @@ fn verified_cpi_below_min_out_reverts_funds_safe() {
     // Deliver less than the signed minimum.
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 3_000_000, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -393,6 +398,7 @@ fn verified_cpi_scratch_bounds_input() {
     // transfer fails and the whole transaction reverts; the vault is untouched.
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -423,6 +429,7 @@ fn verified_cpi_destination_redirect_rejected() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -449,6 +456,7 @@ fn verified_cpi_program_substitution_rejected() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -475,6 +483,7 @@ fn verified_cpi_signed_quote_expired_rejected() {
     let expired = now(&svm) - 1;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expired));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -498,6 +507,7 @@ fn verified_cpi_wrong_quoter_rejected() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&stranger, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -522,6 +532,7 @@ fn verified_cpi_min_out_tamper_rejected() {
     // no longer matches the signature.
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 3_000_000, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -543,6 +554,7 @@ fn verified_cpi_missing_quote_rejected() {
     let expiry = now(&svm) + 3_600;
     // A correct runtime, but NO ed25519 instruction in the transaction.
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -582,6 +594,7 @@ fn verified_cpi_missing_destination_ata_soft_fails() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -625,6 +638,7 @@ fn verified_cpi_oracle_min_out_unsupported() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -675,6 +689,7 @@ fn spl_and_verified_cpi_compose() {
     let mut remaining = vec![AccountMeta::new(recipient_ata, false)];
     remaining.extend(s.verified_metas(s.destination));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -725,6 +740,7 @@ fn verified_cpi_token_2022_output_succeeds() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, min_out, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -773,6 +789,7 @@ fn verified_cpi_transfer_fee_output_uses_post_fee_balance() {
     // Quote the post-fee floor; the swap nominally outputs `out_amount`.
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, landed, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -814,6 +831,7 @@ fn verified_cpi_transfer_fee_min_out_against_post_fee_reverts() {
     // Quote at the nominal output; post-fee landing (990_000) falls short.
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, out_amount, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -845,6 +863,7 @@ fn verified_cpi_permissioned_output_requires_optin() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -889,6 +908,7 @@ fn verified_cpi_permissioned_output_optin_succeeds() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, min_out, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),
@@ -923,6 +943,7 @@ fn verified_cpi_wrong_output_mint_account_rejected() {
     let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
         &s.route,
         FILL_ID,
         s.action_config.clone(),

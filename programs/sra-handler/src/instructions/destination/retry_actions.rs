@@ -60,6 +60,10 @@ pub(crate) fn handler<'info>(
         ctx.accounts.fill_receipt.execution_status == ExecutionStatus::ActionsFailed,
         SraError::InvalidExecutionStatus
     );
+    // A paused route blocks settlement (EVM `executeOnTarget` route-active gate).
+    // Stays owner-gated (no executor allowlist) — `recover_funds` is the
+    // owner's unwind path and is intentionally NOT pause-gated.
+    require!(!ctx.accounts.route.paused, SraError::RoutePaused);
 
     let route = ctx.accounts.route.key();
     let accounts = ActionAccounts {

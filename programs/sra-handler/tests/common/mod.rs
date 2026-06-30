@@ -1654,6 +1654,8 @@ pub fn sample_create_route_params(expected_mint: Pubkey, salt: [u8; 32]) -> Crea
         }],
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
+        // Empty by default; tests exercising execute_actions set this explicitly.
+        allowed_executors: vec![],
     }
 }
 
@@ -2018,6 +2020,7 @@ pub fn fabricate_verified_fill(
 /// SplTransfer-only convenience: each recipient ATA rides writable, no verified
 /// runtimes. Delegates to the full builder.
 pub fn execute_actions_ix(
+    executor: &Pubkey,
     route: &Pubkey,
     fill_id: [u8; 32],
     action_config: Vec<SolanaAction>,
@@ -2028,13 +2031,22 @@ pub fn execute_actions_ix(
         .iter()
         .map(|ata| AccountMeta::new(*ata, false))
         .collect();
-    execute_actions_ix_full(route, fill_id, action_config, vec![], mint, remaining)
+    execute_actions_ix_full(
+        executor,
+        route,
+        fill_id,
+        action_config,
+        vec![],
+        mint,
+        remaining,
+    )
 }
 
 /// Full `execute_actions` builder: caller supplies the exact per-action
 /// `remaining_accounts` metas (SplTransfer recipient ATAs and/or VerifiedCpi
 /// `[program, template slots…]` runs) and the per-VerifiedCpi-action runtimes.
 pub fn execute_actions_ix_full(
+    executor: &Pubkey,
     route: &Pubkey,
     fill_id: [u8; 32],
     action_config: Vec<SolanaAction>,
@@ -2046,6 +2058,7 @@ pub fn execute_actions_ix_full(
     let execution_vault = derive_ata(&execution_authority, mint);
     let (fill_receipt, _) = derive_fill_receipt_pda(route, &fill_id);
     let mut accounts = sra_handler::accounts::ExecuteActions {
+        executor: *executor,
         route: *route,
         fill_receipt,
         expected_mint: *mint,

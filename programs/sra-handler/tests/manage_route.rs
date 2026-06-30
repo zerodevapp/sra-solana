@@ -4,13 +4,26 @@ use anchor_lang::error::ErrorCode;
 use common::*;
 use solana_sdk::{pubkey::Pubkey, signer::Signer};
 use sra_common::{
-    constants::MAX_ADAPTERS,
+    constants::{MAX_ADAPTERS, MAX_EXECUTORS},
     errors::SraError,
     types::{ExecutionStatus, ManageRouteParams},
 };
 
 fn mr_params(pause: Option<bool>, adapters: Option<Vec<Pubkey>>) -> ManageRouteParams {
-    ManageRouteParams { pause, adapters }
+    ManageRouteParams {
+        pause,
+        adapters,
+        executors: None,
+    }
+}
+
+/// Build params that only replace the executor allowlist (pause/adapters unchanged).
+fn mr_executors(executors: Vec<Pubkey>) -> ManageRouteParams {
+    ManageRouteParams {
+        pause: None,
+        adapters: None,
+        executors: Some(executors),
+    }
 }
 
 // --------------------------------------------------------------------------
@@ -265,6 +278,147 @@ fn manage_route_duplicate_adapters_rejected() {
 }
 
 // --------------------------------------------------------------------------
+// executor set (whole-list replace, mirrors the adapter set)
+// --------------------------------------------------------------------------
+
+#[test]
+fn manage_route_set_executors_replaces_list() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+    let route = create_sample_route(&mut svm, &payer, &owner, mint, [20u8; 32]);
+
+    // The sample starts with no executors; set a non-empty list.
+    let set = vec![Pubkey::new_unique(), Pubkey::new_unique()];
+    let ix = manage_route_ix(&owner.pubkey(), &route, mr_executors(set.clone()), &[]);
+    send_ix(&mut svm, ix, &payer, &[&owner]).expect("set executors should succeed");
+    assert_eq!(fetch_route(&svm, &route).allowed_executors, set);
+
+    // Replace with a different list (whole-list swap).
+    let replacement = vec![Pubkey::new_unique()];
+    let ix = manage_route_ix(
+        &owner.pubkey(),
+        &route,
+        mr_executors(replacement.clone()),
+        &[],
+    );
+    send_ix(&mut svm, ix, &payer, &[&owner]).expect("replace executors should succeed");
+    assert_eq!(fetch_route(&svm, &route).allowed_executors, replacement);
+}
+
+#[test]
+fn manage_route_clear_executors() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+    let route = create_sample_route(&mut svm, &payer, &owner, mint, [21u8; 32]);
+
+    let ix = manage_route_ix(
+        &owner.pubkey(),
+        &route,
+        mr_executors(vec![Pubkey::new_unique()]),
+        &[],
+    );
+    send_ix(&mut svm, ix, &payer, &[&owner]).expect("set executors should succeed");
+
+    // An empty replacement clears the allowlist (freezes execute_actions).
+    let ix = manage_route_ix(&owner.pubkey(), &route, mr_executors(vec![]), &[]);
+    send_ix(&mut svm, ix, &payer, &[&owner]).expect("clearing executors should succeed");
+    assert!(fetch_route(&svm, &route).allowed_executors.is_empty());
+}
+
+#[test]
+fn manage_route_executors_edit_preserves_pause_and_adapters() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+    let route = create_sample_route(&mut svm, &payer, &owner, mint, [22u8; 32]);
+
+    // Pause first, then an executors-only edit must leave pause + adapters intact.
+    send_ix(
+        &mut svm,
+        manage_route_ix(&owner.pubkey(), &route, mr_params(Some(true), None), &[]),
+        &payer,
+        &[&owner],
+    )
+    .expect("pause should succeed");
+
+    let set = vec![Pubkey::new_unique()];
+    send_ix(
+        &mut svm,
+        manage_route_ix(&owner.pubkey(), &route, mr_executors(set.clone()), &[]),
+        &payer,
+        &[&owner],
+    )
+    .expect("executors-only edit should succeed");
+
+    let after = fetch_route(&svm, &route);
+    assert!(after.paused, "executors edit must not clear paused");
+    assert_eq!(
+        after.allowed_adapters,
+        vec![ADAPTER_PROGRAM_ID],
+        "executors edit must not touch adapters"
+    );
+    assert_eq!(after.allowed_executors, set);
+}
+
+#[test]
+fn manage_route_too_many_executors_rejected() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+    let route = create_sample_route(&mut svm, &payer, &owner, mint, [23u8; 32]);
+
+    let set: Vec<_> = (0..=MAX_EXECUTORS).map(|_| Pubkey::new_unique()).collect();
+    let ix = manage_route_ix(&owner.pubkey(), &route, mr_executors(set), &[]);
+    let err = send_ix(&mut svm, ix, &payer, &[&owner])
+        .expect_err("exceeding MAX_EXECUTORS must be rejected")
+        .err;
+    assert_eq!(err, custom_error(SraError::TooManyExecutors));
+    assert!(fetch_route(&svm, &route).allowed_executors.is_empty());
+}
+
+#[test]
+fn manage_route_duplicate_executor_rejected() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+    let route = create_sample_route(&mut svm, &payer, &owner, mint, [24u8; 32]);
+
+    let dup = Pubkey::new_unique();
+    let ix = manage_route_ix(&owner.pubkey(), &route, mr_executors(vec![dup, dup]), &[]);
+    let err = send_ix(&mut svm, ix, &payer, &[&owner])
+        .expect_err("a duplicate executor must be rejected")
+        .err;
+    assert_eq!(err, custom_error(SraError::DuplicateExecutor));
+}
+
+#[test]
+fn manage_route_zero_executor_rejected() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+    let route = create_sample_route(&mut svm, &payer, &owner, mint, [25u8; 32]);
+
+    let ix = manage_route_ix(
+        &owner.pubkey(),
+        &route,
+        mr_executors(vec![Pubkey::default()]),
+        &[],
+    );
+    let err = send_ix(&mut svm, ix, &payer, &[&owner])
+        .expect_err("a zero executor pubkey must be rejected")
+        .err;
+    assert_eq!(err, custom_error(SraError::InvalidExecutor));
+}
+
+// --------------------------------------------------------------------------
 // authorization
 // --------------------------------------------------------------------------
 
@@ -304,10 +458,15 @@ fn manage_route_emits_route_managed() {
 
     let extra = deploy_extra_adapter(&mut svm);
     let new_set = vec![ADAPTER_PROGRAM_ID, extra];
+    let exec_set = vec![Pubkey::new_unique()];
     let ix = manage_route_ix(
         &owner.pubkey(),
         &route,
-        mr_params(Some(true), Some(new_set.clone())),
+        ManageRouteParams {
+            pause: Some(true),
+            adapters: Some(new_set.clone()),
+            executors: Some(exec_set.clone()),
+        },
         &new_set,
     );
     let meta = send_ix_with_meta(&mut svm, ix, &payer, &[&owner]).expect("manage_route succeeds");
@@ -319,6 +478,10 @@ fn manage_route_emits_route_managed() {
     assert_eq!(
         ev.allowed_adapters, new_set,
         "event carries the post-write adapter list"
+    );
+    assert_eq!(
+        ev.allowed_executors, exec_set,
+        "event carries the post-write executor list"
     );
     assert!(ev.paused, "event carries the post-write paused flag");
 }
