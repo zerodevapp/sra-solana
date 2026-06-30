@@ -69,7 +69,7 @@ pub enum SraError {
     #[msg("bytes32 value cannot be narrowed to a 20-byte EVM address")]
     InvalidEvmAddress,
 
-    // -- Source: paired instruction attestation (appended to keep prior codes stable) --
+    // -- Source: paired instruction attestation --
     #[msg("Expected neighboring paired instruction is missing")]
     MissingPairedInstruction,
 
@@ -99,7 +99,7 @@ pub enum SraError {
     #[msg("Pending admin must be non-default")]
     InvalidPendingAdmin,
 
-    // -- Source: protocol fee collection (appended to keep prior codes stable) --
+    // -- Source: protocol fee collection --
     #[msg("Attested protocol fee does not match the resolved fee")]
     FeeMismatch,
 
@@ -108,14 +108,14 @@ pub enum SraError {
 
     #[msg("Input amount must be greater than zero")]
     ZeroInputAmount,
-    // -- Source: install/route field validation (appended to keep prior codes stable) --
+    // -- Source: install/route field validation --
     #[msg("Routing field is zero or routes to the local Solana chain")]
     InvalidRouteField,
 
     #[msg("output_amount exceeds the u128 maximum (upper 16 bytes must be zero)")]
     OutputAmountOverflow,
 
-    // -- Destination: route creation (appended to keep prior codes stable) --
+    // -- Destination: route creation --
     #[msg("Supplied route_config_hash does not match the recomputed route config")]
     InvalidRouteConfig,
 
@@ -131,15 +131,15 @@ pub enum SraError {
     #[msg("Adapter already present in the allowlist")]
     DuplicateAdapter,
 
-    // -- Destination: fill finalization (appended to keep prior codes stable) --
+    // -- Destination: fill finalization --
     #[msg("Route is paused")]
     RoutePaused,
 
-    // -- Destination: fund recovery (appended to keep prior codes stable) --
+    // -- Destination: fund recovery --
     #[msg("No funds available to recover")]
     NothingToRecover,
 
-    // -- Destination: action execution (appended to keep prior codes stable) --
+    // -- Destination: action execution --
     #[msg("Supplied action config does not match the route's committed action config hash")]
     ActionConfigHashMismatch,
 
@@ -149,7 +149,7 @@ pub enum SraError {
     #[msg("Action variant is not executable by this program")]
     UnsupportedAction,
 
-    // -- Destination: verified-CPI engine (appended to keep prior codes stable) --
+    // -- Destination: verified-CPI engine --
     #[msg("Verified-CPI program is not the pinned program or is not a deployed executable")]
     ProgramNotPinned,
 
@@ -174,7 +174,7 @@ pub enum SraError {
     #[msg("Output mint is permissioned (permanent-delegate / pausable / default-frozen) and the action did not opt in")]
     PermissionedOutputNotAllowed,
 
-    // -- Destination: executor allowlist (appended to keep prior codes stable) --
+    // -- Destination: executor allowlist --
     #[msg("Caller is not in the route's allowed_executors list")]
     ExecutorNotAllowed,
 
