@@ -10,8 +10,8 @@
 //! 4. Require `post − pre ≥ min_out` on the pinned output, fail-closed.
 //! 5. Sweep the scratch back to the vault; it must end empty.
 //!
-//! `min_out` comes from an ed25519 signed quote bound to a per-fill/per-action
-//! context hash (a port of the EVM signed-pair resolver; ed25519, not secp256k1).
+//! `min_out` comes from an ed25519 signed quote bound to a per-fill aggregate
+//! context (a port of the EVM signed-pair resolver; ed25519, not secp256k1).
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
@@ -26,7 +26,7 @@ use anchor_spl::token_2022::spl_token_2022::state::{
 };
 
 use sra_common::errors::SraError;
-use sra_common::quote::SIGNED_QUOTE_MESSAGE_LEN;
+use sra_common::quote::AGGREGATE_QUOTE_MESSAGE_LEN;
 use sra_common::types::{AccountTemplate, FixedRole, SlotRole};
 
 use crate::utils::adapter::is_program_owner;
@@ -375,22 +375,19 @@ fn mint_data_is_permissioned(data: &[u8]) -> Result<bool> {
 // Signed-quote resolution (ed25519)
 // ---------------------------------------------------------------------------
 
-/// Confirm the transaction carries an authorized, unexpired signed quote whose
-/// bytes equal `expected_message`. Solana verifies the ed25519 precompile over
-/// the whole transaction at load, before any instruction runs — so a matching
-/// ed25519 instruction *anywhere* in the tx is already verified, and the scan is
-/// position-independent by design (restricting it to earlier indices would only
-/// reject valid orderings, not add safety). This just locates that verification
-/// and checks the signer is the route-committed `quoter` over our message.
-pub(crate) fn verify_signed_quote(
+/// Confirm the transaction carries one authorized, unexpired aggregate quote whose
+/// 32-byte message equals `expected_root` (reconstructed from the planned per-action
+/// tuples). The ed25519 precompile verifies the signature transaction-wide before
+/// any instruction runs, so a matching self-contained record signed by `quoter`
+/// proves the quoter signed the whole batch. Position-independent by design.
+pub(crate) fn verify_aggregate_quote(
     instructions_sysvar: &AccountInfo,
     quoter: &Pubkey,
-    expected_message: &[u8; SIGNED_QUOTE_MESSAGE_LEN],
+    expected_root: &[u8; AGGREGATE_QUOTE_MESSAGE_LEN],
     expiry: i64,
     now: i64,
 ) -> Result<()> {
     require!(now <= expiry, SraError::PriceQuoteExpired);
-
     for index in 0..MAX_INSTRUCTION_SCAN {
         let ix = match ix_sysvar::load_instruction_at_checked(index, instructions_sysvar) {
             Ok(ix) => ix,
@@ -400,7 +397,7 @@ pub(crate) fn verify_signed_quote(
             continue;
         }
         if let Some((signer, message)) = parse_ed25519_self_contained(&ix.data) {
-            if signer == *quoter && message == expected_message.as_slice() {
+            if signer == *quoter && message == expected_root.as_slice() {
                 return Ok(());
             }
         }
