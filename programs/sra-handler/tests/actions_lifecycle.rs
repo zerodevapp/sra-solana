@@ -170,14 +170,7 @@ fn lifecycle_finalize_execute_fail_retry_fail_recover() {
     let missing = derive_ata(&recipient, &mint);
     send_ix(
         &mut svm,
-        execute_actions_ix(
-            &payer.pubkey(),
-            &f.route,
-            f.fill_id,
-            &mint,
-            &[missing],
-            0,
-        ),
+        execute_actions_ix(&payer.pubkey(), &f.route, f.fill_id, &mint, &[missing], 0),
         &payer,
         &[],
     )
@@ -192,14 +185,7 @@ fn lifecycle_finalize_execute_fail_retry_fail_recover() {
     // Finalized); the only forward op is retry_actions (or recover_funds).
     let reexec = send_ix_expect_err(
         &mut svm,
-        execute_actions_ix(
-            &payer.pubkey(),
-            &f.route,
-            f.fill_id,
-            &mint,
-            &[missing],
-            0,
-        ),
+        execute_actions_ix(&payer.pubkey(), &f.route, f.fill_id, &mint, &[missing], 0),
         &payer,
         &[],
         "execute_actions on an ActionsFailed receipt must reject",
@@ -213,14 +199,7 @@ fn lifecycle_finalize_execute_fail_retry_fail_recover() {
     // retry while the ATA is still missing -> stays ActionsFailed (retryable).
     send_ix(
         &mut svm,
-        retry_actions_ix(
-            &owner.pubkey(),
-            &f.route,
-            f.fill_id,
-            &mint,
-            &[missing],
-            0,
-        ),
+        retry_actions_ix(&owner.pubkey(), &f.route, f.fill_id, &mint, &[missing], 0),
         &payer,
         &[&owner],
     )
@@ -295,14 +274,7 @@ fn lifecycle_finalize_execute_fail_retry_succeed_terminal() {
     let missing = derive_ata(&recipient, &mint);
     send_ix(
         &mut svm,
-        execute_actions_ix(
-            &payer.pubkey(),
-            &f.route,
-            f.fill_id,
-            &mint,
-            &[missing],
-            0,
-        ),
+        execute_actions_ix(&payer.pubkey(), &f.route, f.fill_id, &mint, &[missing], 0),
         &payer,
         &[],
     )
@@ -531,14 +503,7 @@ fn lifecycle_empty_action_config_actions_succeeded_immediately() {
     // create-route time. (The recipient ATA slot is irrelevant here — execute/retry
     // reject on the status gate before touching remaining accounts.)
     let owner_ata = create_ata(&mut svm, &payer, &owner.pubkey(), &mint);
-    assert_all_ops_rejected(
-        &mut svm,
-        &payer,
-        &owner,
-        &f,
-        mint,
-        (owner_ata, owner_ata),
-    );
+    assert_all_ops_rejected(&mut svm, &payer, &owner, &f, mint, (owner_ata, owner_ata));
     assert_eq!(fetch_token_balance(&svm, &f.execution_vault), AMOUNT);
 }
 

@@ -1,9 +1,7 @@
 use anchor_lang::prelude::*;
 use sra_common::{
     source_deposit::PrepareParams,
-    types::{
-        CreateRouteParams, ManageRouteParams, SourceHandlerData, VerifiedCpiRuntime,
-    },
+    types::{CreateRouteParams, ManageRouteParams, SourceHandlerData, VerifiedCpiRuntime},
 };
 
 pub mod events;

@@ -151,14 +151,7 @@ fn execute_actions_multiple_all_succeed() {
     let a1 = create_ata(&mut svm, &s.payer, &r1, &s.mint);
     let a2 = create_ata(&mut svm, &s.payer, &r2, &s.mint);
 
-    let ix = execute_actions_ix(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        &s.mint,
-        &[a1, a2],
-        0,
-    );
+    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[a1, a2], 0);
     send_ix(&mut svm, ix, &s.payer, &[]).expect("execute_actions should succeed");
 
     // 60/40 of the same start-of-run snapshot drains the vault exactly.
@@ -198,14 +191,7 @@ fn execute_actions_partial_bps_sum_leaves_dust_and_succeeds() {
     let a1 = create_ata(&mut svm, &s.payer, &r1, &s.mint);
     let a2 = create_ata(&mut svm, &s.payer, &r2, &s.mint);
 
-    let ix = execute_actions_ix(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        &s.mint,
-        &[a1, a2],
-        0,
-    );
+    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[a1, a2], 0);
     send_ix(&mut svm, ix, &s.payer, &[]).expect("under-100% drain succeeds");
 
     assert_eq!(fetch_token_balance(&svm, &a1), 2_400_000);
@@ -485,14 +471,7 @@ fn execute_actions_verified_cpi_action_unsupported() {
     let mut svm = setup_svm();
     let s = stage(&mut svm, vec![verified_cpi()], AMOUNT);
 
-    let ix = execute_actions_ix(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        &s.mint,
-        &[],
-        0,
-    );
+    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[], 0);
     let err = send_ix_expect_err(
         &mut svm,
         ix,

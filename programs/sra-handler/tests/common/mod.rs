@@ -31,9 +31,9 @@ use sra_common::{
     errors::SraError,
     instruction_data::encode_anchor_instruction_data,
     seeds::{
-        route_config_hash, SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK,
-        SEED_ASSET_FEE_TIER, SEED_EXECUTION, SEED_FEE_CONFIG, SEED_FILL_RECEIPT, SEED_MINT_NONCE,
-        SEED_PROTOCOL_FEE, SEED_SRA, SEED_SRA_ROUTE, SEED_VERIFIED_FILL,
+        route_config_hash, SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_ASSET_FEE_TIER,
+        SEED_EXECUTION, SEED_FEE_CONFIG, SEED_FILL_RECEIPT, SEED_MINT_NONCE, SEED_PROTOCOL_FEE,
+        SEED_SRA, SEED_SRA_ROUTE, SEED_VERIFIED_FILL,
     },
     source_deposit::{AcrossDepositParams, PrepareParams},
     types::{
@@ -2089,15 +2089,7 @@ pub fn retry_actions_ix(
         .iter()
         .map(|ata| AccountMeta::new(*ata, false))
         .collect();
-    retry_actions_ix_full(
-        owner,
-        route,
-        fill_id,
-        vec![],
-        mint,
-        remaining,
-        quote_expiry,
-    )
+    retry_actions_ix_full(owner, route, fill_id, vec![], mint, remaining, quote_expiry)
 }
 
 /// Full `retry_actions` builder (mirrors `execute_actions_ix_full` + owner signer).

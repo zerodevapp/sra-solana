@@ -180,14 +180,7 @@ fn action_drain_at_full_bps_drains_vault_without_overflow() {
 
     send_ix(
         &mut svm,
-        execute_actions_ix(
-            &payer.pubkey(),
-            &fr.route,
-            fr.fill_id,
-            &mint,
-            &atas,
-            0,
-        ),
+        execute_actions_ix(&payer.pubkey(), &fr.route, fr.fill_id, &mint, &atas, 0),
         &payer,
         &[],
     )
@@ -890,7 +883,11 @@ fn verified_cpi_hostile_account_set_bounded_by_input_bps() {
 
     let expiry = now(&svm) + 3_600;
     let out_amount = 1_000_000;
-    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(input_amount, out_amount)]);
+    let ed_ix = s.agg_quote_ix(
+        &quoter,
+        expiry,
+        &[s.quoted_action(input_amount, out_amount)],
+    );
     // The inner swap is told to pull the full scratch balance — the maximum a
     // hostile account set could attempt.
     let exec = execute_actions_ix_full(

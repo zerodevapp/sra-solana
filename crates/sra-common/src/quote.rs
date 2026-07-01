@@ -55,8 +55,12 @@ pub fn aggregate_quote_root(
 mod tests {
     use super::*;
 
-    fn route() -> Pubkey { Pubkey::new_from_array([1u8; 32]) }
-    fn fill_id() -> [u8; 32] { [2u8; 32] }
+    fn route() -> Pubkey {
+        Pubkey::new_from_array([1u8; 32])
+    }
+    fn fill_id() -> [u8; 32] {
+        [2u8; 32]
+    }
     fn qa(i: u8, amt: u64, min: u64) -> QuotedAction {
         QuotedAction {
             input_mint: Pubkey::new_from_array([i; 32]),
@@ -79,7 +83,10 @@ mod tests {
     fn root_binds_route_fill_expiry() {
         let a = [qa(1, 1000, 900)];
         let base = aggregate_quote_root(&route(), &fill_id(), 1, &a);
-        assert_ne!(base, aggregate_quote_root(&Pubkey::new_from_array([9u8; 32]), &fill_id(), 1, &a));
+        assert_ne!(
+            base,
+            aggregate_quote_root(&Pubkey::new_from_array([9u8; 32]), &fill_id(), 1, &a)
+        );
         assert_ne!(base, aggregate_quote_root(&route(), &[3u8; 32], 1, &a));
         assert_ne!(base, aggregate_quote_root(&route(), &fill_id(), 2, &a));
     }

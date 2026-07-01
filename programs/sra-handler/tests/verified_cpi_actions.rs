@@ -1004,8 +1004,18 @@ fn stage_two(
     let output_mint_b = create_mint(svm, &payer, &payer.pubkey(), DECIMALS);
 
     let action_config = vec![
-        verified_cpi(input_mint, output_mint_a, input_bps_a, signed(quoter.pubkey())),
-        verified_cpi(input_mint, output_mint_b, input_bps_b, signed(quoter.pubkey())),
+        verified_cpi(
+            input_mint,
+            output_mint_a,
+            input_bps_a,
+            signed(quoter.pubkey()),
+        ),
+        verified_cpi(
+            input_mint,
+            output_mint_b,
+            input_bps_b,
+            signed(quoter.pubkey()),
+        ),
     ];
     let salt = [3u8; 32];
 
@@ -1051,9 +1061,23 @@ fn stage_two(
         Pubkey::find_program_address(&[mock_swap::POOL_AUTHORITY_SEED], &mock_swap::ID);
     let pool_input = create_ata(svm, &payer, &pool_authority, &input_mint);
     let pool_output_a = create_ata(svm, &payer, &pool_authority, &output_mint_a);
-    mint_to(svm, &payer, &payer, &output_mint_a, &pool_output_a, POOL_LIQUIDITY);
+    mint_to(
+        svm,
+        &payer,
+        &payer,
+        &output_mint_a,
+        &pool_output_a,
+        POOL_LIQUIDITY,
+    );
     let pool_output_b = create_ata(svm, &payer, &pool_authority, &output_mint_b);
-    mint_to(svm, &payer, &payer, &output_mint_b, &pool_output_b, POOL_LIQUIDITY);
+    mint_to(
+        svm,
+        &payer,
+        &payer,
+        &output_mint_b,
+        &pool_output_b,
+        POOL_LIQUIDITY,
+    );
 
     let fill_receipt =
         seed_fill_receipt_with_status(svm, &route, FILL_ID, VAULT, ExecutionStatus::Finalized);

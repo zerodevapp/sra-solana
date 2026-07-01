@@ -200,14 +200,7 @@ fn retry_actions_still_failing_stays_actions_failed() {
     // The recipient ATA is still missing — the underlying problem is unfixed.
     let missing = derive_ata(&recipient, &s.mint);
 
-    let retry = retry_actions_ix(
-        &s.owner.pubkey(),
-        &s.route,
-        FILL_ID,
-        &s.mint,
-        &[missing],
-        0,
-    );
+    let retry = retry_actions_ix(&s.owner.pubkey(), &s.route, FILL_ID, &s.mint, &[missing], 0);
     // Returns Ok; the status stays ActionsFailed and can be retried again later.
     send_ix(&mut svm, retry, &s.payer, &[&s.owner])
         .expect("still-missing ATA -> stays ActionsFailed");
