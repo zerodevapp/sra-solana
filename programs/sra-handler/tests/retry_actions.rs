@@ -10,7 +10,7 @@ use common::*;
 use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey, signature::Keypair, signer::Signer};
 use sra_common::{
     errors::SraError,
-    quote::{action_context_hash, signed_quote_message},
+    quote::QuotedAction,
     types::{CreateRouteParams, ExecutionStatus, ManageRouteParams, MinOut, SolanaAction},
 };
 
@@ -28,7 +28,6 @@ struct Staged {
     route: Pubkey,
     execution_vault: Pubkey,
     fill_receipt: Pubkey,
-    action_config: Vec<SolanaAction>,
 }
 
 /// Create a route, fund its execution vault, and seed a `FillReceipt` in
@@ -76,7 +75,6 @@ fn stage(
         route,
         execution_vault,
         fill_receipt,
-        action_config,
     }
 }
 
@@ -98,14 +96,7 @@ fn retry_actions_after_fix_succeeds() {
 
     // First execution soft-fails: the recipient ATA does not exist yet.
     let missing = derive_ata(&recipient, &s.mint);
-    let exec = execute_actions_ix(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        s.action_config.clone(),
-        &s.mint,
-        &[missing],
-    );
+    let exec = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[missing], 0);
     send_ix(&mut svm, exec, &s.payer, &[]).expect("missing ATA -> ActionsFailed");
     assert_eq!(
         status(&svm, &s.fill_receipt),
@@ -118,9 +109,9 @@ fn retry_actions_after_fix_succeeds() {
         &s.owner.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
+        0,
     );
     send_ix(&mut svm, retry, &s.payer, &[&s.owner]).expect("retry after fix succeeds");
 
@@ -148,9 +139,9 @@ fn retry_actions_emits_actions_retried() {
         &s.owner.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
+        0,
     );
     let meta = send_ix_with_meta(&mut svm, retry, &s.payer, &[&s.owner]).expect("retry succeeds");
     let event: sra_handler::events::ActionsRetried =
@@ -175,9 +166,9 @@ fn retry_actions_does_not_close_fill_receipt() {
         &s.owner.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
+        0,
     );
     send_ix(&mut svm, retry, &s.payer, &[&s.owner]).expect("retry succeeds");
 
@@ -213,9 +204,9 @@ fn retry_actions_still_failing_stays_actions_failed() {
         &s.owner.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[missing],
+        0,
     );
     // Returns Ok; the status stays ActionsFailed and can be retried again later.
     send_ix(&mut svm, retry, &s.payer, &[&s.owner])
@@ -255,9 +246,9 @@ fn retry_actions_non_actions_failed_status_rejected() {
             &s.owner.pubkey(),
             &s.route,
             FILL_ID,
-            s.action_config.clone(),
             &s.mint,
             &[recipient_ata],
+            0,
         );
         let err = send_ix_expect_err(
             &mut svm,
@@ -291,9 +282,9 @@ fn retry_actions_non_owner_rejected() {
         &attacker.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
+        0,
     );
     let err = send_ix_expect_err(
         &mut svm,
@@ -345,9 +336,9 @@ fn retry_actions_paused_route_rejected() {
         &s.owner.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
+        0,
     );
     let err = send_ix_expect_err(
         &mut svm,
@@ -385,9 +376,9 @@ fn retry_actions_spl_transfer_substitution_rejected() {
         &s.owner.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[wrong_ata],
+        0,
     );
     let err = send_ix_expect_err(
         &mut svm,
@@ -435,7 +426,6 @@ struct VerifiedStaged {
     pool_authority: Pubkey,
     pool_input: Pubkey,
     pool_output: Pubkey,
-    action_config: Vec<SolanaAction>,
 }
 
 impl VerifiedStaged {
@@ -457,17 +447,24 @@ impl VerifiedStaged {
         ]
     }
 
-    fn quote_message(&self, input_amount: u64, min_amount_out: u64, expiry: i64) -> Vec<u8> {
-        let context_hash = action_context_hash(&self.route, &FILL_ID, 0);
-        signed_quote_message(
-            &context_hash,
-            &self.input_mint,
-            &self.output_mint,
+    /// The signed-quote tuple for the fill's single VerifiedCpi action.
+    fn quoted_action(&self, input_amount: u64, min_out: u64) -> QuotedAction {
+        QuotedAction {
+            input_mint: self.input_mint,
+            output_mint: self.output_mint,
             input_amount,
-            min_amount_out,
-            expiry,
-        )
-        .to_vec()
+            min_out,
+        }
+    }
+
+    /// The aggregate signed-quote instruction bound to this route/fill/expiry.
+    fn agg_quote_ix(
+        &self,
+        quoter: &Keypair,
+        expiry: i64,
+        actions: &[QuotedAction],
+    ) -> solana_sdk::instruction::Instruction {
+        aggregate_quote_ix(quoter, &self.route, &FILL_ID, expiry, actions)
     }
 }
 
@@ -538,7 +535,6 @@ fn stage_verified(svm: &mut litesvm::LiteSVM, quoter: &Keypair) -> VerifiedStage
         pool_authority,
         pool_input,
         pool_output,
-        action_config,
     }
 }
 
@@ -551,15 +547,15 @@ fn retry_actions_verified_cpi_reuses_engine() {
     let out_amount = 3_000_000;
     let min_out = 2_900_000;
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &v.quote_message(VAULT, min_out, expiry));
+    let ed_ix = v.agg_quote_ix(&quoter, expiry, &[v.quoted_action(VAULT, min_out)]);
     let retry = retry_actions_ix_full(
         &v.owner.pubkey(),
         &v.route,
         FILL_ID,
-        v.action_config.clone(),
-        vec![runtime(swap_data(VAULT, out_amount), min_out, expiry)],
+        vec![runtime(swap_data(VAULT, out_amount), min_out)],
         &v.input_mint,
         v.verified_metas(),
+        expiry,
     );
     send_instructions(&mut svm, &[ed_ix, retry], &v.payer, &[&v.owner])
         .expect("VerifiedCpi retry settles through the shared engine");

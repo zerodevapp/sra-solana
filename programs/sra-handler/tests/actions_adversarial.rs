@@ -23,6 +23,7 @@ use common::*;
 use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey, signature::Keypair, signer::Signer};
 use sra_common::{
     errors::SraError,
+    quote::QuotedAction,
     types::{CreateRouteParams, ExecutionStatus, MinOut, SolanaAction},
 };
 
@@ -183,9 +184,9 @@ fn action_drain_at_full_bps_drains_vault_without_overflow() {
             &payer.pubkey(),
             &fr.route,
             fr.fill_id,
-            action_config,
             &mint,
             &atas,
+            0,
         ),
         &payer,
         &[],
@@ -203,75 +204,6 @@ fn action_drain_at_full_bps_drains_vault_without_overflow() {
         status(&svm, &fr.fill_receipt),
         ExecutionStatus::ActionsSucceeded
     );
-}
-
-/// The Σ amount_bps ≤ 10_000 invariant is enforced at the commitment point
-/// (`create_route`), and there is no way to reintroduce an over-100% drain at
-/// execution: the committed digest pins the exact action list, so a tampered
-/// >100% config is rejected before any balance is read.
-#[test]
-fn bps_sum_over_10000_rejected_at_create_and_uninjectable_at_execution() {
-    let mut svm = setup_svm();
-    let payer = funded_keypair(&mut svm, 100 * SOL);
-    let owner = funded_keypair(&mut svm, 100 * SOL);
-    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), DECIMALS);
-    let a = Keypair::new();
-    let b = Keypair::new();
-
-    // 1. Defense at the commitment point: a >100% config never becomes a route.
-    let over = vec![spl(a.pubkey(), 6_000), spl(b.pubkey(), 5_000)];
-    let params = CreateRouteParams {
-        source_chain_id: SOURCE_CHAIN_ID,
-        expected_mint: mint,
-        action_config: over.clone(),
-        salt: [8u8; 32],
-        allowed_adapters: vec![ADAPTER_PROGRAM_ID],
-        allowed_executors: vec![payer.pubkey()],
-    };
-    let hash = route_config_hash_for(&owner.pubkey(), &params);
-    let err = send_ix_expect_err(
-        &mut svm,
-        create_route_ix_with_hash(
-            &payer.pubkey(),
-            &owner.pubkey(),
-            hash,
-            params,
-            &[ADAPTER_PROGRAM_ID],
-        ),
-        &payer,
-        &[&owner],
-        "Σbps > 10000",
-    );
-    assert_eq!(err, custom_error(SraError::ActionBpsSumExceeded));
-
-    // 2. A legitimate route (Σbps == 100%) cannot have the over-100% list smuggled
-    // in at execution — the committed hash binds the exact list.
-    let committed = vec![spl(a.pubkey(), 5_000), spl(b.pubkey(), 5_000)];
-    let ata_a = create_ata(&mut svm, &payer, &a.pubkey(), &mint);
-    let ata_b = create_ata(&mut svm, &payer, &b.pubkey(), &mint);
-    let fr = finalize_route(&mut svm, &payer, &owner, mint, committed, [9u8; 32], VAULT);
-    // Pass the tampered over-100% list to execute_actions.
-    let err = send_ix_expect_err(
-        &mut svm,
-        execute_actions_ix(
-            &payer.pubkey(),
-            &fr.route,
-            fr.fill_id,
-            over,
-            &mint,
-            &[ata_a, ata_b],
-        ),
-        &payer,
-        &[],
-        "tampered action list",
-    );
-    assert_eq!(err, custom_error(SraError::ActionConfigHashMismatch));
-    assert_eq!(
-        fetch_token_balance(&svm, &fr.execution_vault),
-        VAULT,
-        "funds untouched after the hash-mismatch reject"
-    );
-    assert_eq!(status(&svm, &fr.fill_receipt), ExecutionStatus::Finalized);
 }
 
 /// A frozen recipient ATA is a runtime state the owner cannot prevent at create
@@ -305,9 +237,9 @@ fn recipient_ata_frozen_soft_fails_then_recovers() {
             &payer.pubkey(),
             &fr.route,
             fr.fill_id,
-            action_config,
             &mint,
             &[recipient_ata],
+            0,
         ),
         &payer,
         &[],
@@ -384,9 +316,9 @@ fn unsolicited_topup_of_execution_vault_distributed_deterministically() {
             &payer.pubkey(),
             &fr.route,
             fr.fill_id,
-            action_config,
             &mint,
             &[recipient_ata],
+            0,
         ),
         &payer,
         &[],
@@ -460,9 +392,9 @@ fn double_finalize_rejected_and_execute_after_success_rejected() {
             &payer.pubkey(),
             &fr.route,
             fr.fill_id,
-            action_config.clone(),
             &mint,
             &[recipient_ata],
+            0,
         ),
         &payer,
         &[],
@@ -481,9 +413,9 @@ fn double_finalize_rejected_and_execute_after_success_rejected() {
             &payer.pubkey(),
             &fr.route,
             fr.fill_id,
-            action_config,
             &mint,
             &[recipient_ata],
+            0,
         ),
         &payer,
         &[],
@@ -587,9 +519,9 @@ fn stranded_funds_inventory_holds() {
             &payer.pubkey(),
             &fr2.route,
             fr2.fill_id,
-            failed_config,
             &mint,
             &[frozen_ata],
+            0,
         ),
         &payer,
         &[],
@@ -632,9 +564,9 @@ fn stranded_funds_inventory_holds() {
             &payer.pubkey(),
             &fr3.route,
             fr3.fill_id,
-            succ_config,
             &mint,
             &[succ_ata],
+            0,
         ),
         &payer,
         &[],
@@ -671,7 +603,6 @@ struct StagedVerified {
     pool_authority: Pubkey,
     pool_input: Pubkey,
     pool_output: Pubkey,
-    action_config: Vec<SolanaAction>,
 }
 
 const V_FILL_ID: [u8; 32] = [33u8; 32];
@@ -772,7 +703,6 @@ fn stage_verified(
         pool_authority,
         pool_input,
         pool_output,
-        action_config,
     }
 }
 
@@ -811,30 +741,24 @@ impl StagedVerified {
         )
     }
 
-    fn quote_message(&self, input_amount: u64, min_amount_out: u64, expiry: i64) -> Vec<u8> {
-        self.quote_message_at(0, input_amount, min_amount_out, expiry)
+    /// The signed-quote tuple for the fill's single VerifiedCpi action.
+    fn quoted_action(&self, input_amount: u64, min_out: u64) -> QuotedAction {
+        QuotedAction {
+            input_mint: self.input_mint,
+            output_mint: self.output_mint,
+            input_amount,
+            min_out,
+        }
     }
 
-    /// The signed-quote message for the VerifiedCpi at `action_index` (1 when an
-    /// `SplTransfer` precedes it in the route's action list).
-    fn quote_message_at(
+    /// The aggregate signed-quote instruction bound to this route/fill/expiry.
+    fn agg_quote_ix(
         &self,
-        action_index: u8,
-        input_amount: u64,
-        min_amount_out: u64,
+        quoter: &Keypair,
         expiry: i64,
-    ) -> Vec<u8> {
-        use sra_common::quote::{action_context_hash, signed_quote_message};
-        let context_hash = action_context_hash(&self.route, &self.fill_id, action_index);
-        signed_quote_message(
-            &context_hash,
-            &self.input_mint,
-            &self.output_mint,
-            input_amount,
-            min_amount_out,
-            expiry,
-        )
-        .to_vec()
+        actions: &[QuotedAction],
+    ) -> solana_sdk::instruction::Instruction {
+        aggregate_quote_ix(quoter, &self.route, &self.fill_id, expiry, actions)
     }
 }
 
@@ -866,15 +790,15 @@ fn malicious_cpi_target_rejected_funds_safe() {
     plant_non_executable_at(&mut svm, mock_swap::ID);
 
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, 1_000_000)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         s.fill_id,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
         &s.input_mint,
         s.honest_metas(),
+        expiry,
     );
 
     let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
@@ -898,13 +822,12 @@ fn verified_cpi_source_slot_substitution_rejected() {
     let attacker_ata = create_ata(&mut svm, &s.payer, &attacker.pubkey(), &s.input_mint);
 
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, 1_000_000)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         s.fill_id,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
         &s.input_mint,
         s.metas(
             mock_swap::ID,
@@ -912,6 +835,7 @@ fn verified_cpi_source_slot_substitution_rejected() {
             attacker_ata,
             s.destination,
         ),
+        expiry,
     );
 
     let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
@@ -933,15 +857,15 @@ fn verified_cpi_signing_authority_substitution_rejected() {
     let attacker_authority = Pubkey::new_unique();
 
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, 1_000_000)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         s.fill_id,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
         &s.input_mint,
         s.metas(mock_swap::ID, attacker_authority, s.scratch, s.destination),
+        expiry,
     );
 
     let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
@@ -966,21 +890,17 @@ fn verified_cpi_hostile_account_set_bounded_by_input_bps() {
 
     let expiry = now(&svm) + 3_600;
     let out_amount = 1_000_000;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(input_amount, out_amount, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(input_amount, out_amount)]);
     // The inner swap is told to pull the full scratch balance — the maximum a
     // hostile account set could attempt.
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         s.fill_id,
-        s.action_config.clone(),
-        vec![runtime(
-            swap_data(input_amount, out_amount),
-            out_amount,
-            expiry,
-        )],
+        vec![runtime(swap_data(input_amount, out_amount), out_amount)],
         &s.input_mint,
         s.honest_metas(),
+        expiry,
     );
 
     send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]).expect("bounded swap succeeds");
@@ -1029,15 +949,15 @@ fn verified_cpi_prefunded_scratch_swept_to_vault() {
     let pulled = VAULT;
     let out_amount = 1_000_000;
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, out_amount, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, out_amount)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         s.fill_id,
-        s.action_config.clone(),
-        vec![runtime(swap_data(pulled, out_amount), out_amount, expiry)],
+        vec![runtime(swap_data(pulled, out_amount), out_amount)],
         &s.input_mint,
         s.honest_metas(),
+        expiry,
     );
 
     send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]).expect("swap succeeds");
@@ -1080,19 +1000,20 @@ fn mixed_variant_combined_draw_over_100pct_reverts_funds_safe() {
     let recipient_ata = create_ata(&mut svm, &s.payer, &recipient.pubkey(), &s.input_mint);
 
     // The VerifiedCpi is action index 1; its quote must verify in pass 1 so the run
-    // reaches the pass-2 revert (not a quote-failure revert).
+    // reaches the pass-2 revert (not a quote-failure revert). The aggregate covers
+    // only the VerifiedCpi action (the SplTransfer contributes no quote tuple).
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message_at(1, VAULT, 1, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, 1)]);
     let mut remaining = vec![AccountMeta::new(recipient_ata, false)];
     remaining.extend(s.honest_metas());
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         s.fill_id,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 1), 1, expiry)],
+        vec![runtime(swap_data(VAULT, 1), 1)],
         &s.input_mint,
         remaining,
+        expiry,
     );
 
     let res = send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]);

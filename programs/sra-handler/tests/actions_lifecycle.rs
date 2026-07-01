@@ -34,7 +34,7 @@ use common::*;
 use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey, signature::Keypair, signer::Signer};
 use sra_common::{
     errors::SraError,
-    quote::{action_context_hash, signed_quote_message},
+    quote::QuotedAction,
     types::{CreateRouteParams, ExecutionStatus, MinOut, SolanaAction},
 };
 
@@ -174,9 +174,9 @@ fn lifecycle_finalize_execute_fail_retry_fail_recover() {
             &payer.pubkey(),
             &f.route,
             f.fill_id,
-            cfg.clone(),
             &mint,
             &[missing],
+            0,
         ),
         &payer,
         &[],
@@ -196,9 +196,9 @@ fn lifecycle_finalize_execute_fail_retry_fail_recover() {
             &payer.pubkey(),
             &f.route,
             f.fill_id,
-            cfg.clone(),
             &mint,
             &[missing],
+            0,
         ),
         &payer,
         &[],
@@ -217,9 +217,9 @@ fn lifecycle_finalize_execute_fail_retry_fail_recover() {
             &owner.pubkey(),
             &f.route,
             f.fill_id,
-            cfg.clone(),
             &mint,
             &[missing],
+            0,
         ),
         &payer,
         &[&owner],
@@ -264,9 +264,9 @@ fn lifecycle_finalize_execute_succeed_terminal() {
             &payer.pubkey(),
             &f.route,
             f.fill_id,
-            cfg,
             &mint,
             &[recipient_ata],
+            0,
         ),
         &payer,
         &[],
@@ -299,9 +299,9 @@ fn lifecycle_finalize_execute_fail_retry_succeed_terminal() {
             &payer.pubkey(),
             &f.route,
             f.fill_id,
-            cfg.clone(),
             &mint,
             &[missing],
+            0,
         ),
         &payer,
         &[],
@@ -320,9 +320,9 @@ fn lifecycle_finalize_execute_fail_retry_succeed_terminal() {
             &owner.pubkey(),
             &f.route,
             f.fill_id,
-            cfg,
             &mint,
             &[recipient_ata],
+            0,
         ),
         &payer,
         &[&owner],
@@ -377,7 +377,6 @@ fn assert_all_ops_rejected(
     owner: &Keypair,
     f: &Finalized,
     mint: Pubkey,
-    cfg: &[SolanaAction],
     atas: (Pubkey, Pubkey),
 ) {
     let (recipient_ata, owner_ata) = atas;
@@ -391,9 +390,9 @@ fn assert_all_ops_rejected(
             &payer.pubkey(),
             &f.route,
             f.fill_id,
-            cfg.to_vec(),
             &mint,
             &[recipient_ata],
+            0,
         ),
         payer,
         &[],
@@ -407,9 +406,9 @@ fn assert_all_ops_rejected(
             &owner.pubkey(),
             &f.route,
             f.fill_id,
-            cfg.to_vec(),
             &mint,
             &[recipient_ata],
+            0,
         ),
         payer,
         &[owner],
@@ -457,9 +456,9 @@ fn lifecycle_terminal_states_reject_further_ops() {
             &payer.pubkey(),
             &fa.route,
             fa.fill_id,
-            cfg_a.clone(),
             &mint,
             &[recipient_a_ata],
+            0,
         ),
         &payer,
         &[],
@@ -475,7 +474,6 @@ fn lifecycle_terminal_states_reject_further_ops() {
         &owner,
         &fa,
         mint,
-        &cfg_a,
         (recipient_a_ata, owner_ata),
     );
 
@@ -498,7 +496,6 @@ fn lifecycle_terminal_states_reject_further_ops() {
         &owner,
         &fb,
         mint,
-        &cfg_b,
         (recipient_b_ata, owner_ata),
     );
 }
@@ -516,7 +513,7 @@ fn lifecycle_empty_action_config_actions_succeeded_immediately() {
 
     send_ix(
         &mut svm,
-        execute_actions_ix(&payer.pubkey(), &f.route, f.fill_id, vec![], &mint, &[]),
+        execute_actions_ix(&payer.pubkey(), &f.route, f.fill_id, &mint, &[], 0),
         &payer,
         &[],
     )
@@ -540,7 +537,6 @@ fn lifecycle_empty_action_config_actions_succeeded_immediately() {
         &owner,
         &f,
         mint,
-        &[],
         (owner_ata, owner_ata),
     );
     assert_eq!(fetch_token_balance(&svm, &f.execution_vault), AMOUNT);
@@ -580,7 +576,6 @@ struct VerifiedSetup {
     pool_authority: Pubkey,
     pool_input: Pubkey,
     pool_output: Pubkey,
-    action_config: Vec<SolanaAction>,
 }
 
 impl VerifiedSetup {
@@ -603,23 +598,24 @@ impl VerifiedSetup {
         ]
     }
 
-    fn quote_message(
-        &self,
-        action_index: u8,
-        input_amount: u64,
-        min_out: u64,
-        expiry: i64,
-    ) -> Vec<u8> {
-        let context_hash = action_context_hash(&self.f.route, &self.f.fill_id, action_index);
-        signed_quote_message(
-            &context_hash,
-            &self.input_mint,
-            &self.output_mint,
+    /// The signed-quote tuple for the fill's single VerifiedCpi action.
+    fn quoted_action(&self, input_amount: u64, min_out: u64) -> QuotedAction {
+        QuotedAction {
+            input_mint: self.input_mint,
+            output_mint: self.output_mint,
             input_amount,
             min_out,
-            expiry,
-        )
-        .to_vec()
+        }
+    }
+
+    /// The aggregate signed-quote instruction bound to this route/fill/expiry.
+    fn agg_quote_ix(
+        &self,
+        quoter: &Keypair,
+        expiry: i64,
+        actions: &[QuotedAction],
+    ) -> solana_sdk::instruction::Instruction {
+        aggregate_quote_ix(quoter, &self.f.route, &self.f.fill_id, expiry, actions)
     }
 }
 
@@ -678,7 +674,6 @@ fn stage_verified(
         pool_authority,
         pool_input,
         pool_output,
-        action_config,
     }
 }
 
@@ -692,15 +687,15 @@ fn lifecycle_finalize_verified_cpi_swap_succeed_terminal() {
     let out_amount = 3_000_000;
     let min_out = 2_900_000;
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &v.quote_message(0, AMOUNT, min_out, expiry));
+    let ed_ix = v.agg_quote_ix(&quoter, expiry, &[v.quoted_action(AMOUNT, min_out)]);
     let exec = execute_actions_ix_full(
         &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        v.action_config.clone(),
-        vec![runtime(swap_data(AMOUNT, out_amount), min_out, expiry)],
+        vec![runtime(swap_data(AMOUNT, out_amount), min_out)],
         &v.input_mint,
         v.verified_metas(v.destination),
+        expiry,
     );
     send_instructions(&mut svm, &[ed_ix, exec], &v.payer, &[]).expect("verified swap succeeds");
 
@@ -729,15 +724,15 @@ fn lifecycle_verified_cpi_below_min_out_reverts_then_reexecutes() {
     let expiry = now(&svm) + 3_600;
 
     // Quote demands 3_000_000 but the swap only delivers 2_000_000 -> hard revert.
-    let ed_short = ed25519_quote_ix(&quoter, &v.quote_message(0, AMOUNT, 3_000_000, expiry));
+    let ed_short = v.agg_quote_ix(&quoter, expiry, &[v.quoted_action(AMOUNT, 3_000_000)]);
     let exec_short = execute_actions_ix_full(
         &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        v.action_config.clone(),
-        vec![runtime(swap_data(AMOUNT, 2_000_000), 3_000_000, expiry)],
+        vec![runtime(swap_data(AMOUNT, 2_000_000), 3_000_000)],
         &v.input_mint,
         v.verified_metas(v.destination),
+        expiry,
     );
     let err = send_instructions_expect_err(&mut svm, &[ed_short, exec_short], &v.payer, &[]);
     // execute_actions sits at index 1 (the ed25519 quote is index 0).
@@ -755,15 +750,15 @@ fn lifecycle_verified_cpi_below_min_out_reverts_then_reexecutes() {
     // Re-execute with a quote the swap can satisfy.
     let out_amount = 3_000_000;
     let min_out = 2_900_000;
-    let ed_ok = ed25519_quote_ix(&quoter, &v.quote_message(0, AMOUNT, min_out, expiry));
+    let ed_ok = v.agg_quote_ix(&quoter, expiry, &[v.quoted_action(AMOUNT, min_out)]);
     let exec_ok = execute_actions_ix_full(
         &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        v.action_config.clone(),
-        vec![runtime(swap_data(AMOUNT, out_amount), min_out, expiry)],
+        vec![runtime(swap_data(AMOUNT, out_amount), min_out)],
         &v.input_mint,
         v.verified_metas(v.destination),
+        expiry,
     );
     send_instructions(&mut svm, &[ed_ok, exec_ok], &v.payer, &[]).expect("re-execution settles");
 
@@ -784,15 +779,15 @@ fn lifecycle_verified_cpi_missing_destination_soft_fail_retry_succeed() {
     let v = stage_verified(&mut svm, &quoter, false, [0x0A; 32]);
     let expiry = now(&svm) + 3_600;
 
-    let ed_ix = ed25519_quote_ix(&quoter, &v.quote_message(0, AMOUNT, 1_000_000, expiry));
+    let ed_ix = v.agg_quote_ix(&quoter, expiry, &[v.quoted_action(AMOUNT, 1_000_000)]);
     let exec = execute_actions_ix_full(
         &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        v.action_config.clone(),
-        vec![runtime(swap_data(AMOUNT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(AMOUNT, 1_000_000), 1_000_000)],
         &v.input_mint,
         v.verified_metas(v.destination),
+        expiry,
     );
     send_instructions(&mut svm, &[ed_ix, exec], &v.payer, &[])
         .expect("missing destination ATA -> ActionsFailed (soft)");
@@ -807,15 +802,15 @@ fn lifecycle_verified_cpi_missing_destination_soft_fail_retry_succeed() {
     let out_amount = 3_000_000;
     let min_out = 2_900_000;
     let expiry2 = now(&svm) + 3_600;
-    let ed_retry = ed25519_quote_ix(&quoter, &v.quote_message(0, AMOUNT, min_out, expiry2));
+    let ed_retry = v.agg_quote_ix(&quoter, expiry2, &[v.quoted_action(AMOUNT, min_out)]);
     let retry = retry_actions_ix_full(
         &v.owner.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        v.action_config.clone(),
-        vec![runtime(swap_data(AMOUNT, out_amount), min_out, expiry2)],
+        vec![runtime(swap_data(AMOUNT, out_amount), min_out)],
         &v.input_mint,
         v.verified_metas(v.destination),
+        expiry2,
     );
     send_instructions(&mut svm, &[ed_retry, retry], &v.payer, &[&v.owner])
         .expect("retry after creating the destination ATA -> ActionsSucceeded");
@@ -888,28 +883,24 @@ fn lifecycle_mixed_spl_transfer_and_verified_cpi_in_one_route() {
         pool_authority,
         pool_input,
         pool_output,
-        action_config: action_config.clone(),
     };
 
     let swap_input = AMOUNT * 7_000 / 10_000;
     let out_amount = 1_500_000;
     let expiry = now(&svm) + 3_600;
-    // The VerifiedCpi is action index 1, so the quote binds to that index.
-    let ed_ix = ed25519_quote_ix(&quoter, &v.quote_message(1, swap_input, out_amount, expiry));
+    // The aggregate covers only the fill's VerifiedCpi action (the SplTransfer
+    // contributes no quote tuple), bound to this route/fill/expiry.
+    let ed_ix = v.agg_quote_ix(&quoter, expiry, &[v.quoted_action(swap_input, out_amount)]);
     let mut remaining = vec![AccountMeta::new(recipient_ata, false)];
     remaining.extend(v.verified_metas(v.destination));
     let exec = execute_actions_ix_full(
         &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        action_config,
-        vec![runtime(
-            swap_data(swap_input, out_amount),
-            out_amount,
-            expiry,
-        )],
+        vec![runtime(swap_data(swap_input, out_amount), out_amount)],
         &v.input_mint,
         remaining,
+        expiry,
     );
     send_instructions(&mut svm, &[ed_ix, exec], &v.payer, &[]).expect("mixed config composes");
 

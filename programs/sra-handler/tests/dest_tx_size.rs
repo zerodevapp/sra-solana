@@ -45,8 +45,7 @@ use solana_sdk::{
 };
 use sra_common::{
     constants::{MAX_ACTION_IDXS, MAX_TEMPLATE_SLOTS},
-    quote::{action_context_hash, signed_quote_message},
-    types::{AccountTemplate, FixedRole, MinOut, SlotRole, SolanaAction},
+    quote::QuotedAction,
 };
 
 const AMOUNT: u64 = 1_000_000;
@@ -134,92 +133,56 @@ fn finalize_only_ix(d: &Dest) -> Instruction {
 /// `execute_actions` carrying the maximum number of `SplTransfer`s (the heaviest
 /// static-account action shape), one recipient ATA per action.
 fn max_spl_execute_ix(d: &Dest) -> Instruction {
-    let recipients: Vec<Pubkey> = (0..MAX_ACTION_IDXS).map(|_| Pubkey::new_unique()).collect();
-    let bps = BPS_TOTAL / MAX_ACTION_IDXS as u16;
-    let action_config: Vec<SolanaAction> = recipients
-        .iter()
-        .map(|r| SolanaAction::SplTransfer {
-            recipient: *r,
-            amount_bps: bps,
-        })
+    // The action list is committed on the route, not carried in the instruction; the
+    // wire shape is one writable recipient ATA per action.
+    let atas: Vec<Pubkey> = (0..MAX_ACTION_IDXS)
+        .map(|_| derive_ata(&Pubkey::new_unique(), &d.mint))
         .collect();
-    let atas: Vec<Pubkey> = recipients.iter().map(|r| derive_ata(r, &d.mint)).collect();
-    execute_actions_ix(
-        &d.payer.pubkey(),
-        &d.route,
-        FILL_ID,
-        action_config,
-        &d.mint,
-        &atas,
-    )
-}
-
-/// A template pinning every handler-controlled role, padded with `Free` routing
-/// slots to `MAX_TEMPLATE_SLOTS` — the account-count envelope of a Jupiter-scale
-/// inner route (the concrete aggregator template is a later addition; the slot
-/// count is the cap the program enforces today).
-fn max_template() -> AccountTemplate {
-    let mut slots = vec![
-        SlotRole::Fixed(FixedRole::TokenProgram),
-        SlotRole::Fixed(FixedRole::SigningAuthority),
-        SlotRole::Fixed(FixedRole::Source),
-        SlotRole::Fixed(FixedRole::Destination),
-        SlotRole::Fixed(FixedRole::OutputMint),
-    ];
-    while slots.len() < MAX_TEMPLATE_SLOTS {
-        slots.push(SlotRole::Free);
-    }
-    AccountTemplate { slots }
+    execute_actions_ix(&d.payer.pubkey(), &d.route, FILL_ID, &d.mint, &atas, 0)
 }
 
 /// `n` max-template `VerifiedCpi` actions plus the single `execute_actions` that
 /// runs them atomically. Each action carries a representative relayer-supplied
-/// `inner_data` and its OWN ed25519 signed quote — the quote's context hash folds
-/// the action index, so one quote cannot cover another. Returns
-/// `[ed25519 × n, execute_actions]`, the exact shape the SDK submits for a route
-/// of `n` verified swaps.
+/// `inner_data`; the fill's whole verified set is covered by ONE aggregate ed25519
+/// signed quote (bound to the ordered per-action tuples). Returns
+/// `[aggregate ed25519, execute_actions]`, the exact shape the SDK submits for a
+/// route of `n` verified swaps.
 fn verified_cpi_ixs(d: &Dest, n: u8) -> Vec<Instruction> {
-    let mut ixs = Vec::new();
-    let mut action_config = Vec::new();
+    let quoter = Keypair::new();
     let mut runtimes = Vec::new();
     let mut metas = Vec::new();
+    let mut quoted = Vec::new();
 
-    for i in 0..n {
+    let input_amount = (VAULT as u128 * (BPS_TOTAL / n as u16) as u128 / 10_000) as u64;
+    for _ in 0..n {
         let output_mint = Pubkey::new_unique();
-        let quoter = Keypair::new();
-        action_config.push(SolanaAction::VerifiedCpi {
-            program_id: mock_swap::ID,
-            input_mint: d.mint,
-            input_bps: BPS_TOTAL / n as u16,
-            account_template: max_template(),
-            output_mint,
-            min_out: MinOut::SignedQuote {
-                quoter: quoter.pubkey(),
-            },
-            allow_permissioned_output: false,
-        });
         // The per-action run: [inner program, then one account per template slot].
         metas.push(AccountMeta::new_readonly(mock_swap::ID, false));
         for _ in 0..MAX_TEMPLATE_SLOTS {
             metas.push(AccountMeta::new(Pubkey::new_unique(), false));
         }
-        runtimes.push(runtime(vec![0u8; INNER_DATA_LEN], MIN_OUT, EXPIRY));
-
-        let context_hash = action_context_hash(&d.route, &FILL_ID, i);
-        let message =
-            signed_quote_message(&context_hash, &d.mint, &output_mint, VAULT, MIN_OUT, EXPIRY);
-        ixs.push(ed25519_quote_ix(&quoter, &message));
+        runtimes.push(runtime(vec![0u8; INNER_DATA_LEN], MIN_OUT));
+        quoted.push(QuotedAction {
+            input_mint: d.mint,
+            output_mint,
+            input_amount,
+            min_out: MIN_OUT,
+        });
     }
 
-    ixs.push(execute_actions_ix_full(
-        &d.payer.pubkey(),
-        &d.route,
-        FILL_ID,
-        action_config,
-        runtimes,
-        &d.mint,
-        metas,
-    ));
+    // One aggregate quote for the whole verified set, riding at index 0.
+    let ixs = vec![
+        aggregate_quote_ix(&quoter, &d.route, &FILL_ID, EXPIRY, &quoted),
+        execute_actions_ix_full(
+            &d.payer.pubkey(),
+            &d.route,
+            FILL_ID,
+            runtimes,
+            &d.mint,
+            metas,
+            EXPIRY,
+        ),
+    ];
     ixs
 }
 

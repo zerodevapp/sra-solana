@@ -23,7 +23,7 @@ use solana_sdk::{
 };
 use sra_common::{
     errors::SraError,
-    quote::{action_context_hash, signed_quote_message},
+    quote::QuotedAction,
     types::{CreateRouteParams, ExecutionStatus, MinOut, SolanaAction},
 };
 
@@ -96,7 +96,6 @@ struct Staged {
     pool_input: Pubkey,
     pool_output: Pubkey,
     pool_authority: Pubkey,
-    action_config: Vec<SolanaAction>,
 }
 
 /// Create the input (legacy) + output mints, build `action_config` from them (and
@@ -195,7 +194,6 @@ fn stage(
         pool_input,
         pool_output,
         pool_authority,
-        action_config,
     }
 }
 
@@ -231,29 +229,26 @@ impl Staged {
         ]
     }
 
-    /// Reconstruct the signed-quote message for the single VerifiedCpi at action 0.
-    fn quote_message(&self, input_amount: u64, min_amount_out: u64, expiry: i64) -> Vec<u8> {
-        self.quote_message_at(0, input_amount, min_amount_out, expiry)
+    /// The signed-quote tuple for the fill's single VerifiedCpi action (input mint,
+    /// output mint, the handler-derived input amount, and the signed floor).
+    fn quoted_action(&self, input_amount: u64, min_out: u64) -> QuotedAction {
+        QuotedAction {
+            input_mint: self.input_mint,
+            output_mint: self.output_mint,
+            input_amount,
+            min_out,
+        }
     }
 
-    /// Reconstruct the signed-quote message for the VerifiedCpi at `action_index`.
-    fn quote_message_at(
+    /// The aggregate signed-quote instruction covering `actions` (in action order),
+    /// signed by `quoter` and bound to this route/fill/expiry.
+    fn agg_quote_ix(
         &self,
-        action_index: u8,
-        input_amount: u64,
-        min_amount_out: u64,
+        quoter: &Keypair,
         expiry: i64,
-    ) -> Vec<u8> {
-        let context_hash = action_context_hash(&self.route, &FILL_ID, action_index);
-        signed_quote_message(
-            &context_hash,
-            &self.input_mint,
-            &self.output_mint,
-            input_amount,
-            min_amount_out,
-            expiry,
-        )
-        .to_vec()
+        actions: &[QuotedAction],
+    ) -> solana_sdk::instruction::Instruction {
+        aggregate_quote_ix(quoter, &self.route, &FILL_ID, expiry, actions)
     }
 }
 
@@ -270,15 +265,15 @@ fn verified_cpi_swap_succeeds() {
     let out_amount = 3_000_000;
     let min_out = 2_900_000;
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, min_out, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, min_out)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, out_amount), min_out, expiry)],
+        vec![runtime(swap_data(VAULT, out_amount), min_out)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expiry,
     );
 
     send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]).expect("verified swap succeeds");
@@ -306,15 +301,15 @@ fn verified_cpi_sweeps_unspent_input() {
     let pulled = 3_000_000;
     let out_amount = 1_000_000;
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, out_amount, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, out_amount)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(pulled, out_amount), out_amount, expiry)],
+        vec![runtime(swap_data(pulled, out_amount), out_amount)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expiry,
     );
 
     send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]).expect("partial-pull swap succeeds");
@@ -341,15 +336,15 @@ fn verified_cpi_emits_actions_executed() {
     let quoter = Keypair::new();
     let s = staged_single(&mut svm, &quoter);
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, 1_000_000)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expiry,
     );
     let meta =
         send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]).expect("verified swap succeeds");
@@ -370,15 +365,15 @@ fn verified_cpi_below_min_out_reverts_funds_safe() {
     let s = staged_single(&mut svm, &quoter);
     let expiry = now(&svm) + 3_600;
     // Deliver less than the signed minimum.
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 3_000_000, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, 3_000_000)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 2_000_000), 3_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 2_000_000), 3_000_000)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expiry,
     );
 
     let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
@@ -396,15 +391,15 @@ fn verified_cpi_scratch_bounds_input() {
     let expiry = now(&svm) + 3_600;
     // Ask the swap to pull MORE than the engine moved into scratch — the SPL
     // transfer fails and the whole transaction reverts; the vault is untouched.
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, 1_000_000)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT * 2, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT * 2, 1_000_000), 1_000_000)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expiry,
     );
 
     let res = send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]);
@@ -427,15 +422,15 @@ fn verified_cpi_destination_redirect_rejected() {
     let attacker = Pubkey::new_unique();
     let attacker_ata = create_ata(&mut svm, &s.payer, &attacker, &s.output_mint);
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, 1_000_000)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
         &s.input_mint,
         s.verified_metas(attacker_ata),
+        expiry,
     );
 
     let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
@@ -454,15 +449,15 @@ fn verified_cpi_program_substitution_rejected() {
     let mut metas = s.verified_metas(s.destination);
     metas[0] = AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false);
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, 1_000_000)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
         &s.input_mint,
         metas,
+        expiry,
     );
 
     let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
@@ -481,15 +476,15 @@ fn verified_cpi_signed_quote_expired_rejected() {
     let quoter = Keypair::new();
     let s = staged_single(&mut svm, &quoter);
     let expired = now(&svm) - 1;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expired));
+    let ed_ix = s.agg_quote_ix(&quoter, expired, &[s.quoted_action(VAULT, 1_000_000)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expired)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expired,
     );
 
     let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
@@ -505,15 +500,15 @@ fn verified_cpi_wrong_quoter_rejected() {
     // A stranger signs the (otherwise valid) quote.
     let stranger = Keypair::new();
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&stranger, &s.quote_message(VAULT, 1_000_000, expiry));
+    let ed_ix = s.agg_quote_ix(&stranger, expiry, &[s.quoted_action(VAULT, 1_000_000)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expiry,
     );
 
     let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
@@ -528,17 +523,17 @@ fn verified_cpi_min_out_tamper_rejected() {
     let s = staged_single(&mut svm, &quoter);
     let expiry = now(&svm) + 3_600;
     // The quoter signs min_out = 3_000_000, but the relayer submits a runtime
-    // claiming 1_000_000 (to slip a worse swap through). The reconstructed message
+    // claiming 1_000_000 (to slip a worse swap through). The reconstructed root
     // no longer matches the signature.
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 3_000_000, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, 3_000_000)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expiry,
     );
 
     let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
@@ -557,10 +552,10 @@ fn verified_cpi_missing_quote_rejected() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expiry,
     );
 
     // Only one instruction, so the error lands on index 0.
@@ -592,15 +587,15 @@ fn verified_cpi_missing_destination_ata_soft_fails() {
         false,
     );
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, 1_000_000)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expiry,
     );
 
     // Soft fail returns Ok and persists ActionsFailed; funds stay staged.
@@ -636,15 +631,15 @@ fn verified_cpi_oracle_min_out_unsupported() {
         true,
     );
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, 1_000_000)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expiry,
     );
 
     let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
@@ -680,11 +675,9 @@ fn spl_and_verified_cpi_compose() {
     let swap_input = VAULT * 7_000 / 10_000;
     let out_amount = 1_500_000;
     let expiry = now(&svm) + 3_600;
-    // The VerifiedCpi is the second action (index 1) — the quote binds to that index.
-    let ed_ix = ed25519_quote_ix(
-        &quoter,
-        &s.quote_message_at(1, swap_input, out_amount, expiry),
-    );
+    // The aggregate covers only the fill's VerifiedCpi action (the SplTransfer
+    // contributes no quote tuple), bound to this route/fill/expiry.
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(swap_input, out_amount)]);
     // remaining = [SplTransfer recipient ATA] ++ [VerifiedCpi run]
     let mut remaining = vec![AccountMeta::new(recipient_ata, false)];
     remaining.extend(s.verified_metas(s.destination));
@@ -692,14 +685,10 @@ fn spl_and_verified_cpi_compose() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(
-            swap_data(swap_input, out_amount),
-            out_amount,
-            expiry,
-        )],
+        vec![runtime(swap_data(swap_input, out_amount), out_amount)],
         &s.input_mint,
         remaining,
+        expiry,
     );
 
     send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]).expect("compose succeeds");
@@ -738,15 +727,15 @@ fn verified_cpi_token_2022_output_succeeds() {
     let out_amount = 3_000_000;
     let min_out = 2_900_000;
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, min_out, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, min_out)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, out_amount), min_out, expiry)],
+        vec![runtime(swap_data(VAULT, out_amount), min_out)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expiry,
     );
 
     send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[])
@@ -787,15 +776,15 @@ fn verified_cpi_transfer_fee_output_uses_post_fee_balance() {
     let landed = out_amount - fee;
     let expiry = now(&svm) + 3_600;
     // Quote the post-fee floor; the swap nominally outputs `out_amount`.
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, landed, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, landed)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, out_amount), landed, expiry)],
+        vec![runtime(swap_data(VAULT, out_amount), landed)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expiry,
     );
 
     send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[])
@@ -829,15 +818,15 @@ fn verified_cpi_transfer_fee_min_out_against_post_fee_reverts() {
     let out_amount = 1_000_000;
     let expiry = now(&svm) + 3_600;
     // Quote at the nominal output; post-fee landing (990_000) falls short.
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, out_amount, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, out_amount)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, out_amount), out_amount, expiry)],
+        vec![runtime(swap_data(VAULT, out_amount), out_amount)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expiry,
     );
 
     let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
@@ -861,15 +850,15 @@ fn verified_cpi_permissioned_output_requires_optin() {
     );
 
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, 1_000_000)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 3_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 3_000_000), 1_000_000)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expiry,
     );
 
     let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
@@ -906,15 +895,15 @@ fn verified_cpi_permissioned_output_optin_succeeds() {
     let out_amount = 3_000_000;
     let min_out = 2_900_000;
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, min_out, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, min_out)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, out_amount), min_out, expiry)],
+        vec![runtime(swap_data(VAULT, out_amount), min_out)],
         &s.input_mint,
         s.verified_metas(s.destination),
+        expiry,
     );
 
     send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[])
@@ -941,15 +930,15 @@ fn verified_cpi_wrong_output_mint_account_rejected() {
     let mut metas = s.verified_metas(s.destination);
     metas[5] = AccountMeta::new_readonly(s.input_mint, false);
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, 1_000_000)]);
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
         &s.input_mint,
         metas,
+        expiry,
     );
 
     let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
