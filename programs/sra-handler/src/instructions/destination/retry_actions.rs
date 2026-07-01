@@ -8,9 +8,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 use sra_common::errors::SraError;
 use sra_common::seeds::{SEED_EXECUTION, SEED_FILL_RECEIPT};
-use sra_common::types::{
-    ExecutionStatus, FillReceipt, SolanaAction, SolanaSraRoute, VerifiedCpiRuntime,
-};
+use sra_common::types::{ExecutionStatus, FillReceipt, SolanaSraRoute, VerifiedCpiRuntime};
 
 use super::execute_actions::{run_committed_actions, ActionAccounts, ActionOutcome};
 use crate::events::{ActionsFailed, ActionsRetried};
@@ -52,8 +50,8 @@ pub struct RetryActions<'info> {
 pub(crate) fn handler<'info>(
     ctx: Context<'_, '_, '_, 'info, RetryActions<'info>>,
     fill_id: [u8; 32],
-    action_config: Vec<SolanaAction>,
     verified_runtimes: Vec<VerifiedCpiRuntime>,
+    quote_expiry: i64,
 ) -> Result<()> {
     // Only an ActionsFailed receipt is retryable (Finalized -> execute_actions; terminal states can't re-run).
     require!(
@@ -75,7 +73,13 @@ pub(crate) fn handler<'info>(
         execution_authority_bump: ctx.bumps.execution_authority,
     };
 
-    match run_committed_actions(&accounts, fill_id, &action_config, &verified_runtimes)? {
+    match run_committed_actions(
+        &accounts,
+        fill_id,
+        &ctx.accounts.route.action_config,
+        &verified_runtimes,
+        quote_expiry,
+    )? {
         ActionOutcome::Succeeded => {
             // The re-run applied. ActionsRetried is the retry-path success event
             // (the counterpart of execute_actions' ActionsExecuted), not a re-attempt.

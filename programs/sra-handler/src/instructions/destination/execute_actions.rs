@@ -24,8 +24,8 @@ use anchor_spl::token::spl_token::state::AccountState;
 use anchor_spl::token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked};
 use sra_common::constants::BPS_DENOMINATOR;
 use sra_common::errors::SraError;
-use sra_common::quote::{action_context_hash, signed_quote_message};
-use sra_common::seeds::{action_config_hash, SEED_EXECUTION, SEED_FILL_RECEIPT, SEED_SCRATCH};
+use sra_common::quote::{aggregate_quote_root, QuotedAction};
+use sra_common::seeds::{SEED_EXECUTION, SEED_FILL_RECEIPT, SEED_SCRATCH};
 use sra_common::types::{
     ExecutionStatus, FillReceipt, FixedRole, MinOut, SolanaAction, SolanaSraRoute,
     VerifiedCpiRuntime,
@@ -33,7 +33,7 @@ use sra_common::types::{
 
 use super::verified_engine::{
     execute_verified, fixed_slot, mint_is_permissioned, token_account_usable,
-    validate_pinned_program, validate_template_slots, verify_signed_quote, TokenBalanceCheck,
+    validate_pinned_program, validate_template_slots, verify_aggregate_quote, TokenBalanceCheck,
     VerifiedCpiCall,
 };
 use crate::events::{ActionsExecuted, ActionsFailed};
@@ -121,8 +121,8 @@ pub(crate) struct ActionAccounts<'a, 'info> {
 pub(crate) fn handler<'info>(
     ctx: Context<'_, '_, '_, 'info, ExecuteActions<'info>>,
     fill_id: [u8; 32],
-    action_config: Vec<SolanaAction>,
     verified_runtimes: Vec<VerifiedCpiRuntime>,
+    quote_expiry: i64,
 ) -> Result<()> {
     // Must be settled and not yet acted on (ActionsFailed is retried via retry_actions).
     require!(
@@ -151,7 +151,13 @@ pub(crate) fn handler<'info>(
         execution_authority_bump: ctx.bumps.execution_authority,
     };
 
-    match run_committed_actions(&accounts, fill_id, &action_config, &verified_runtimes)? {
+    match run_committed_actions(
+        &accounts,
+        fill_id,
+        &ctx.accounts.route.action_config,
+        &verified_runtimes,
+        quote_expiry,
+    )? {
         ActionOutcome::Succeeded => {
             ctx.accounts.fill_receipt.execution_status = ExecutionStatus::ActionsSucceeded;
             emit!(ActionsExecuted { route, fill_id });
@@ -173,13 +179,8 @@ pub(crate) fn run_committed_actions<'info>(
     fill_id: [u8; 32],
     action_config: &[SolanaAction],
     verified_runtimes: &[VerifiedCpiRuntime],
+    quote_expiry: i64,
 ) -> Result<ActionOutcome> {
-    // Re-supplied action list must match the committed digest — no inject/drop/reorder.
-    require!(
-        action_config_hash(action_config)? == accounts.route.action_config_hash,
-        SraError::ActionConfigHashMismatch
-    );
-
     let route_key = accounts.route.key();
     let owner = accounts.route.owner;
     let expected_mint = accounts.route.expected_mint;
@@ -215,6 +216,10 @@ pub(crate) fn run_committed_actions<'info>(
     let mut runtime_index = 0usize;
     let mut plan: Vec<Planned> = Vec::new();
     let mut any_action_would_fail = false;
+    // The ordered per-action commitment (one entry per VerifiedCpi action, in
+    // action order) and the single quoter that must sign the whole batch.
+    let mut quoted_actions: Vec<QuotedAction> = Vec::new();
+    let mut batch_quoter: Option<Pubkey> = None;
 
     for (action_index, action) in action_config.iter().enumerate() {
         match action {
@@ -318,6 +323,23 @@ pub(crate) fn run_committed_actions<'info>(
                     .ok_or(SraError::ActionAccountMismatch)?;
                 runtime_index += 1;
 
+                let input_amount = vault_amount_for_bps(vault_snapshot, *input_bps);
+
+                // Accumulate this action's signed-quote tuple UNCONDITIONALLY (before
+                // the soft-fail branch), so the reconstructed aggregate root covers the
+                // committed set exactly — a soft-failing action still contributes its
+                // tuple. Record the single quoter that must sign the whole batch.
+                match batch_quoter {
+                    Some(q) => require_keys_eq!(q, *quoter, SraError::MixedQuoters),
+                    None => batch_quoter = Some(*quoter),
+                }
+                quoted_actions.push(QuotedAction {
+                    input_mint: *input_mint,
+                    output_mint: *output_mint,
+                    input_amount,
+                    min_out: runtime.min_amount_out,
+                });
+
                 // Soft-fail on handler-pinned-account state (recoverable), like SplTransfer.
                 let scratch_info = fixed_slot(slots, account_template, FixedRole::Source)?;
                 let dest_info = fixed_slot(slots, account_template, FixedRole::Destination)?;
@@ -328,25 +350,6 @@ pub(crate) fn run_committed_actions<'info>(
                     cursor = end;
                     continue;
                 }
-
-                // Verify the authorized, unexpired signed quote (hard reject).
-                let input_amount = vault_amount_for_bps(vault_snapshot, *input_bps);
-                let context_hash = action_context_hash(&route_key, &fill_id, action_index as u8);
-                let message = signed_quote_message(
-                    &context_hash,
-                    input_mint,
-                    output_mint,
-                    input_amount,
-                    runtime.min_amount_out,
-                    runtime.expiry,
-                );
-                verify_signed_quote(
-                    accounts.instructions_sysvar,
-                    quoter,
-                    &message,
-                    runtime.expiry,
-                    now,
-                )?;
 
                 plan.push(Planned::Verified {
                     action_index,
@@ -371,6 +374,20 @@ pub(crate) fn run_committed_actions<'info>(
         runtime_index == verified_runtimes.len(),
         SraError::ActionAccountMismatch
     );
+
+    // Verify the single authorized, unexpired aggregate quote once — reconstruct the
+    // root from the ordered per-action tuples (built over the full committed set) and
+    // match it against the quoter's transaction-wide ed25519 signature (hard reject).
+    if let Some(quoter) = batch_quoter {
+        let root = aggregate_quote_root(&route_key, &fill_id, quote_expiry, &quoted_actions);
+        verify_aggregate_quote(
+            accounts.instructions_sysvar,
+            &quoter,
+            &root,
+            quote_expiry,
+            now,
+        )?;
+    }
 
     // Soft fail (no transfers ran) — caller persists ActionsFailed.
     if any_action_would_fail {
@@ -459,9 +476,10 @@ pub(crate) fn run_committed_actions<'info>(
 }
 
 /// `floor(amount_bps * vault_snapshot / BPS_DENOMINATOR)`. `amount_bps <= 10_000`
-/// is guaranteed upstream (`validate_action_config`, re-bound by the
-/// `action_config_hash` check), so the product is `<= vault_snapshot` (lossless
-/// `u64` cast); the floor can leave a few base units of recoverable dust.
+/// is guaranteed upstream (`validate_action_config` at route creation, and the
+/// config is read from the route's own account data), so the product is
+/// `<= vault_snapshot` (lossless `u64` cast); the floor can leave a few base units
+/// of recoverable dust.
 fn vault_amount_for_bps(vault_snapshot: u64, amount_bps: u16) -> u64 {
     ((vault_snapshot as u128 * amount_bps as u128) / BPS_DENOMINATOR as u128) as u64
 }

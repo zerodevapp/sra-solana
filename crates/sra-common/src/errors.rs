@@ -122,9 +122,6 @@ pub enum SraError {
     NothingToRecover,
 
     // -- Destination: action execution --
-    #[msg("Supplied action config does not match the route's committed action config hash")]
-    ActionConfigHashMismatch,
-
     #[msg("Action's supplied accounts do not match its required accounts")]
     ActionAccountMismatch,
 
