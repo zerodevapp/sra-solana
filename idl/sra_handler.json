@@ -530,16 +530,6 @@
           }
         },
         {
-          "name": "action_config",
-          "type": {
-            "vec": {
-              "defined": {
-                "name": "SolanaAction"
-              }
-            }
-          }
-        },
-        {
           "name": "verified_runtimes",
           "type": {
             "vec": {
@@ -548,6 +538,10 @@
               }
             }
           }
+        },
+        {
+          "name": "quote_expiry",
+          "type": "i64"
         }
       ]
     },
@@ -1695,16 +1689,6 @@
           }
         },
         {
-          "name": "action_config",
-          "type": {
-            "vec": {
-              "defined": {
-                "name": "SolanaAction"
-              }
-            }
-          }
-        },
-        {
           "name": "verified_runtimes",
           "type": {
             "vec": {
@@ -1713,6 +1697,10 @@
               }
             }
           }
+        },
+        {
+          "name": "quote_expiry",
+          "type": "i64"
         }
       ]
     },
@@ -4136,18 +4124,6 @@
             "type": "pubkey"
           },
           {
-            "name": "action_config_hash",
-            "docs": [
-              "keccak256(borsh(action_config)) — committed by hash, not stored inline."
-            ],
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
             "name": "salt",
             "type": {
               "array": [
@@ -4339,17 +4315,18 @@
             "type": "pubkey"
           },
           {
-            "name": "action_config_hash",
+            "name": "action_config",
             "docs": [
-              "keccak256(borsh(action_config)). The action list is also folded into the",
-              "route's config_hash, but stored only as this digest; callers re-supply the",
-              "list as ix data and verify it against this hash, keeping the account small."
+              "The committed action list, stored inline. The route PDA address already",
+              "binds it (the address derives from a hash folding this list), so callers",
+              "read it directly — it is not re-supplied per call."
             ],
             "type": {
-              "array": [
-                "u8",
-                32
-              ]
+              "vec": {
+                "defined": {
+                  "name": "SolanaAction"
+                }
+              }
             }
           },
           {
@@ -4548,10 +4525,10 @@
       "docs": [
         "Per-`VerifiedCpi`-action runtime data the relayer supplies to `execute_actions`,",
         "one entry per `VerifiedCpi` action in action order. Carries the inner CPI's",
-        "instruction data plus the signed-quote fields (`min_amount_out`, `expiry`); the",
-        "quote's signature rides in a separate ed25519 instruction in the same",
-        "transaction. `min_amount_out`/`expiry` are bound into the quote message and",
-        "verified against the route-committed quoter, so a relayer cannot inflate them."
+        "instruction data plus the signed quote's `min_amount_out`; the quote's",
+        "signature rides in a separate ed25519 instruction in the same transaction.",
+        "`min_amount_out` is bound into the quote message and verified against the",
+        "route-committed quoter, so a relayer cannot inflate it."
       ],
       "type": {
         "kind": "struct",
@@ -4569,13 +4546,6 @@
               "The signed quote's minimum acceptable output (the balance-diff floor)."
             ],
             "type": "u64"
-          },
-          {
-            "name": "expiry",
-            "docs": [
-              "The signed quote's unix expiry."
-            ],
-            "type": "i64"
           }
         ]
       }
