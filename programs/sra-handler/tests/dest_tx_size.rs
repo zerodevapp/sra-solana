@@ -6,20 +6,22 @@
 //!   * `verify_across_fill` (adapter) + `finalize_fill` (handler) — records the
 //!     fill and moves the bridged amount into the route's execution vault.
 //!   * `execute_actions` (handler) — runs the route's committed `action_config`
-//!     (one or more `SplTransfer`s, and/or a `VerifiedCpi` swap/deposit).
+//!     (stored on the route account, not carried in the transaction). For fills
+//!     that include one or more `VerifiedCpi` actions the transaction also
+//!     carries one aggregate ed25519 quote instruction covering all actions.
 //!
 //! These canaries pin each shape's serialized size so a future change that grows
 //! the static account set (or the action payload) is caught before it silently
 //! pushes a real transaction past the packet limit.
 //!
 //! A transaction's serialized size is a pure function of its account count and its
-//! instruction-data length — not of whether the referenced accounts exist on-chain,
-//! nor of a route's committed action list (the route stores only a 32-byte hash of
-//! it; `execute_actions` carries the action list as instruction data). So these
-//! tests build the genuine instructions, via the same builders the SDK uses, at the
-//! heaviest payload the program accepts, and serialize them — they never submit.
-//! (Executing the `VerifiedCpi` path end-to-end belongs to the compute-budget and
-//! end-to-end suites; here only the wire size matters.)
+//! instruction-data length — not of whether the referenced accounts exist on-chain.
+//! The action config is stored on the route, so `execute_actions` does not carry it
+//! as instruction data; each fill's verified set is covered by one aggregate quote.
+//! These tests build the genuine instructions, via the same builders the SDK uses,
+//! at the heaviest payload the program accepts, and serialize them — they never
+//! submit. (Executing the `VerifiedCpi` path end-to-end belongs to the
+//! compute-budget and end-to-end suites; here only the wire size matters.)
 //!
 //! Two findings the shapes make concrete:
 //!   * `verify_across_fill` + `finalize_fill` is **action-config independent** —
@@ -281,15 +283,31 @@ fn dest_finalize_plus_single_verified_cpi_execute_actions_fits_with_alt() {
     );
 }
 
+// --- execute_actions: two VerifiedCpi actions (the headline multi-action shape) -
+
+#[test]
+fn dest_two_verified_cpi_execute_actions_fits_within_packet_limit_with_alt() {
+    let d = dest();
+    let ixs = verified_cpi_ixs(&d, 2);
+    let alt = representative_lookup_table(&ixs);
+    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt]));
+    println!("dest execute_actions(2 VerifiedCpi) with ALT: {size} / {PACKET_DATA_SIZE} bytes");
+    assert!(
+        size <= PACKET_DATA_SIZE,
+        "2x VerifiedCpi with ALT is {size} bytes, exceeds {PACKET_DATA_SIZE}",
+    );
+}
+
 // --- execute_actions: the program-accepted maximum action set ------------------
 //
 // `validate_action_config` accepts up to `MAX_ACTION_IDXS` actions of any mix, with
 // no cap on the number of `VerifiedCpi` actions, and `execute_actions` runs the
 // WHOLE committed list atomically in one instruction (no chunking). Each extra
-// `VerifiedCpi` adds an address-lookup-table-INCOMPRESSIBLE cost — its own ed25519
-// quote instruction (the quote's context hash folds the action index) plus its
-// committed action bytes and runtime `inner_data` — so the genuine worst case is
-// `MAX_ACTION_IDXS` verified swaps. This canary sizes that ceiling.
+// `VerifiedCpi` adds an address-lookup-table-INCOMPRESSIBLE cost — its additional
+// per-action runtime `inner_data` and template account slots extend both the
+// instruction data and the account list beyond what the ALT can compress — so the
+// genuine worst case is `MAX_ACTION_IDXS` verified swaps. This canary sizes that
+// ceiling.
 
 #[test]
 fn dest_max_verified_cpi_execute_actions_exceeds_packet_limit_even_with_alt() {
