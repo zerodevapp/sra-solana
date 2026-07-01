@@ -53,11 +53,9 @@ use sra_common::{
 };
 
 /// The compute-unit budget the production destination fill tx requests — design
-/// parity with the source deposit, which requests the same 400k (its twin
-/// constant is `common::SOURCE_CU_BUDGET`). The 2-IX flow and the action
-/// follow-up must each execute under this; these tests are the regression gate.
-const DEST_CU_BUDGET: u32 = 400_000;
-
+/// parity with the source deposit, which requests the same 400k.
+/// Keep this as an alias so destination assertions track any future budget change.
+const DEST_CU_BUDGET: u32 = SOURCE_CU_BUDGET;
 /// Runtime CU limit for measurement: the Solana maximum, so the 400k assertion is
 /// the gate — a flow over budget still runs and reports its real consumption
 /// instead of aborting on the runtime limit.
