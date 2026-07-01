@@ -318,12 +318,14 @@ fn dest_max_verified_cpi_execute_actions_exceeds_packet_limit_even_with_alt() {
 
     // FINDING: the program permits routes whose single, atomic `execute_actions`
     // cannot fit in one transaction even with an address lookup table — an ALT
-    // compresses account addresses, but the per-action ed25519 quotes + action
-    // bytes + runtime data are incompressible. Because actions execute atomically
-    // (no partial execution), such a route's actions can never run on-chain; the
-    // bridged funds settle into the execution vault and are owner-recoverable, but
-    // the intended actions do not execute. The route-creation / SDK layer must
-    // bound a route's action + account + data budget so its `execute_actions` fits.
+    // compresses account addresses, but each extra VerifiedCpi action adds
+    // incompressible per-action runtime instruction data and template account slots,
+    // plus account-list growth beyond what the ALT covers; there is one aggregate
+    // ed25519 quote per fill. Because actions execute atomically (no partial
+    // execution), such a route's actions can never run on-chain; the bridged funds
+    // settle into the execution vault and are owner-recoverable, but the intended
+    // actions do not execute. The route-creation / SDK layer must bound a route's
+    // action + account + data budget so its `execute_actions` fits.
     println!("dest execute_actions({MAX_ACTION_IDXS} VerifiedCpi, max template) with ALT: {size} / {PACKET_DATA_SIZE} bytes");
     assert!(
         size > PACKET_DATA_SIZE,
