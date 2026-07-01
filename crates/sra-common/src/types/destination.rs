@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::constants::{MAX_ADAPTERS, MAX_EXECUTORS};
+use crate::constants::{MAX_ACTION_IDXS, MAX_ADAPTERS, MAX_EXECUTORS};
 use crate::types::actions::{AccountTemplate, MinOut};
 
 /// A pre-registered action to execute on the destination chain after fill
@@ -44,10 +44,11 @@ pub struct SolanaSraRoute {
     pub owner: Pubkey,
     pub source_chain_id: u64,
     pub expected_mint: Pubkey,
-    /// keccak256(borsh(action_config)). The action list is also folded into the
-    /// route's config_hash, but stored only as this digest; callers re-supply the
-    /// list as ix data and verify it against this hash, keeping the account small.
-    pub action_config_hash: [u8; 32],
+    /// The committed action list, stored inline. The route PDA address already
+    /// binds it (the address derives from a hash folding this list), so callers
+    /// read it directly — it is not re-supplied per call.
+    #[max_len(MAX_ACTION_IDXS)]
+    pub action_config: Vec<SolanaAction>,
     // Immutable (NOT in config_hash)
     pub salt: [u8; 32],
     // Mutable
@@ -90,18 +91,16 @@ pub struct ManageRouteParams {
 
 /// Per-`VerifiedCpi`-action runtime data the relayer supplies to `execute_actions`,
 /// one entry per `VerifiedCpi` action in action order. Carries the inner CPI's
-/// instruction data plus the signed-quote fields (`min_amount_out`, `expiry`); the
-/// quote's signature rides in a separate ed25519 instruction in the same
-/// transaction. `min_amount_out`/`expiry` are bound into the quote message and
-/// verified against the route-committed quoter, so a relayer cannot inflate them.
+/// instruction data plus the signed quote's `min_amount_out`; the quote's
+/// signature rides in a separate ed25519 instruction in the same transaction.
+/// `min_amount_out` is bound into the quote message and verified against the
+/// route-committed quoter, so a relayer cannot inflate it.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct VerifiedCpiRuntime {
     /// The inner program's instruction data (relayer-built swap/deposit args).
     pub inner_data: Vec<u8>,
     /// The signed quote's minimum acceptable output (the balance-diff floor).
     pub min_amount_out: u64,
-    /// The signed quote's unix expiry.
-    pub expiry: i64,
 }
 
 /// Execution status state machine for fill lifecycle.
@@ -184,29 +183,19 @@ mod tests {
     #[test]
     fn solana_sra_route_init_space() {
         // 32 owner + 8 source_chain_id + 32 expected_mint
-        // + 32 action_config_hash + 32 salt
+        // + (4 + 4*203) action_config + 32 salt
         // + 4 + (32 * 8) allowed_adapters
         // + 4 + (32 * 8) allowed_executors + 1 paused + 1 bump
-        // = 32 + 8 + 32 + 32 + 32 + 260 + 260 + 1 + 1 = 658
-        assert_eq!(SolanaSraRoute::INIT_SPACE, 658);
+        // = 32 + 8 + 32 + 816 + 32 + 260 + 260 + 1 + 1 = 1442
+        assert_eq!(SolanaSraRoute::INIT_SPACE, 1442);
     }
 
     #[test]
-    fn solana_sra_route_stores_action_config_hash_not_inline_actions() {
-        // Commit-by-hash: the route carries a 32-byte digest of the action list,
-        // never the Vec<SolanaAction> itself.
-        let route = SolanaSraRoute {
-            owner: Pubkey::new_unique(),
-            source_chain_id: 1,
-            expected_mint: Pubkey::new_unique(),
-            action_config_hash: [7u8; 32],
-            salt: [0u8; 32],
-            allowed_adapters: vec![],
-            allowed_executors: vec![],
-            paused: false,
-            bump: 255,
-        };
-        assert_eq!(route.action_config_hash, [7u8; 32]);
+    fn solana_sra_route_stores_inline_action_config() {
+        // 32 owner + 8 chain + 32 mint + (4 + 4*203) action_config + 32 salt
+        // + 260 adapters + 260 executors + 1 paused + 1 bump = 1442.
+        assert_eq!(SolanaSraRoute::INIT_SPACE, 1442);
+        assert_eq!(SolanaAction::INIT_SPACE, 203);
     }
 
     #[test]
