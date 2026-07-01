@@ -569,6 +569,54 @@ fn create_route_verified_cpi_happy_path() {
     );
 }
 
+/// One aggregate signature means one signer: two VerifiedCpi actions naming
+/// different SignedQuote quoters cannot be committed — create_route rejects the
+/// config with MixedQuoters before the route identity is written.
+#[test]
+fn create_route_mixed_quoters_rejected() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+
+    let pinned_slots = vec![
+        SlotRole::Fixed(FixedRole::SigningAuthority),
+        SlotRole::Fixed(FixedRole::Source),
+        SlotRole::Fixed(FixedRole::Destination),
+        SlotRole::Fixed(FixedRole::OutputMint),
+        SlotRole::Free,
+    ];
+    let verified_with_quoter = |quoter: Pubkey| SolanaAction::VerifiedCpi {
+        program_id: Pubkey::new_unique(),
+        input_mint: mint,
+        input_bps: 5_000,
+        account_template: AccountTemplate {
+            slots: pinned_slots.clone(),
+        },
+        output_mint: Pubkey::new_unique(),
+        min_out: MinOut::SignedQuote { quoter },
+        allow_permissioned_output: false,
+    };
+
+    // Two VerifiedCpi actions, each with a distinct quoter.
+    let mut params = sample_create_route_params(mint, [15u8; 32]);
+    params.action_config = vec![
+        verified_with_quoter(Pubkey::new_unique()),
+        verified_with_quoter(Pubkey::new_unique()),
+    ];
+
+    let ix = create_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    let err = send_ix(&mut svm, ix, &payer, &[&owner])
+        .expect_err("VerifiedCpi actions with differing quoters must be rejected")
+        .err;
+    assert_eq!(err, custom_error(SraError::MixedQuoters));
+}
+
 #[test]
 fn create_route_verified_cpi_unpinned_template_rejected() {
     let mut svm = setup_svm();

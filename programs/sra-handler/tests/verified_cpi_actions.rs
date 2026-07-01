@@ -946,3 +946,498 @@ fn verified_cpi_wrong_output_mint_account_rejected() {
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
     assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
 }
+
+// --------------------------------------------------------------------------
+// Aggregate-quote binding across TWO VerifiedCpi actions
+//
+// The route commits two VerifiedCpi actions (two output mints, two pools, two
+// owner destinations) sharing the single expected-mint input. One ed25519
+// instruction signs the aggregate root over BOTH `QuotedAction`s, in action
+// order; the handler reconstructs that same root from the committed set and its
+// runtimes and verifies one signature for the whole batch.
+// --------------------------------------------------------------------------
+
+/// `floor(bps * VAULT / 10_000)` — the handler-derived input amount for a bps
+/// fraction of the vault snapshot (matches the on-chain `vault_amount_for_bps`).
+fn vault_amount_for_bps(bps: u16) -> u64 {
+    ((VAULT as u128 * bps as u128) / 10_000u128) as u64
+}
+
+/// A route with two VerifiedCpi actions splitting the vault by `(bps_a, bps_b)`.
+/// Both spend the shared legacy input; each has its own legacy output mint, its
+/// own owner destination ATA, and its own pool output reserve (under the single
+/// shared pool authority + input reserve). Destinations are created iff the
+/// matching `create_destination_*` flag is set.
+struct TwoStaged {
+    payer: Keypair,
+    input_mint: Pubkey,
+    route: Pubkey,
+    execution_vault: Pubkey,
+    fill_receipt: Pubkey,
+    scratch_authority: Pubkey,
+    scratch: Pubkey,
+    pool_authority: Pubkey,
+    pool_input: Pubkey,
+    input_bps_a: u16,
+    input_bps_b: u16,
+    output_mint_a: Pubkey,
+    output_mint_b: Pubkey,
+    destination_a: Pubkey,
+    destination_b: Pubkey,
+    pool_output_a: Pubkey,
+    pool_output_b: Pubkey,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stage_two(
+    svm: &mut litesvm::LiteSVM,
+    quoter: &Keypair,
+    input_bps_a: u16,
+    input_bps_b: u16,
+    create_destination_a: bool,
+    create_destination_b: bool,
+) -> TwoStaged {
+    let payer = funded_keypair(svm, 100 * SOL);
+    let owner = funded_keypair(svm, 100 * SOL);
+    let input_mint = create_mint(svm, &payer, &payer.pubkey(), DECIMALS);
+    let output_mint_a = create_mint(svm, &payer, &payer.pubkey(), DECIMALS);
+    let output_mint_b = create_mint(svm, &payer, &payer.pubkey(), DECIMALS);
+
+    let action_config = vec![
+        verified_cpi(input_mint, output_mint_a, input_bps_a, signed(quoter.pubkey())),
+        verified_cpi(input_mint, output_mint_b, input_bps_b, signed(quoter.pubkey())),
+    ];
+    let salt = [3u8; 32];
+
+    let params = CreateRouteParams {
+        source_chain_id: SOURCE_CHAIN_ID,
+        expected_mint: input_mint,
+        action_config,
+        salt,
+        allowed_adapters: vec![ADAPTER_PROGRAM_ID],
+        allowed_executors: vec![payer.pubkey()],
+    };
+    let hash = route_config_hash_for(&owner.pubkey(), &params);
+    let (route, _) = derive_route_pda(&owner.pubkey(), &hash, &salt);
+    let ix = create_route_ix_with_hash(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        hash,
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    send_ix(svm, ix, &payer, &[&owner]).expect("create_route (two VerifiedCpi) should succeed");
+
+    let (execution_authority, _) = derive_execution_authority_pda(&route);
+    let execution_vault = derive_ata(&execution_authority, &input_mint);
+    mint_to(svm, &payer, &payer, &input_mint, &execution_vault, VAULT);
+
+    let (scratch_authority, _) = derive_scratch_authority_pda(&route);
+    let scratch = create_ata(svm, &payer, &scratch_authority, &input_mint);
+
+    let destination_a = if create_destination_a {
+        create_ata(svm, &payer, &owner.pubkey(), &output_mint_a)
+    } else {
+        derive_ata(&owner.pubkey(), &output_mint_a)
+    };
+    let destination_b = if create_destination_b {
+        create_ata(svm, &payer, &owner.pubkey(), &output_mint_b)
+    } else {
+        derive_ata(&owner.pubkey(), &output_mint_b)
+    };
+
+    // One shared pool authority + input reserve; a distinct output reserve per mint.
+    let (pool_authority, _) =
+        Pubkey::find_program_address(&[mock_swap::POOL_AUTHORITY_SEED], &mock_swap::ID);
+    let pool_input = create_ata(svm, &payer, &pool_authority, &input_mint);
+    let pool_output_a = create_ata(svm, &payer, &pool_authority, &output_mint_a);
+    mint_to(svm, &payer, &payer, &output_mint_a, &pool_output_a, POOL_LIQUIDITY);
+    let pool_output_b = create_ata(svm, &payer, &pool_authority, &output_mint_b);
+    mint_to(svm, &payer, &payer, &output_mint_b, &pool_output_b, POOL_LIQUIDITY);
+
+    let fill_receipt =
+        seed_fill_receipt_with_status(svm, &route, FILL_ID, VAULT, ExecutionStatus::Finalized);
+
+    TwoStaged {
+        payer,
+        input_mint,
+        route,
+        execution_vault,
+        fill_receipt,
+        scratch_authority,
+        scratch,
+        pool_authority,
+        pool_input,
+        input_bps_a,
+        input_bps_b,
+        output_mint_a,
+        output_mint_b,
+        destination_a,
+        destination_b,
+        pool_output_a,
+        pool_output_b,
+    }
+}
+
+impl TwoStaged {
+    /// The per-action remaining-accounts run `[program, <10 template slots>]` for
+    /// output `output_mint` / `destination` / `pool_output`.
+    fn metas_for(
+        &self,
+        output_mint: Pubkey,
+        destination: Pubkey,
+        pool_output: Pubkey,
+    ) -> Vec<AccountMeta> {
+        vec![
+            AccountMeta::new_readonly(mock_swap::ID, false),
+            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false), // input token program (legacy)
+            AccountMeta::new_readonly(self.scratch_authority, false),
+            AccountMeta::new(self.scratch, false),
+            AccountMeta::new(destination, false),
+            AccountMeta::new_readonly(output_mint, false),
+            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false), // output token program (legacy)
+            AccountMeta::new_readonly(self.input_mint, false),
+            AccountMeta::new_readonly(self.pool_authority, false),
+            AccountMeta::new(self.pool_input, false),
+            AccountMeta::new(pool_output, false),
+        ]
+    }
+
+    /// Remaining accounts for both actions, in committed action order (A then B).
+    fn remaining(&self) -> Vec<AccountMeta> {
+        let mut r = self.metas_for(self.output_mint_a, self.destination_a, self.pool_output_a);
+        r.extend(self.metas_for(self.output_mint_b, self.destination_b, self.pool_output_b));
+        r
+    }
+
+    /// The `QuotedAction` tuple for action A (input mint, output mint A, the
+    /// handler-derived input amount for A's bps, and A's signed floor).
+    fn quoted_a(&self, min_out: u64) -> QuotedAction {
+        QuotedAction {
+            input_mint: self.input_mint,
+            output_mint: self.output_mint_a,
+            input_amount: vault_amount_for_bps(self.input_bps_a),
+            min_out,
+        }
+    }
+
+    /// The `QuotedAction` tuple for action B.
+    fn quoted_b(&self, min_out: u64) -> QuotedAction {
+        QuotedAction {
+            input_mint: self.input_mint,
+            output_mint: self.output_mint_b,
+            input_amount: vault_amount_for_bps(self.input_bps_b),
+            min_out,
+        }
+    }
+
+    /// The aggregate signed-quote instruction covering `actions` (in action order),
+    /// signed by `quoter` and bound to this route/fill/expiry.
+    fn agg_quote_ix(
+        &self,
+        quoter: &Keypair,
+        expiry: i64,
+        actions: &[QuotedAction],
+    ) -> solana_sdk::instruction::Instruction {
+        aggregate_quote_ix(quoter, &self.route, &FILL_ID, expiry, actions)
+    }
+}
+
+/// Two VerifiedCpi actions, one aggregate quote over both tuples in action order:
+/// both swaps land in their owner destinations, the shared scratch ends empty,
+/// the whole vault is spent, and the receipt advances to ActionsSucceeded.
+#[test]
+fn aggregate_quote_covers_two_verified_cpi_succeeds() {
+    let mut svm = setup_svm();
+    let quoter = Keypair::new();
+    let s = stage_two(&mut svm, &quoter, 6_000, 4_000, true, true);
+
+    let in_a = vault_amount_for_bps(6_000);
+    let in_b = vault_amount_for_bps(4_000);
+    let out_a = 2_000_000;
+    let out_b = 1_200_000;
+    let min_a = 1_900_000;
+    let min_b = 1_100_000;
+    let expiry = now(&svm) + 3_600;
+
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_a(min_a), s.quoted_b(min_b)]);
+    let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        vec![
+            runtime(swap_data(in_a, out_a), min_a),
+            runtime(swap_data(in_b, out_b), min_b),
+        ],
+        &s.input_mint,
+        s.remaining(),
+        expiry,
+    );
+
+    send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[])
+        .expect("two-action aggregate-quoted batch succeeds");
+
+    assert_eq!(fetch_token_balance(&svm, &s.destination_a), out_a);
+    assert_eq!(fetch_token_balance(&svm, &s.destination_b), out_b);
+    // 6000 + 4000 = 100% of the snapshot; the whole vault is spent.
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), 0);
+    assert_eq!(
+        fetch_token_balance(&svm, &s.scratch),
+        0,
+        "shared scratch swept empty"
+    );
+    assert_eq!(
+        status(&svm, &s.fill_receipt),
+        ExecutionStatus::ActionsSucceeded
+    );
+}
+
+/// Each action's `min_out` is bound individually: the quoter signs both floors,
+/// but action A's swap delivers below A's floor. The tx reverts at the execute ix
+/// with MinOutNotMet, no destination receives anything, the vault is untouched,
+/// and the receipt stays Finalized (retryable).
+#[test]
+fn aggregate_quote_enforces_per_action_min_out() {
+    let mut svm = setup_svm();
+    let quoter = Keypair::new();
+    let s = stage_two(&mut svm, &quoter, 5_000, 5_000, true, true);
+
+    let in_a = vault_amount_for_bps(5_000);
+    let in_b = vault_amount_for_bps(5_000);
+    // A is signed for a 2_000_000 floor but delivers only 1_000_000; B is fine.
+    let min_a = 2_000_000;
+    let min_b = 1_000_000;
+    let out_a = 1_000_000; // below A's signed floor
+    let out_b = 1_500_000;
+    let expiry = now(&svm) + 3_600;
+
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_a(min_a), s.quoted_b(min_b)]);
+    let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        vec![
+            runtime(swap_data(in_a, out_a), min_a),
+            runtime(swap_data(in_b, out_b), min_b),
+        ],
+        &s.input_mint,
+        s.remaining(),
+        expiry,
+    );
+
+    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    assert_eq!(err, exec_error(SraError::MinOutNotMet));
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
+    assert_eq!(fetch_token_balance(&svm, &s.destination_a), 0);
+    assert_eq!(fetch_token_balance(&svm, &s.destination_b), 0);
+    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+}
+
+/// A quote signed over set A's tuples cannot be replayed against a route committed
+/// to set B: the handler reconstructs the root from B's committed output mints, so
+/// the A-root signature no longer matches -> InvalidPriceSignature, funds safe.
+#[test]
+#[allow(non_snake_case)]
+fn aggregate_quote_for_set_A_rejected_for_set_B() {
+    let mut svm = setup_svm();
+    let quoter = Keypair::new();
+    // The live route (set B).
+    let s = stage_two(&mut svm, &quoter, 6_000, 4_000, true, true);
+
+    let in_a = vault_amount_for_bps(6_000);
+    let in_b = vault_amount_for_bps(4_000);
+    let min_a = 1_000_000;
+    let min_b = 1_000_000;
+    let expiry = now(&svm) + 3_600;
+
+    // Set A: identical economics, but different output mints. The quoter signs A's
+    // root; the handler will reconstruct B's (the committed output mints differ).
+    let foreign_out_a = Pubkey::new_unique();
+    let foreign_out_b = Pubkey::new_unique();
+    let set_a = [
+        QuotedAction {
+            input_mint: s.input_mint,
+            output_mint: foreign_out_a,
+            input_amount: in_a,
+            min_out: min_a,
+        },
+        QuotedAction {
+            input_mint: s.input_mint,
+            output_mint: foreign_out_b,
+            input_amount: in_b,
+            min_out: min_b,
+        },
+    ];
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &set_a);
+    let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        vec![
+            runtime(swap_data(in_a, 1_500_000), min_a),
+            runtime(swap_data(in_b, 1_500_000), min_b),
+        ],
+        &s.input_mint,
+        s.remaining(),
+        expiry,
+    );
+
+    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    assert_eq!(err, exec_error(SraError::InvalidPriceSignature));
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
+    assert_eq!(fetch_token_balance(&svm, &s.destination_a), 0);
+    assert_eq!(fetch_token_balance(&svm, &s.destination_b), 0);
+    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+}
+
+/// Order is bound: a quote signed with the two tuples reversed vs the committed
+/// action order does not match the handler's in-order reconstruction ->
+/// InvalidPriceSignature, funds safe.
+#[test]
+fn aggregate_quote_wrong_action_order_rejected() {
+    let mut svm = setup_svm();
+    let quoter = Keypair::new();
+    let s = stage_two(&mut svm, &quoter, 6_000, 4_000, true, true);
+
+    let in_a = vault_amount_for_bps(6_000);
+    let in_b = vault_amount_for_bps(4_000);
+    let min_a = 1_000_000;
+    let min_b = 1_000_000;
+    let expiry = now(&svm) + 3_600;
+
+    // Sign B-then-A; the handler reconstructs A-then-B (committed order).
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_b(min_b), s.quoted_a(min_a)]);
+    let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        vec![
+            runtime(swap_data(in_a, 1_500_000), min_a),
+            runtime(swap_data(in_b, 1_500_000), min_b),
+        ],
+        &s.input_mint,
+        s.remaining(),
+        expiry,
+    );
+
+    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    assert_eq!(err, exec_error(SraError::InvalidPriceSignature));
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
+    assert_eq!(fetch_token_balance(&svm, &s.destination_a), 0);
+    assert_eq!(fetch_token_balance(&svm, &s.destination_b), 0);
+    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+}
+
+/// The aggregate quote carries a batch-wide expiry: an already-elapsed expiry is
+/// rejected up front with PriceQuoteExpired, before any transfer.
+#[test]
+fn aggregate_quote_expired_batch_rejected() {
+    let mut svm = setup_svm();
+    let quoter = Keypair::new();
+    let s = stage_two(&mut svm, &quoter, 6_000, 4_000, true, true);
+
+    let in_a = vault_amount_for_bps(6_000);
+    let in_b = vault_amount_for_bps(4_000);
+    let min_a = 1_000_000;
+    let min_b = 1_000_000;
+    let expired = now(&svm) - 1;
+
+    let ed_ix = s.agg_quote_ix(&quoter, expired, &[s.quoted_a(min_a), s.quoted_b(min_b)]);
+    let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        vec![
+            runtime(swap_data(in_a, 1_500_000), min_a),
+            runtime(swap_data(in_b, 1_500_000), min_b),
+        ],
+        &s.input_mint,
+        s.remaining(),
+        expired,
+    );
+
+    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    assert_eq!(err, exec_error(SraError::PriceQuoteExpired));
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
+    assert_eq!(fetch_token_balance(&svm, &s.destination_a), 0);
+    assert_eq!(fetch_token_balance(&svm, &s.destination_b), 0);
+    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+}
+
+// --------------------------------------------------------------------------
+// On-chain config read (no action_config argument)
+// --------------------------------------------------------------------------
+
+/// execute_actions takes no `action_config` argument — the committed config is read
+/// from the route account. A happy single-VerifiedCpi run (built purely from the
+/// route-derived accounts, with no config passed in the instruction data) succeeds:
+/// the positive baseline for the config-read mutation proof.
+#[test]
+fn execute_reads_route_action_config() {
+    let mut svm = setup_svm();
+    let quoter = Keypair::new();
+    let s = staged_single(&mut svm, &quoter);
+
+    let out_amount = 3_000_000;
+    let min_out = 2_900_000;
+    let expiry = now(&svm) + 3_600;
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, min_out)]);
+    let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        vec![runtime(swap_data(VAULT, out_amount), min_out)],
+        &s.input_mint,
+        s.verified_metas(s.destination),
+        expiry,
+    );
+
+    send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[])
+        .expect("config read from the route drives execution");
+
+    assert_eq!(fetch_token_balance(&svm, &s.destination), out_amount);
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), 0);
+    assert_eq!(
+        fetch_token_balance(&svm, &s.scratch),
+        0,
+        "scratch swept empty"
+    );
+    assert_eq!(
+        status(&svm, &s.fill_receipt),
+        ExecutionStatus::ActionsSucceeded
+    );
+}
+
+/// The relayer-supplied remaining_accounts must match the route's committed action
+/// shape. Here the route commits ONE VerifiedCpi (11 slots: program + 10 template),
+/// but the run supplies only the SplTransfer-shaped single account — a different
+/// action shape — so validation against the committed template rejects it with
+/// ActionAccountMismatch, funds safe. (Replaces the old config-hash-mismatch test:
+/// the config is no longer hashed in, it is read from the route.)
+#[test]
+fn execute_rejects_mismatched_remaining_accounts() {
+    let mut svm = setup_svm();
+    let quoter = Keypair::new();
+    let s = staged_single(&mut svm, &quoter);
+
+    let expiry = now(&svm) + 3_600;
+    let ed_ix = s.agg_quote_ix(&quoter, expiry, &[s.quoted_action(VAULT, 1_000_000)]);
+    // A single account where the committed VerifiedCpi expects [program, 10 slots]:
+    // the account count for that action shape can never be satisfied.
+    let wrong_remaining = vec![AccountMeta::new(s.destination, false)];
+    let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
+        &s.input_mint,
+        wrong_remaining,
+        expiry,
+    );
+
+    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    assert_eq!(err, exec_error(SraError::ActionAccountMismatch));
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
+    assert_eq!(fetch_token_balance(&svm, &s.destination), 0);
+    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+}
