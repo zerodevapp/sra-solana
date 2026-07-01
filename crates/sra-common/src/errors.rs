@@ -168,4 +168,7 @@ pub enum SraError {
 
     #[msg("Executor already present in the allowlist")]
     DuplicateExecutor,
+
+    #[msg("All verified-CPI actions in a route must share one signed-quote signer")]
+    MixedQuoters,
 }

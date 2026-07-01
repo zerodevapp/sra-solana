@@ -141,6 +141,22 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
         SraError::ActionBpsSumExceeded
     );
 
+    // One aggregate signature ⇒ one signer: every SignedQuote VerifiedCpi action
+    // must name the same quoter.
+    let mut quoter: Option<Pubkey> = None;
+    for action in actions {
+        if let SolanaAction::VerifiedCpi {
+            min_out: MinOut::SignedQuote { quoter: q },
+            ..
+        } = action
+        {
+            match quoter {
+                Some(first) => require!(*q == first, SraError::MixedQuoters),
+                None => quoter = Some(*q),
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -442,6 +458,37 @@ mod tests {
             validate_action_config(&[action]).unwrap_err(),
             SraError::InvalidActionConfig.into()
         );
+    }
+
+    #[test]
+    fn validate_action_config_mixed_signed_quoters_rejected() {
+        let q1 = Pubkey::new_unique();
+        let q2 = Pubkey::new_unique();
+        let mut a = valid_verified_cpi(); // quoter = some fixed key; set explicitly below
+        if let SolanaAction::VerifiedCpi { min_out, .. } = &mut a {
+            *min_out = MinOut::SignedQuote { quoter: q1 };
+        }
+        let mut b = valid_verified_cpi();
+        if let SolanaAction::VerifiedCpi { min_out, .. } = &mut b {
+            *min_out = MinOut::SignedQuote { quoter: q2 };
+        }
+        assert_eq!(
+            validate_action_config(&[a, b]).unwrap_err(),
+            SraError::MixedQuoters.into(),
+        );
+    }
+
+    #[test]
+    fn validate_action_config_same_signed_quoter_accepted() {
+        let q = Pubkey::new_unique();
+        let mut a = valid_verified_cpi();
+        let mut b = valid_verified_cpi();
+        for x in [&mut a, &mut b] {
+            if let SolanaAction::VerifiedCpi { min_out, .. } = x {
+                *min_out = MinOut::SignedQuote { quoter: q };
+            }
+        }
+        assert!(validate_action_config(&[a, b]).is_ok());
     }
 
     fn assert_template_rejected(slots: &[SlotRole]) {
