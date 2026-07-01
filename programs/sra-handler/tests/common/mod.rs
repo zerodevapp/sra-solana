@@ -31,7 +31,7 @@ use sra_common::{
     errors::SraError,
     instruction_data::encode_anchor_instruction_data,
     seeds::{
-        action_config_hash, route_config_hash, SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK,
+        route_config_hash, SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK,
         SEED_ASSET_FEE_TIER, SEED_EXECUTION, SEED_FEE_CONFIG, SEED_FILL_RECEIPT, SEED_MINT_NONCE,
         SEED_PROTOCOL_FEE, SEED_SRA, SEED_SRA_ROUTE, SEED_VERIFIED_FILL,
     },
@@ -102,11 +102,10 @@ pub fn swap_data(in_amount: u64, out_amount: u64) -> Vec<u8> {
 }
 
 /// A `VerifiedCpiRuntime` for one mock-swap action.
-pub fn runtime(inner_data: Vec<u8>, min_amount_out: u64, expiry: i64) -> VerifiedCpiRuntime {
+pub fn runtime(inner_data: Vec<u8>, min_amount_out: u64) -> VerifiedCpiRuntime {
     VerifiedCpiRuntime {
         inner_data,
         min_amount_out,
-        expiry,
     }
 }
 
@@ -1580,10 +1579,6 @@ pub fn route_config_hash_for(owner: &Pubkey, params: &CreateRouteParams) -> [u8;
     .expect("route_config_hash should not exceed the action bound")
 }
 
-pub fn action_config_hash_for(params: &CreateRouteParams) -> [u8; 32] {
-    action_config_hash(&params.action_config).expect("action_config_hash within bound")
-}
-
 /// Build a `create_route` instruction. `route_config_hash` is supplied explicitly
 /// so negative tests can pass a tampered hash; `adapter_accounts` are appended as
 /// `remaining_accounts` (the program loader-owned-executable-checks each).
@@ -2023,9 +2018,9 @@ pub fn execute_actions_ix(
     executor: &Pubkey,
     route: &Pubkey,
     fill_id: [u8; 32],
-    action_config: Vec<SolanaAction>,
     mint: &Pubkey,
     recipient_atas: &[Pubkey],
+    quote_expiry: i64,
 ) -> Instruction {
     let remaining = recipient_atas
         .iter()
@@ -2035,10 +2030,10 @@ pub fn execute_actions_ix(
         executor,
         route,
         fill_id,
-        action_config,
         vec![],
         mint,
         remaining,
+        quote_expiry,
     )
 }
 
@@ -2049,10 +2044,10 @@ pub fn execute_actions_ix_full(
     executor: &Pubkey,
     route: &Pubkey,
     fill_id: [u8; 32],
-    action_config: Vec<SolanaAction>,
     verified_runtimes: Vec<VerifiedCpiRuntime>,
     mint: &Pubkey,
     remaining: Vec<AccountMeta>,
+    quote_expiry: i64,
 ) -> Instruction {
     let (execution_authority, _) = derive_execution_authority_pda(route);
     let execution_vault = derive_ata(&execution_authority, mint);
@@ -2074,8 +2069,8 @@ pub fn execute_actions_ix_full(
         accounts,
         data: sra_handler::instruction::ExecuteActions {
             fill_id,
-            action_config,
             verified_runtimes,
+            quote_expiry,
         }
         .data(),
     }
@@ -2086,9 +2081,9 @@ pub fn retry_actions_ix(
     owner: &Pubkey,
     route: &Pubkey,
     fill_id: [u8; 32],
-    action_config: Vec<SolanaAction>,
     mint: &Pubkey,
     recipient_atas: &[Pubkey],
+    quote_expiry: i64,
 ) -> Instruction {
     let remaining = recipient_atas
         .iter()
@@ -2098,10 +2093,10 @@ pub fn retry_actions_ix(
         owner,
         route,
         fill_id,
-        action_config,
         vec![],
         mint,
         remaining,
+        quote_expiry,
     )
 }
 
@@ -2110,10 +2105,10 @@ pub fn retry_actions_ix_full(
     owner: &Pubkey,
     route: &Pubkey,
     fill_id: [u8; 32],
-    action_config: Vec<SolanaAction>,
     verified_runtimes: Vec<VerifiedCpiRuntime>,
     mint: &Pubkey,
     remaining: Vec<AccountMeta>,
+    quote_expiry: i64,
 ) -> Instruction {
     let (execution_authority, _) = derive_execution_authority_pda(route);
     let execution_vault = derive_ata(&execution_authority, mint);
@@ -2135,8 +2130,8 @@ pub fn retry_actions_ix_full(
         accounts,
         data: sra_handler::instruction::RetryActions {
             fill_id,
-            action_config,
             verified_runtimes,
+            quote_expiry,
         }
         .data(),
     }
@@ -2172,4 +2167,17 @@ pub fn ed25519_quote_ix(quoter: &Keypair, message: &[u8]) -> Instruction {
         signature.as_ref().try_into().expect("64-byte ed25519 sig"),
         &quoter.pubkey().to_bytes(),
     )
+}
+
+/// Sign one aggregate quote over the ordered per-action tuples and wrap it in a
+/// self-contained ed25519 instruction (rides at index 0 in the batch).
+pub fn aggregate_quote_ix(
+    quoter: &Keypair,
+    route: &Pubkey,
+    fill_id: &[u8; 32],
+    expiry: i64,
+    actions: &[sra_common::quote::QuotedAction],
+) -> Instruction {
+    let root = sra_common::quote::aggregate_quote_root(route, fill_id, expiry, actions);
+    ed25519_quote_ix(quoter, &root)
 }
