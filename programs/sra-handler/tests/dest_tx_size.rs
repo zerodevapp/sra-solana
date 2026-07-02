@@ -12,12 +12,19 @@
 //! the static account set (or the action payload) is caught before it silently
 //! pushes a real transaction past the packet limit.
 //!
-//! A transaction's serialized size is a pure function of its account count and its
-//! instruction-data length — not of whether the referenced accounts exist on-chain,
-//! nor of a route's committed action list (the route stores only a 32-byte hash of
-//! it; `execute_actions` carries the action list as instruction data). So these
-//! tests build the genuine instructions, via the same builders the SDK uses, at the
-//! heaviest payload the program accepts, and serialize them — they never submit.
+//! A transaction's serialized size is a pure function of its account count, its
+//! signature count, and its instruction-data length — not of whether the
+//! referenced accounts exist on-chain. The route stores its `action_config`
+//! on-chain (set once at `create_route`); `execute_actions` reads it from the
+//! route account and carries only the per-fill runtime data (e.g. a
+//! `VerifiedCpi`'s inner instruction bytes and `min_amount_out`) plus a single
+//! `quoter` account that co-signs the whole batch, attesting every action's
+//! `min_amount_out` and the shared `quote_expiry` — one signature replaces what
+//! used to be a per-action ed25519 quote instruction. So these tests build the
+//! genuine instructions, via the same builders the SDK uses, at the heaviest
+//! payload the program accepts, sign them with every required signer (including
+//! the co-signing quoter, whose signature and account key are NOT compressible
+//! by an address lookup table), and serialize them — they never submit.
 //! (Executing the `VerifiedCpi` path end-to-end belongs to the compute-budget and
 //! end-to-end suites; here only the wire size matters.)
 //!
@@ -28,7 +35,8 @@
 //!     canary, and it fits even without an address lookup table.
 //!   * An address lookup table is **mandatory only for the heavy
 //!     `execute_actions(VerifiedCpi)` shape** — a Jupiter-scale inner route fills
-//!     the account list. The lighter shapes fit unaided.
+//!     the account list, and the co-signing quoter's signature and key still ride
+//!     outside the table. The lighter shapes fit unaided.
 
 mod common;
 
@@ -101,6 +109,23 @@ fn compile_v0(
         .expect("compile v0 message");
     let mut signers: Vec<&Keypair> = vec![payer];
     signers.extend_from_slice(extra_signers);
+    VersionedTransaction::try_new(VersionedMessage::V0(msg), &signers).expect("sign versioned tx")
+}
+
+/// Like `compile_v0` but signed by `payer` plus `extra` co-signers — used when the
+/// instruction set requires a co-signing quoter (its signature adds 64 B and its
+/// account key adds 32 B; signers cannot ride in an address lookup table, so this
+/// MUST be used for any measured transaction that requires a co-signer).
+fn compile_v0_signed(
+    ixs: &[Instruction],
+    payer: &Keypair,
+    extra: &[&Keypair],
+    alts: &[AddressLookupTableAccount],
+) -> VersionedTransaction {
+    let msg = v0::Message::try_compile(&payer.pubkey(), ixs, alts, Hash::default())
+        .expect("compile v0 message");
+    let mut signers: Vec<&Keypair> = vec![payer];
+    signers.extend_from_slice(extra);
     VersionedTransaction::try_new(VersionedMessage::V0(msg), &signers).expect("sign versioned tx")
 }
 
@@ -296,6 +321,25 @@ fn dest_finalize_plus_single_verified_cpi_execute_actions_fits_with_alt() {
     assert!(
         size <= PACKET_DATA_SIZE,
         "finalize + 1-VerifiedCpi execute_actions with ALT is {size} bytes, exceeds {PACKET_DATA_SIZE}-byte packet limit — split into separate transactions (FillReceipt gates the sequence)",
+    );
+}
+
+// Measured 1035 B. The ceiling is deliberately tighter than PACKET_DATA_SIZE
+// (1232) so a regression eroding the two-action headroom fails here before it
+// reaches the wire limit.
+const TWO_VERIFIED_CPI_CEILING: usize = 1_100;
+
+#[test]
+fn dest_two_verified_cpi_execute_actions_fits_with_alt() {
+    let d = dest();
+    let (ixs, quoter) = verified_cpi_ixs(&d, 2);
+    let alt = representative_lookup_table(&ixs);
+    let size = serialized_len(&compile_v0_signed(&ixs, &d.payer, &[&quoter], &[alt]));
+
+    println!("dest execute_actions(2 VerifiedCpi, max template) with ALT: {size} / {PACKET_DATA_SIZE} bytes");
+    assert!(
+        size <= TWO_VERIFIED_CPI_CEILING,
+        "two VerifiedCpi actions must fit in one transaction: {size} > {TWO_VERIFIED_CPI_CEILING}"
     );
 }
 
