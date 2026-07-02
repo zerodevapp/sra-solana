@@ -530,16 +530,6 @@
           }
         },
         {
-          "name": "action_config",
-          "type": {
-            "vec": {
-              "defined": {
-                "name": "SolanaAction"
-              }
-            }
-          }
-        },
-        {
           "name": "verified_runtimes",
           "type": {
             "vec": {
@@ -1692,16 +1682,6 @@
               "u8",
               32
             ]
-          }
-        },
-        {
-          "name": "action_config",
-          "type": {
-            "vec": {
-              "defined": {
-                "name": "SolanaAction"
-              }
-            }
           }
         },
         {
@@ -4136,18 +4116,6 @@
             "type": "pubkey"
           },
           {
-            "name": "action_config_hash",
-            "docs": [
-              "keccak256(borsh(action_config)) — committed by hash, not stored inline."
-            ],
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
             "name": "salt",
             "type": {
               "array": [
@@ -4339,17 +4307,19 @@
             "type": "pubkey"
           },
           {
-            "name": "action_config_hash",
+            "name": "action_config",
             "docs": [
-              "keccak256(borsh(action_config)). The action list is also folded into the",
-              "route's config_hash, but stored only as this digest; callers re-supply the",
-              "list as ix data and verify it against this hash, keeping the account small."
+              "The committed action list, stored typed so later instructions read it",
+              "directly instead of re-verifying a relayer-supplied copy. Also folded into",
+              "the route's config_hash (the PDA seed), so the address inherently commits",
+              "to it."
             ],
             "type": {
-              "array": [
-                "u8",
-                32
-              ]
+              "vec": {
+                "defined": {
+                  "name": "SolanaAction"
+                }
+              }
             }
           },
           {
