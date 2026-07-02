@@ -38,8 +38,12 @@ pub const NO_FEE_BPS_OVERRIDE: u16 = u16::MAX;
 /// Matches EVM `require(slippageBps <= BPS_DENOMINATOR)` in SRAHandler.sol:78.
 pub const MAX_SLIPPAGE_BPS: u16 = BPS_DENOMINATOR;
 
-/// Solana chain ID as registered in the Across protocol.
-pub const SOLANA_CHAIN_ID: u64 = 1_151_111_081_099_592;
+/// Solana chain ID as registered in the Across protocol — MUST equal the
+/// deployed SVM Spoke Pool's `state.chain_id` (it is bound into every relay
+/// hash) and Across's published `CHAIN_IDs.SOLANA`. Pinned by the destination
+/// Surfpool E2E, where the real program rejects fills whose relay hash was
+/// derived from any other value.
+pub const SOLANA_CHAIN_ID: u64 = 34_268_394_551_451;
 
 /// USDC mint on Solana mainnet.
 pub const USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
