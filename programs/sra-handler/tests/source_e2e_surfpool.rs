@@ -90,17 +90,8 @@ impl SurfpoolSourceFixture {
             "bootstrap: Across spoke pool {ACROSS_SPOKE_POOL_ID} is reachable"
         ));
 
-        let payer_airdrop = rpc.request_airdrop(&payer.pubkey(), 10 * SOL)?;
-        rpc.confirm_transaction(&payer_airdrop)?;
-        surfpool_log(format!(
-            "bootstrap: payer airdrop confirmed with signature {payer_airdrop}"
-        ));
-
-        let owner_airdrop = rpc.request_airdrop(&owner.pubkey(), SOL)?;
-        rpc.confirm_transaction(&owner_airdrop)?;
-        surfpool_log(format!(
-            "bootstrap: owner airdrop confirmed with signature {owner_airdrop}"
-        ));
+        request_and_confirm_airdrop(&rpc, "payer", &payer.pubkey(), 10 * SOL)?;
+        request_and_confirm_airdrop(&rpc, "owner", &owner.pubkey(), SOL)?;
 
         let initialize_address_book_root_ix = initialize_address_book_root_ix(
             &payer.pubkey(),

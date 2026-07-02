@@ -125,6 +125,31 @@ pub fn wait_for_program_deploys(rpc: &RpcClient, program_ids: &[Pubkey]) -> Test
     Err("Surfpool did not finish auto-deploying local programs".into())
 }
 
+/// Request an airdrop and poll until it CONFIRMS. `confirm_transaction`
+/// returns `Ok(false)` while the transaction is still unconfirmed — treating
+/// that as success would let later steps fail in harder-to-debug ways.
+pub fn request_and_confirm_airdrop(
+    rpc: &RpcClient,
+    label: &str,
+    key: &Pubkey,
+    lamports: u64,
+) -> TestResult<Signature> {
+    let signature = rpc.request_airdrop(key, lamports)?;
+    for attempt in 1..=SURFPOOL_RETRY_COUNT {
+        if rpc.confirm_transaction(&signature)? {
+            surfpool_log(format!(
+                "request_and_confirm_airdrop[{label}]: confirmed signature {signature} on attempt {attempt}/{SURFPOOL_RETRY_COUNT}"
+            ));
+            return Ok(signature);
+        }
+        surfpool_log(format!(
+            "request_and_confirm_airdrop[{label}]: not yet confirmed on attempt {attempt}/{SURFPOOL_RETRY_COUNT}"
+        ));
+        sleep(Duration::from_millis(SURFPOOL_RETRY_DELAY_MS));
+    }
+    Err(format!("airdrop for {label} ({key}) did not confirm: {signature}").into())
+}
+
 pub fn send_legacy_transaction(
     rpc: &RpcClient,
     label: &str,

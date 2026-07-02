@@ -135,11 +135,7 @@ impl SurfpoolDestFixture {
             ("owner", owner.pubkey(), SOL),
             ("relayer", relayer.pubkey(), SOL),
         ] {
-            let signature = rpc.request_airdrop(&key, lamports)?;
-            rpc.confirm_transaction(&signature)?;
-            surfpool_log(format!(
-                "bootstrap: {label} airdrop confirmed with signature {signature}"
-            ));
+            request_and_confirm_airdrop(&rpc, label, &key, lamports)?;
         }
 
         // A fresh route per bootstrap (fresh owner + salt) — its PDA is the
