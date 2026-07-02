@@ -34,8 +34,7 @@ use common::*;
 use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey, signature::Keypair, signer::Signer};
 use sra_common::{
     errors::SraError,
-    quote::{action_context_hash, signed_quote_message},
-    types::{CreateRouteParams, ExecutionStatus, MinOut, SolanaAction},
+    types::{CreateRouteParams, ExecutionStatus, SolanaAction},
 };
 
 const AMOUNT: u64 = 4_000_000;
@@ -519,7 +518,7 @@ fn verified_cpi(
         input_bps,
         account_template: mock_swap_template(),
         output_mint,
-        min_out: MinOut::SignedQuote { quoter },
+        quoter,
         allow_permissioned_output: false,
     }
 }
@@ -556,25 +555,6 @@ impl VerifiedSetup {
             AccountMeta::new(self.pool_input, false),
             AccountMeta::new(self.pool_output, false),
         ]
-    }
-
-    fn quote_message(
-        &self,
-        action_index: u8,
-        input_amount: u64,
-        min_out: u64,
-        expiry: i64,
-    ) -> Vec<u8> {
-        let context_hash = action_context_hash(&self.f.route, &self.f.fill_id, action_index);
-        signed_quote_message(
-            &context_hash,
-            &self.input_mint,
-            &self.output_mint,
-            input_amount,
-            min_out,
-            expiry,
-        )
-        .to_vec()
     }
 }
 
@@ -646,16 +626,17 @@ fn lifecycle_finalize_verified_cpi_swap_succeed_terminal() {
     let out_amount = 3_000_000;
     let min_out = 2_900_000;
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &v.quote_message(0, AMOUNT, min_out, expiry));
     let exec = execute_actions_ix_full(
         &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        vec![runtime(swap_data(AMOUNT, out_amount), min_out, expiry)],
+        vec![runtime(swap_data(AMOUNT, out_amount), min_out)],
+        expiry,
+        Some(quoter.pubkey()),
         &v.input_mint,
         v.verified_metas(v.destination),
     );
-    send_instructions(&mut svm, &[ed_ix, exec], &v.payer, &[]).expect("verified swap succeeds");
+    send_instructions(&mut svm, &[exec], &v.payer, &[&quoter]).expect("verified swap succeeds");
 
     assert_eq!(fetch_token_balance(&svm, &v.destination), out_amount);
     assert_eq!(fetch_token_balance(&svm, &v.f.execution_vault), 0);
@@ -682,21 +663,21 @@ fn lifecycle_verified_cpi_below_min_out_reverts_then_reexecutes() {
     let expiry = now(&svm) + 3_600;
 
     // Quote demands 3_000_000 but the swap only delivers 2_000_000 -> hard revert.
-    let ed_short = ed25519_quote_ix(&quoter, &v.quote_message(0, AMOUNT, 3_000_000, expiry));
     let exec_short = execute_actions_ix_full(
         &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        vec![runtime(swap_data(AMOUNT, 2_000_000), 3_000_000, expiry)],
+        vec![runtime(swap_data(AMOUNT, 2_000_000), 3_000_000)],
+        expiry,
+        Some(quoter.pubkey()),
         &v.input_mint,
         v.verified_metas(v.destination),
     );
-    let err = send_instructions_expect_err(&mut svm, &[ed_short, exec_short], &v.payer, &[]);
-    // execute_actions sits at index 1 (the ed25519 quote is index 0).
+    let err = send_instructions_expect_err(&mut svm, &[exec_short], &v.payer, &[&quoter]);
     assert_eq!(
         err,
         solana_sdk::transaction::TransactionError::InstructionError(
-            1,
+            0,
             solana_sdk::instruction::InstructionError::Custom(SraError::MinOutNotMet.into()),
         )
     );
@@ -707,16 +688,17 @@ fn lifecycle_verified_cpi_below_min_out_reverts_then_reexecutes() {
     // Re-execute with a quote the swap can satisfy.
     let out_amount = 3_000_000;
     let min_out = 2_900_000;
-    let ed_ok = ed25519_quote_ix(&quoter, &v.quote_message(0, AMOUNT, min_out, expiry));
     let exec_ok = execute_actions_ix_full(
         &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        vec![runtime(swap_data(AMOUNT, out_amount), min_out, expiry)],
+        vec![runtime(swap_data(AMOUNT, out_amount), min_out)],
+        expiry,
+        Some(quoter.pubkey()),
         &v.input_mint,
         v.verified_metas(v.destination),
     );
-    send_instructions(&mut svm, &[ed_ok, exec_ok], &v.payer, &[]).expect("re-execution settles");
+    send_instructions(&mut svm, &[exec_ok], &v.payer, &[&quoter]).expect("re-execution settles");
 
     assert_eq!(fetch_token_balance(&svm, &v.destination), out_amount);
     assert_eq!(fetch_token_balance(&svm, &v.f.execution_vault), 0);
@@ -735,16 +717,17 @@ fn lifecycle_verified_cpi_missing_destination_soft_fail_retry_succeed() {
     let v = stage_verified(&mut svm, &quoter, false, [0x0A; 32]);
     let expiry = now(&svm) + 3_600;
 
-    let ed_ix = ed25519_quote_ix(&quoter, &v.quote_message(0, AMOUNT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
         &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        vec![runtime(swap_data(AMOUNT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(AMOUNT, 1_000_000), 1_000_000)],
+        expiry,
+        Some(quoter.pubkey()),
         &v.input_mint,
         v.verified_metas(v.destination),
     );
-    send_instructions(&mut svm, &[ed_ix, exec], &v.payer, &[])
+    send_instructions(&mut svm, &[exec], &v.payer, &[&quoter])
         .expect("missing destination ATA -> ActionsFailed (soft)");
     assert_eq!(
         status(&svm, &v.f.fill_receipt),
@@ -757,16 +740,17 @@ fn lifecycle_verified_cpi_missing_destination_soft_fail_retry_succeed() {
     let out_amount = 3_000_000;
     let min_out = 2_900_000;
     let expiry2 = now(&svm) + 3_600;
-    let ed_retry = ed25519_quote_ix(&quoter, &v.quote_message(0, AMOUNT, min_out, expiry2));
     let retry = retry_actions_ix_full(
         &v.owner.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        vec![runtime(swap_data(AMOUNT, out_amount), min_out, expiry2)],
+        vec![runtime(swap_data(AMOUNT, out_amount), min_out)],
+        expiry2,
+        Some(quoter.pubkey()),
         &v.input_mint,
         v.verified_metas(v.destination),
     );
-    send_instructions(&mut svm, &[ed_retry, retry], &v.payer, &[&v.owner])
+    send_instructions(&mut svm, &[retry], &v.payer, &[&v.owner, &quoter])
         .expect("retry after creating the destination ATA -> ActionsSucceeded");
 
     assert_eq!(fetch_token_balance(&svm, &v.destination), out_amount);
@@ -842,23 +826,19 @@ fn lifecycle_mixed_spl_transfer_and_verified_cpi_in_one_route() {
     let swap_input = AMOUNT * 7_000 / 10_000;
     let out_amount = 1_500_000;
     let expiry = now(&svm) + 3_600;
-    // The VerifiedCpi is action index 1, so the quote binds to that index.
-    let ed_ix = ed25519_quote_ix(&quoter, &v.quote_message(1, swap_input, out_amount, expiry));
     let mut remaining = vec![AccountMeta::new(recipient_ata, false)];
     remaining.extend(v.verified_metas(v.destination));
     let exec = execute_actions_ix_full(
         &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        vec![runtime(
-            swap_data(swap_input, out_amount),
-            out_amount,
-            expiry,
-        )],
+        vec![runtime(swap_data(swap_input, out_amount), out_amount)],
+        expiry,
+        Some(quoter.pubkey()),
         &v.input_mint,
         remaining,
     );
-    send_instructions(&mut svm, &[ed_ix, exec], &v.payer, &[]).expect("mixed config composes");
+    send_instructions(&mut svm, &[exec], &v.payer, &[&quoter]).expect("mixed config composes");
 
     assert_eq!(
         fetch_token_balance(&svm, &recipient_ata),

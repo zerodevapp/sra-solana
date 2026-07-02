@@ -10,7 +10,6 @@ pub mod constants;
 pub mod errors;
 pub mod fees;
 pub mod instruction_data;
-pub mod quote;
 pub mod seeds;
 pub mod source_deposit;
 #[cfg(not(target_os = "solana"))]

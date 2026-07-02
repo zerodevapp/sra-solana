@@ -21,41 +21,12 @@ use solana_sdk::{
 };
 use sra_common::{
     errors::SraError,
-    types::{
-        AccountTemplate, CreateRouteParams, ExecutionStatus, FixedRole, ManageRouteParams, MinOut,
-        SlotRole, SolanaAction,
-    },
+    types::{CreateRouteParams, ExecutionStatus, ManageRouteParams, SolanaAction},
 };
 
 const AMOUNT: u64 = 4_000_000;
 const SOURCE_CHAIN_ID: u64 = 42_161;
 const FILL_ID: [u8; 32] = [7u8; 32];
-
-/// A valid `VerifiedCpi` action (pins all four required slots, non-zero keys) —
-/// creatable at `create_route`, not executable in this build.
-fn verified_cpi() -> SolanaAction {
-    SolanaAction::VerifiedCpi {
-        program_id: Pubkey::new_unique(),
-        input_mint: Pubkey::new_unique(),
-        input_bps: 10_000,
-        account_template: AccountTemplate {
-            slots: vec![
-                SlotRole::Fixed(FixedRole::TokenProgram),
-                SlotRole::Fixed(FixedRole::SigningAuthority),
-                SlotRole::Fixed(FixedRole::Source),
-                SlotRole::Fixed(FixedRole::Destination),
-                SlotRole::Fixed(FixedRole::OutputMint),
-                SlotRole::Free,
-            ],
-        },
-        output_mint: Pubkey::new_unique(),
-        min_out: MinOut::Oracle {
-            feed: Pubkey::new_unique(),
-            max_slippage_bps: 50,
-        },
-        allow_permissioned_output: false,
-    }
-}
 
 struct Staged {
     payer: solana_sdk::signature::Keypair,
@@ -78,7 +49,7 @@ fn stage(svm: &mut litesvm::LiteSVM, action_config: Vec<SolanaAction>, amount: u
     let params = CreateRouteParams {
         source_chain_id: SOURCE_CHAIN_ID,
         expected_mint: mint,
-        action_config,
+        action_config: action_config.clone(),
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
         // Fee payer is the authorized executor; gate tests below use distinct keypairs.
@@ -441,27 +412,6 @@ fn execute_actions_spl_transfer_non_writable_recipient_rejected() {
     );
     assert_eq!(err, custom_error(SraError::ActionAccountMismatch));
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
-}
-
-#[test]
-fn execute_actions_verified_cpi_action_unsupported() {
-    let mut svm = setup_svm();
-    let s = stage(&mut svm, vec![verified_cpi()], AMOUNT);
-
-    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[]);
-    let err = send_ix_expect_err(
-        &mut svm,
-        ix,
-        &s.payer,
-        &[],
-        "VerifiedCpi not executable yet",
-    );
-    assert_eq!(err, custom_error(SraError::UnsupportedAction));
-
-    // Fail-closed: funds stay, receipt stays Finalized (re-executable once the
-    // VerifiedCpi engine ships — not a terminal ActionsFailed).
-    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
-    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
 }
 
 #[test]

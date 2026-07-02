@@ -10,8 +10,7 @@ use common::*;
 use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey, signature::Keypair, signer::Signer};
 use sra_common::{
     errors::SraError,
-    quote::{action_context_hash, signed_quote_message},
-    types::{CreateRouteParams, ExecutionStatus, ManageRouteParams, MinOut, SolanaAction},
+    types::{CreateRouteParams, ExecutionStatus, ManageRouteParams, SolanaAction},
 };
 
 const AMOUNT: u64 = 4_000_000;
@@ -379,7 +378,7 @@ fn retry_actions_spl_transfer_substitution_rejected() {
 // VerifiedCpi retry runs through the same shared engine as execute_actions
 // --------------------------------------------------------------------------
 
-/// One signed-quote VerifiedCpi action over the shared `mock_swap_template`.
+/// One VerifiedCpi action over the shared `mock_swap_template`, co-signed by `quoter`.
 fn verified_cpi(input_mint: Pubkey, output_mint: Pubkey, quoter: Pubkey) -> SolanaAction {
     SolanaAction::VerifiedCpi {
         program_id: mock_swap::ID,
@@ -387,7 +386,7 @@ fn verified_cpi(input_mint: Pubkey, output_mint: Pubkey, quoter: Pubkey) -> Sola
         input_bps: 10_000,
         account_template: mock_swap_template(),
         output_mint,
-        min_out: MinOut::SignedQuote { quoter },
+        quoter,
         allow_permissioned_output: false,
     }
 }
@@ -425,19 +424,6 @@ impl VerifiedStaged {
             AccountMeta::new(self.pool_input, false),
             AccountMeta::new(self.pool_output, false),
         ]
-    }
-
-    fn quote_message(&self, input_amount: u64, min_amount_out: u64, expiry: i64) -> Vec<u8> {
-        let context_hash = action_context_hash(&self.route, &FILL_ID, 0);
-        signed_quote_message(
-            &context_hash,
-            &self.input_mint,
-            &self.output_mint,
-            input_amount,
-            min_amount_out,
-            expiry,
-        )
-        .to_vec()
     }
 }
 
@@ -520,16 +506,17 @@ fn retry_actions_verified_cpi_reuses_engine() {
     let out_amount = 3_000_000;
     let min_out = 2_900_000;
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &v.quote_message(VAULT, min_out, expiry));
     let retry = retry_actions_ix_full(
         &v.owner.pubkey(),
         &v.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, out_amount), min_out, expiry)],
+        vec![runtime(swap_data(VAULT, out_amount), min_out)],
+        expiry,
+        Some(quoter.pubkey()),
         &v.input_mint,
         v.verified_metas(),
     );
-    send_instructions(&mut svm, &[ed_ix, retry], &v.payer, &[&v.owner])
+    send_instructions(&mut svm, &[retry], &v.payer, &[&v.owner, &quoter])
         .expect("VerifiedCpi retry settles through the shared engine");
 
     // The swap ran on the retry path: output delivered, scratch swept, vault spent.

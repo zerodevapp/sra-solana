@@ -10,12 +10,11 @@
 //! 4. Require `post − pre ≥ min_out` on the pinned output, fail-closed.
 //! 5. Sweep the scratch back to the vault; it must end empty.
 //!
-//! `min_out` comes from an ed25519 signed quote bound to a per-fill/per-action
-//! context hash (a port of the EVM signed-pair resolver; ed25519, not secp256k1).
+//! `min_out` is attested by the route-committed quoter co-signing the transaction
+//! (checked by the caller before this engine runs), not derived here.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
-use anchor_lang::solana_program::sysvar::instructions as ix_sysvar;
 use anchor_spl::token::{transfer_checked, TransferChecked};
 use anchor_spl::token_2022::spl_token_2022::extension::default_account_state::DefaultAccountState;
 use anchor_spl::token_2022::spl_token_2022::extension::{
@@ -26,28 +25,9 @@ use anchor_spl::token_2022::spl_token_2022::state::{
 };
 
 use sra_common::errors::SraError;
-use sra_common::quote::SIGNED_QUOTE_MESSAGE_LEN;
 use sra_common::types::{AccountTemplate, FixedRole, SlotRole};
 
 use crate::utils::adapter::is_program_owner;
-
-/// The ed25519 native verification program.
-const ED25519_PROGRAM_ID: Pubkey = pubkey!("Ed25519SigVerify111111111111111111111111111");
-
-/// Defensive cap on how many transaction instructions the quote scan walks. The
-/// v0 transaction account/instruction budget is far below this; the scan also
-/// stops at the first out-of-range index.
-const MAX_INSTRUCTION_SCAN: usize = 64;
-
-// ed25519 single-signature, self-contained instruction-data layout
-// (see solana's ed25519 program). All `*_instruction_index` fields are
-// `u16::MAX`, meaning the pubkey/signature/message live in this same instruction.
-const ED25519_NUM_SIGNATURES_OFFSET: usize = 0;
-const ED25519_OFFSETS_START: usize = 2;
-const ED25519_OFFSETS_LEN: usize = 14;
-const ED25519_DATA_START: usize = ED25519_OFFSETS_START + ED25519_OFFSETS_LEN; // 16
-const ED25519_PUBKEY_LEN: usize = 32;
-const ED25519_SIGNATURE_LEN: usize = 64;
 
 // ---------------------------------------------------------------------------
 // Post-condition trait (the only per-action-type difference)
@@ -371,187 +351,9 @@ fn mint_data_is_permissioned(data: &[u8]) -> Result<bool> {
     Ok(false)
 }
 
-// ---------------------------------------------------------------------------
-// Signed-quote resolution (ed25519)
-// ---------------------------------------------------------------------------
-
-/// Confirm the transaction carries an authorized, unexpired signed quote whose
-/// bytes equal `expected_message`. Solana verifies the ed25519 precompile over
-/// the whole transaction at load, before any instruction runs — so a matching
-/// ed25519 instruction *anywhere* in the tx is already verified, and the scan is
-/// position-independent by design (restricting it to earlier indices would only
-/// reject valid orderings, not add safety). This just locates that verification
-/// and checks the signer is the route-committed `quoter` over our message.
-pub(crate) fn verify_signed_quote(
-    instructions_sysvar: &AccountInfo,
-    quoter: &Pubkey,
-    expected_message: &[u8; SIGNED_QUOTE_MESSAGE_LEN],
-    expiry: i64,
-    now: i64,
-) -> Result<()> {
-    require!(now <= expiry, SraError::PriceQuoteExpired);
-
-    for index in 0..MAX_INSTRUCTION_SCAN {
-        let ix = match ix_sysvar::load_instruction_at_checked(index, instructions_sysvar) {
-            Ok(ix) => ix,
-            Err(_) => break,
-        };
-        if ix.program_id != ED25519_PROGRAM_ID {
-            continue;
-        }
-        if let Some((signer, message)) = parse_ed25519_self_contained(&ix.data) {
-            if signer == *quoter && message == expected_message.as_slice() {
-                return Ok(());
-            }
-        }
-    }
-    Err(SraError::InvalidPriceSignature.into())
-}
-
-/// Extract `(pubkey, message)` from a single-signature, self-contained ed25519
-/// instruction in the exact canonical layout the ed25519 instruction builder
-/// emits: `[num_sigs=1][pad][offsets(14)][pubkey(32)][signature(64)][message]`,
-/// all `*_instruction_index` fields `u16::MAX`, and no trailing bytes. Returns
-/// `None` (fail-closed) for anything else — multi-signature data, a
-/// cross-instruction reference, non-canonical offsets, or trailing bytes.
-///
-/// The signature is not re-checked here: the ed25519 native program verifies it
-/// transaction-wide before any instruction runs, so a matching record implies the
-/// signer signed the message. Pinning the canonical layout means the bytes we read
-/// as `(pubkey, message)` are exactly the region the precompile bound to that
-/// signature — there is no offset-aliasing slack.
-fn parse_ed25519_self_contained(data: &[u8]) -> Option<(Pubkey, &[u8])> {
-    if data.len() < ED25519_DATA_START {
-        return None;
-    }
-    // Exactly one signature, fully self-contained.
-    if data[ED25519_NUM_SIGNATURES_OFFSET] != 1 {
-        return None;
-    }
-    let o = &data[ED25519_OFFSETS_START..ED25519_DATA_START];
-    let u16le = |start: usize| u16::from_le_bytes([o[start], o[start + 1]]);
-    let signature_offset = u16le(0) as usize;
-    let signature_instruction_index = u16le(2);
-    let public_key_offset = u16le(4) as usize;
-    let public_key_instruction_index = u16le(6);
-    let message_data_offset = u16le(8) as usize;
-    let message_data_size = u16le(10) as usize;
-    let message_instruction_index = u16le(12);
-
-    // Self-contained only: pubkey, signature, and message must live in this
-    // instruction (index == u16::MAX), never referenced from another.
-    if signature_instruction_index != u16::MAX
-        || public_key_instruction_index != u16::MAX
-        || message_instruction_index != u16::MAX
-    {
-        return None;
-    }
-
-    // Canonical, gap-free layout: pubkey then signature then message, with no
-    // trailing bytes. This forces the offsets we read to be the ones the
-    // precompile verified over.
-    let expected_signature_offset = ED25519_DATA_START + ED25519_PUBKEY_LEN;
-    let expected_message_offset = expected_signature_offset + ED25519_SIGNATURE_LEN;
-    if public_key_offset != ED25519_DATA_START
-        || signature_offset != expected_signature_offset
-        || message_data_offset != expected_message_offset
-        || data.len() != message_data_offset.checked_add(message_data_size)?
-    {
-        return None;
-    }
-
-    let pubkey = Pubkey::try_from(&data[public_key_offset..expected_signature_offset]).ok()?;
-    Some((pubkey, &data[message_data_offset..]))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Build a self-contained single-signature ed25519 instruction's data, exactly
-    /// as solana's `new_ed25519_instruction_with_signature` does.
-    fn ed25519_data(pubkey: &[u8; 32], signature: &[u8; 64], message: &[u8]) -> Vec<u8> {
-        let public_key_offset = ED25519_DATA_START; // 16
-        let signature_offset = public_key_offset + ED25519_PUBKEY_LEN; // 48
-        let message_data_offset = signature_offset + 64; // 112
-
-        let mut data = Vec::new();
-        data.push(1u8); // num_signatures
-        data.push(0u8); // padding
-        data.extend_from_slice(&(signature_offset as u16).to_le_bytes());
-        data.extend_from_slice(&u16::MAX.to_le_bytes()); // signature_instruction_index
-        data.extend_from_slice(&(public_key_offset as u16).to_le_bytes());
-        data.extend_from_slice(&u16::MAX.to_le_bytes()); // public_key_instruction_index
-        data.extend_from_slice(&(message_data_offset as u16).to_le_bytes());
-        data.extend_from_slice(&(message.len() as u16).to_le_bytes());
-        data.extend_from_slice(&u16::MAX.to_le_bytes()); // message_instruction_index
-        data.extend_from_slice(pubkey);
-        data.extend_from_slice(signature);
-        data.extend_from_slice(message);
-        data
-    }
-
-    #[test]
-    fn parses_self_contained_pubkey_and_message() {
-        let pubkey = [7u8; 32];
-        let signature = [9u8; 64];
-        let message = b"the signed quote message bytes";
-        let data = ed25519_data(&pubkey, &signature, message);
-        let (parsed_pk, parsed_msg) = parse_ed25519_self_contained(&data).unwrap();
-        assert_eq!(parsed_pk.to_bytes(), pubkey);
-        assert_eq!(parsed_msg, message);
-    }
-
-    #[test]
-    fn rejects_multi_signature_header() {
-        let mut data = ed25519_data(&[7u8; 32], &[9u8; 64], b"msg");
-        data[0] = 2; // num_signatures != 1
-        assert!(parse_ed25519_self_contained(&data).is_none());
-    }
-
-    #[test]
-    fn rejects_cross_instruction_reference() {
-        let mut data = ed25519_data(&[7u8; 32], &[9u8; 64], b"msg");
-        // Flip public_key_instruction_index away from u16::MAX.
-        let pk_ix_idx_at = ED25519_OFFSETS_START + 6;
-        data[pk_ix_idx_at] = 0;
-        data[pk_ix_idx_at + 1] = 0;
-        assert!(parse_ed25519_self_contained(&data).is_none());
-    }
-
-    #[test]
-    fn rejects_out_of_bounds_message() {
-        let mut data = ed25519_data(&[7u8; 32], &[9u8; 64], b"msg");
-        // Inflate message_data_size past the buffer.
-        let size_at = ED25519_OFFSETS_START + 10;
-        data[size_at] = 0xff;
-        data[size_at + 1] = 0xff;
-        assert!(parse_ed25519_self_contained(&data).is_none());
-    }
-
-    #[test]
-    fn rejects_truncated_data() {
-        assert!(parse_ed25519_self_contained(&[1u8, 0u8]).is_none());
-    }
-
-    #[test]
-    fn rejects_non_canonical_pubkey_offset() {
-        // A pubkey offset other than the canonical 16 (here pointing past the
-        // signature) must be rejected even though it is in-bounds.
-        let mut data = ed25519_data(&[7u8; 32], &[9u8; 64], b"message");
-        let pk_off_at = ED25519_OFFSETS_START + 4;
-        data[pk_off_at..pk_off_at + 2]
-            .copy_from_slice(&((ED25519_DATA_START + 1) as u16).to_le_bytes());
-        assert!(parse_ed25519_self_contained(&data).is_none());
-    }
-
-    #[test]
-    fn rejects_trailing_bytes() {
-        // Extra bytes after the message break the gap-free canonical length check.
-        let mut data = ed25519_data(&[7u8; 32], &[9u8; 64], b"message");
-        data.push(0xaa);
-        assert!(parse_ed25519_self_contained(&data).is_none());
-    }
 
     // ---- mint_is_permissioned (Token-2022 extension scan) ----
 

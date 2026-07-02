@@ -1210,39 +1210,6 @@
       }
     },
     {
-      "name": "MinOut",
-      "docs": [
-        "Minimum-output reference for a `VerifiedCpi`'s post-fee balance-diff gate."
-      ],
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "SignedQuote",
-            "fields": [
-              {
-                "name": "quoter",
-                "type": "pubkey"
-              }
-            ]
-          },
-          {
-            "name": "Oracle",
-            "fields": [
-              {
-                "name": "feed",
-                "type": "pubkey"
-              },
-              {
-                "name": "max_slippage_bps",
-                "type": "u16"
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
       "name": "MintNonce",
       "docs": [
         "Persistent nonce per `(sra_config, source_mint)`. The owner-signed deposit",
@@ -1416,12 +1383,12 @@
                 "type": "pubkey"
               },
               {
-                "name": "min_out",
-                "type": {
-                  "defined": {
-                    "name": "MinOut"
-                  }
-                }
+                "name": "quoter",
+                "docs": [
+                  "The off-chain quoter that must co-sign any transaction executing this",
+                  "action; it attests the relayer-supplied `min_amount_out`s and expiry."
+                ],
+                "type": "pubkey"
               },
               {
                 "name": "allow_permissioned_output",

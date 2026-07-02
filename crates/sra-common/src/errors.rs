@@ -147,7 +147,7 @@ pub enum SraError {
     #[msg("Signed price quote has expired")]
     PriceQuoteExpired,
 
-    #[msg("No matching authorized signed price quote was found in the transaction")]
+    #[msg("Quoter did not co-sign the transaction or does not match the route-committed quoter")]
     InvalidPriceSignature,
 
     #[msg("Output mint is permissioned (permanent-delegate / pausable / default-frozen) and the action did not opt in")]

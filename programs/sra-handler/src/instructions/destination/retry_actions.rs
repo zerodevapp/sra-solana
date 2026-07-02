@@ -1,8 +1,8 @@
 //! Owner-gated re-execution of a route's committed actions after an
-//! `execute_actions` run left the receipt `ActionsFailed`. Re-runs the same
-//! `action_config` through the shared `run_committed_actions`, so retry can never
-//! diverge from first execution. Retryable indefinitely (no counter); the other
-//! `ActionsFailed` escape is `recover_funds`.
+//! `execute_actions` run left the receipt `ActionsFailed`. Re-runs the route's
+//! stored `action_config` through the shared `run_committed_actions`, so retry can
+//! never diverge from first execution. Retryable indefinitely (no counter); the
+//! other `ActionsFailed` escape is `recover_funds`.
 
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
@@ -41,9 +41,11 @@ pub struct RetryActions<'info> {
     )]
     pub execution_vault: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
-    /// CHECK: instructions sysvar; locates the `VerifiedCpi` signed price quote.
-    #[account(address = anchor_lang::solana_program::sysvar::instructions::ID)]
-    pub instructions_sysvar: UncheckedAccount<'info>,
+    /// The route-committed quoter co-signing this transaction. Required when the
+    /// route's committed actions include a `VerifiedCpi`; omitted otherwise. The
+    /// runtime has already verified its signature over the whole transaction, so
+    /// the handler only checks presence + identity + the co-signed expiry.
+    pub quoter: Option<Signer<'info>>,
     // Per-action accounts ride in `remaining_accounts`, identical to `ExecuteActions`.
 }
 
@@ -51,6 +53,7 @@ pub(crate) fn handler<'info>(
     ctx: Context<'_, '_, '_, 'info, RetryActions<'info>>,
     fill_id: [u8; 32],
     verified_runtimes: Vec<VerifiedCpiRuntime>,
+    quote_expiry: i64,
 ) -> Result<()> {
     // Only an ActionsFailed receipt is retryable (Finalized -> execute_actions; terminal states can't re-run).
     require!(
@@ -67,12 +70,12 @@ pub(crate) fn handler<'info>(
         execution_authority: &ctx.accounts.execution_authority,
         execution_vault: &ctx.accounts.execution_vault,
         token_program: &ctx.accounts.token_program,
-        instructions_sysvar: &ctx.accounts.instructions_sysvar,
+        quoter: ctx.accounts.quoter.as_ref(),
         remaining_accounts: ctx.remaining_accounts,
         execution_authority_bump: ctx.bumps.execution_authority,
     };
 
-    match run_committed_actions(&accounts, fill_id, &verified_runtimes)? {
+    match run_committed_actions(&accounts, &verified_runtimes, quote_expiry)? {
         ActionOutcome::Succeeded => {
             // The re-run applied. ActionsRetried is the retry-path success event
             // (the counterpart of execute_actions' ActionsExecuted), not a re-attempt.

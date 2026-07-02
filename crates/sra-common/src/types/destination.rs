@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::constants::{MAX_ACTION_IDXS, MAX_ADAPTERS, MAX_EXECUTORS};
-use crate::types::actions::{AccountTemplate, MinOut};
+use crate::types::actions::AccountTemplate;
 
 /// A pre-registered action to execute on the destination chain after fill
 /// finalization. v1: `SplTransfer` (static, exact-match accounts) and
@@ -15,9 +15,9 @@ pub enum SolanaAction {
         amount_bps: u16,
     },
     /// Spend a fraction of the vault through a pinned program, verifying the
-    /// post-fee output by balance-diff against `min_out`. Routing accounts are
-    /// relayer-supplied (`Free` slots); the value-bearing slots are pinned by
-    /// `account_template`.
+    /// post-fee output by balance-diff against the quoter-attested `min_amount_out`.
+    /// Routing accounts are relayer-supplied (`Free` slots); the value-bearing
+    /// slots are pinned by `account_template`.
     VerifiedCpi {
         /// Pinned program — checked loader-owned-executable + exact pubkey at execution.
         program_id: Pubkey,
@@ -28,7 +28,9 @@ pub enum SolanaAction {
         account_template: AccountTemplate,
         /// Fungible receipt the engine balance-diffs (swap output, vault share, LST, …).
         output_mint: Pubkey,
-        min_out: MinOut,
+        /// The off-chain quoter that must co-sign any transaction executing this
+        /// action; it attests the relayer-supplied `min_amount_out`s and expiry.
+        quoter: Pubkey,
         /// Opt-in for Token-2022 permissioned (perm-delegate / frozen) output mints.
         allow_permissioned_output: bool,
     },
@@ -91,19 +93,15 @@ pub struct ManageRouteParams {
 }
 
 /// Per-`VerifiedCpi`-action runtime data the relayer supplies to `execute_actions`,
-/// one entry per `VerifiedCpi` action in action order. Carries the inner CPI's
-/// instruction data plus the signed-quote fields (`min_amount_out`, `expiry`); the
-/// quote's signature rides in a separate ed25519 instruction in the same
-/// transaction. `min_amount_out`/`expiry` are bound into the quote message and
-/// verified against the route-committed quoter, so a relayer cannot inflate them.
+/// one entry per `VerifiedCpi` action in action order. The route-committed quoter
+/// co-signs the whole transaction, so `min_amount_out` (and the batch
+/// `quote_expiry` argument) are quoter-attested with no separate signed message.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct VerifiedCpiRuntime {
     /// The inner program's instruction data (relayer-built swap/deposit args).
     pub inner_data: Vec<u8>,
-    /// The signed quote's minimum acceptable output (the balance-diff floor).
+    /// The quoter-attested minimum acceptable output (the balance-diff floor).
     pub min_amount_out: u64,
-    /// The signed quote's unix expiry.
-    pub expiry: i64,
 }
 
 /// Execution status state machine for fill lifecycle.
@@ -139,8 +137,8 @@ mod tests {
     fn solana_action_init_space_covers_verified_cpi() {
         // InitSpace reserves the larger variant. VerifiedCpi = 32 program_id
         // + 32 input_mint + 2 input_bps + 68 account_template + 32 output_mint
-        // + 35 min_out + 1 allow_permissioned_output = 202; enum disc (1) + 202.
-        assert_eq!(SolanaAction::INIT_SPACE, 203);
+        // + 32 quoter + 1 allow_permissioned_output = 199; enum disc (1) + 199.
+        assert_eq!(SolanaAction::INIT_SPACE, 200);
     }
 
     fn sample_verified_cpi() -> SolanaAction {
@@ -158,10 +156,7 @@ mod tests {
                 ],
             },
             output_mint: Pubkey::new_unique(),
-            min_out: MinOut::Oracle {
-                feed: Pubkey::new_unique(),
-                max_slippage_bps: 50,
-            },
+            quoter: Pubkey::new_unique(),
             allow_permissioned_output: true,
         }
     }
@@ -186,11 +181,11 @@ mod tests {
     #[test]
     fn solana_sra_route_init_space() {
         // 32 owner + 8 source_chain_id + 32 expected_mint
-        // + 4 + (4 * 203) action_config + 32 salt
+        // + 4 + (4 * 200) action_config + 32 salt
         // + 4 + (32 * 8) allowed_adapters
         // + 4 + (32 * 8) allowed_executors + 1 paused + 1 bump
-        // = 32 + 8 + 32 + (4 + 812) + 32 + 260 + 260 + 1 + 1 = 1442
-        assert_eq!(SolanaSraRoute::INIT_SPACE, 1442);
+        // = 32 + 8 + 32 + 804 + 32 + 260 + 260 + 1 + 1 = 1430
+        assert_eq!(SolanaSraRoute::INIT_SPACE, 1430);
     }
 
     #[test]
