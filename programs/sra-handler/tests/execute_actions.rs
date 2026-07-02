@@ -64,7 +64,6 @@ struct Staged {
     route: Pubkey,
     execution_vault: Pubkey,
     fill_receipt: Pubkey,
-    action_config: Vec<SolanaAction>,
 }
 
 /// Create a route with `action_config`, fund its execution vault with `amount`,
@@ -79,7 +78,7 @@ fn stage(svm: &mut litesvm::LiteSVM, action_config: Vec<SolanaAction>, amount: u
     let params = CreateRouteParams {
         source_chain_id: SOURCE_CHAIN_ID,
         expected_mint: mint,
-        action_config: action_config.clone(),
+        action_config,
         salt,
         allowed_adapters: vec![ADAPTER_PROGRAM_ID],
         // Fee payer is the authorized executor; gate tests below use distinct keypairs.
@@ -111,7 +110,6 @@ fn stage(svm: &mut litesvm::LiteSVM, action_config: Vec<SolanaAction>, amount: u
         route,
         execution_vault,
         fill_receipt,
-        action_config,
     }
 }
 
@@ -130,7 +128,6 @@ fn execute_actions_single_spl_transfer_succeeds() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -153,14 +150,7 @@ fn execute_actions_multiple_all_succeed() {
     let a1 = create_ata(&mut svm, &s.payer, &r1, &s.mint);
     let a2 = create_ata(&mut svm, &s.payer, &r2, &s.mint);
 
-    let ix = execute_actions_ix(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        s.action_config.clone(),
-        &s.mint,
-        &[a1, a2],
-    );
+    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[a1, a2]);
     send_ix(&mut svm, ix, &s.payer, &[]).expect("execute_actions should succeed");
 
     // 60/40 of the same start-of-run snapshot drains the vault exactly.
@@ -178,7 +168,7 @@ fn execute_actions_empty_action_config_immediately_succeeds() {
     let mut svm = setup_svm();
     let s = stage(&mut svm, vec![], AMOUNT);
 
-    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, vec![], &s.mint, &[]);
+    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[]);
     send_ix(&mut svm, ix, &s.payer, &[]).expect("empty action_config is a no-op success");
 
     // No actions, no transfers — funds stay staged, status is terminal-success.
@@ -200,14 +190,7 @@ fn execute_actions_partial_bps_sum_leaves_dust_and_succeeds() {
     let a1 = create_ata(&mut svm, &s.payer, &r1, &s.mint);
     let a2 = create_ata(&mut svm, &s.payer, &r2, &s.mint);
 
-    let ix = execute_actions_ix(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        s.action_config.clone(),
-        &s.mint,
-        &[a1, a2],
-    );
+    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[a1, a2]);
     send_ix(&mut svm, ix, &s.payer, &[]).expect("under-100% drain succeeds");
 
     assert_eq!(fetch_token_balance(&svm, &a1), 2_400_000);
@@ -230,7 +213,6 @@ fn execute_actions_emits_actions_executed() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -257,7 +239,6 @@ fn execute_actions_failure_sets_actions_failed_and_preserves_funds() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -289,7 +270,6 @@ fn execute_actions_frozen_recipient_ata_sets_actions_failed() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -319,7 +299,6 @@ fn execute_actions_frozen_source_vault_sets_actions_failed() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -348,14 +327,7 @@ fn execute_actions_partial_failure_atomic() {
     let a2 = derive_ata(&r2, &s.mint); // the middle action's ATA is missing
     let a3 = create_ata(&mut svm, &s.payer, &r3, &s.mint);
 
-    let ix = execute_actions_ix(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        s.action_config.clone(),
-        &s.mint,
-        &[a1, a2, a3],
-    );
+    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[a1, a2, a3]);
     send_ix(&mut svm, ix, &s.payer, &[]).expect("returns Ok with ActionsFailed");
 
     // The whole batch unwound — NO partial transfers to actions 1 or 3.
@@ -379,7 +351,6 @@ fn execute_actions_emits_actions_failed() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -406,7 +377,6 @@ fn execute_actions_non_finalized_status_rejected() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -421,43 +391,11 @@ fn execute_actions_non_finalized_status_rejected() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
     let err = send_ix_expect_err(&mut svm, ix2, &s.payer, &[], "non-finalized rejected");
     assert_eq!(err, custom_error(SraError::InvalidExecutionStatus));
-}
-
-#[test]
-fn execute_actions_action_config_must_hash_match_committed() {
-    let mut svm = setup_svm();
-    let recipient = Pubkey::new_unique();
-    let s = stage(&mut svm, vec![spl(recipient, 10_000)], AMOUNT);
-    let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
-
-    // Same recipient, different amount_bps -> different action_config_hash.
-    let tampered = vec![spl(recipient, 5_000)];
-    let ix = execute_actions_ix(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        tampered,
-        &s.mint,
-        &[recipient_ata],
-    );
-    let err = send_ix_expect_err(
-        &mut svm,
-        ix,
-        &s.payer,
-        &[],
-        "tampered action_config rejected",
-    );
-    assert_eq!(err, custom_error(SraError::ActionConfigHashMismatch));
-
-    // Funds untouched, receipt still finalizable.
-    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
-    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
 }
 
 #[test]
@@ -469,14 +407,7 @@ fn execute_actions_spl_transfer_remaining_accounts_substitution_rejected() {
     // A different recipient's ATA — correct shape, wrong pubkey.
     let wrong_ata = derive_ata(&Pubkey::new_unique(), &s.mint);
 
-    let ix = execute_actions_ix(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        s.action_config.clone(),
-        &s.mint,
-        &[wrong_ata],
-    );
+    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[wrong_ata]);
     let err = send_ix_expect_err(&mut svm, ix, &s.payer, &[], "account substitution rejected");
     assert_eq!(err, custom_error(SraError::ActionAccountMismatch));
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
@@ -494,7 +425,6 @@ fn execute_actions_spl_transfer_non_writable_recipient_rejected() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -518,14 +448,7 @@ fn execute_actions_verified_cpi_action_unsupported() {
     let mut svm = setup_svm();
     let s = stage(&mut svm, vec![verified_cpi()], AMOUNT);
 
-    let ix = execute_actions_ix(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        s.action_config.clone(),
-        &s.mint,
-        &[],
-    );
+    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[]);
     let err = send_ix_expect_err(
         &mut svm,
         ix,
@@ -554,7 +477,6 @@ fn execute_actions_cu_exhaustion_leaves_receipt_retryable() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -571,7 +493,6 @@ fn execute_actions_cu_exhaustion_leaves_receipt_retryable() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -642,7 +563,6 @@ fn execute_actions_authorized_distinct_executor_succeeds() {
         &executor.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -669,7 +589,6 @@ fn execute_actions_unauthorized_caller_rejected() {
         &intruder.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -702,7 +621,6 @@ fn execute_actions_empty_executors_freezes() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -733,7 +651,6 @@ fn execute_actions_paused_route_rejected() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );

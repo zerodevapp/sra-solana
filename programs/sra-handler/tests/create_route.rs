@@ -38,7 +38,7 @@ fn create_route_happy_path() {
     assert_eq!(route.owner, owner.pubkey());
     assert_eq!(route.source_chain_id, params.source_chain_id);
     assert_eq!(route.expected_mint, mint);
-    assert_eq!(route.action_config_hash, action_config_hash_for(&params));
+    assert_eq!(route.action_config, params.action_config);
     assert_eq!(route.salt, params.salt);
     assert_eq!(route.allowed_adapters, vec![ADAPTER_PROGRAM_ID]);
     assert!(
@@ -78,7 +78,6 @@ fn create_route_emits_route_created() {
     assert_eq!(ev.owner, owner.pubkey());
     assert_eq!(ev.source_chain_id, params.source_chain_id);
     assert_eq!(ev.expected_mint, mint);
-    assert_eq!(ev.action_config_hash, action_config_hash_for(&params));
     assert_eq!(ev.salt, params.salt);
     assert_eq!(ev.allowed_adapters, vec![ADAPTER_PROGRAM_ID]);
     assert!(ev.allowed_executors.is_empty());
@@ -245,7 +244,7 @@ fn create_route_config_hash_matches_offchain() {
     let (route_pda, _) = derive_route_pda(&owner.pubkey(), &hash, &params.salt);
     let route = fetch_route(&svm, &route_pda);
     assert_eq!(route.owner, owner.pubkey());
-    assert_eq!(route.action_config_hash, action_config_hash_for(&params));
+    assert_eq!(route.action_config, params.action_config);
 }
 
 #[test]
@@ -565,8 +564,8 @@ fn create_route_verified_cpi_happy_path() {
     send_ix(&mut svm, ix, &payer, &[&owner]).expect("a well-formed VerifiedCpi route is created");
 
     assert_eq!(
-        fetch_route(&svm, &route_pda).action_config_hash,
-        action_config_hash_for(&params)
+        fetch_route(&svm, &route_pda).action_config,
+        params.action_config
     );
 }
 

@@ -25,7 +25,7 @@ use anchor_spl::token::{transfer_checked, Mint, Token, TokenAccount, TransferChe
 use sra_common::constants::BPS_DENOMINATOR;
 use sra_common::errors::SraError;
 use sra_common::quote::{action_context_hash, signed_quote_message};
-use sra_common::seeds::{action_config_hash, SEED_EXECUTION, SEED_FILL_RECEIPT, SEED_SCRATCH};
+use sra_common::seeds::{SEED_EXECUTION, SEED_FILL_RECEIPT, SEED_SCRATCH};
 use sra_common::types::{
     ExecutionStatus, FillReceipt, FixedRole, MinOut, SolanaAction, SolanaSraRoute,
     VerifiedCpiRuntime,
@@ -121,7 +121,6 @@ pub(crate) struct ActionAccounts<'a, 'info> {
 pub(crate) fn handler<'info>(
     ctx: Context<'_, '_, '_, 'info, ExecuteActions<'info>>,
     fill_id: [u8; 32],
-    action_config: Vec<SolanaAction>,
     verified_runtimes: Vec<VerifiedCpiRuntime>,
 ) -> Result<()> {
     // Must be settled and not yet acted on (ActionsFailed is retried via retry_actions).
@@ -151,7 +150,7 @@ pub(crate) fn handler<'info>(
         execution_authority_bump: ctx.bumps.execution_authority,
     };
 
-    match run_committed_actions(&accounts, fill_id, &action_config, &verified_runtimes)? {
+    match run_committed_actions(&accounts, fill_id, &verified_runtimes)? {
         ActionOutcome::Succeeded => {
             ctx.accounts.fill_receipt.execution_status = ExecutionStatus::ActionsSucceeded;
             emit!(ActionsExecuted { route, fill_id });
@@ -171,14 +170,9 @@ pub(crate) fn handler<'info>(
 pub(crate) fn run_committed_actions<'info>(
     accounts: &ActionAccounts<'_, 'info>,
     fill_id: [u8; 32],
-    action_config: &[SolanaAction],
     verified_runtimes: &[VerifiedCpiRuntime],
 ) -> Result<ActionOutcome> {
-    // Re-supplied action list must match the committed digest — no inject/drop/reorder.
-    require!(
-        action_config_hash(action_config)? == accounts.route.action_config_hash,
-        SraError::ActionConfigHashMismatch
-    );
+    let action_config: &[SolanaAction] = &accounts.route.action_config;
 
     let route_key = accounts.route.key();
     let owner = accounts.route.owner;
@@ -459,9 +453,10 @@ pub(crate) fn run_committed_actions<'info>(
 }
 
 /// `floor(amount_bps * vault_snapshot / BPS_DENOMINATOR)`. `amount_bps <= 10_000`
-/// is guaranteed upstream (`validate_action_config`, re-bound by the
-/// `action_config_hash` check), so the product is `<= vault_snapshot` (lossless
-/// `u64` cast); the floor can leave a few base units of recoverable dust.
+/// is guaranteed upstream (`validate_action_config`, enforced once at
+/// `create_route` on the action list the route stores and later reads directly),
+/// so the product is `<= vault_snapshot` (lossless `u64` cast); the floor can
+/// leave a few base units of recoverable dust.
 fn vault_amount_for_bps(vault_snapshot: u64, amount_bps: u16) -> u64 {
     ((vault_snapshot as u128 * amount_bps as u128) / BPS_DENOMINATOR as u128) as u64
 }

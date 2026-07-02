@@ -6,10 +6,7 @@ use anchor_spl::{
 use sra_common::{
     constants::MAX_ADAPTERS,
     errors::SraError,
-    seeds::{
-        action_config_hash as compute_action_config_hash,
-        route_config_hash as compute_route_config_hash, SEED_EXECUTION, SEED_SRA_ROUTE,
-    },
+    seeds::{route_config_hash as compute_route_config_hash, SEED_EXECUTION, SEED_SRA_ROUTE},
     types::{validate_action_config, CreateRouteParams, SolanaSraRoute},
 };
 
@@ -89,13 +86,11 @@ pub(crate) fn handler(
         SraError::InvalidRouteConfig
     );
 
-    let action_hash = compute_action_config_hash(&params.action_config)?;
-
     let route = &mut ctx.accounts.route;
     route.owner = ctx.accounts.owner.key();
     route.source_chain_id = params.source_chain_id;
     route.expected_mint = params.expected_mint;
-    route.action_config_hash = action_hash;
+    route.action_config = params.action_config.clone();
     route.salt = params.salt;
     route.allowed_adapters = params.allowed_adapters;
     // Not in route_config_hash (mutable, like allowed_adapters).
@@ -108,7 +103,6 @@ pub(crate) fn handler(
         owner: route.owner,
         source_chain_id: route.source_chain_id,
         expected_mint: route.expected_mint,
-        action_config_hash: route.action_config_hash,
         salt: route.salt,
         allowed_adapters: route.allowed_adapters.clone(),
         allowed_executors: route.allowed_executors.clone(),

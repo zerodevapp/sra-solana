@@ -96,20 +96,6 @@ pub fn route_config_hash(
     Ok(keccak_hash(&data).to_bytes())
 }
 
-/// `keccak256(borsh(action_config))` for `SolanaSraRoute.action_config_hash` — the
-/// action list alone, so later instructions re-supply it as ix data and verify it
-/// without reconstructing the route tuple. Pure (length bound only, no `validate()`).
-pub fn action_config_hash(action_config: &[SolanaAction]) -> Result<[u8; 32]> {
-    require!(
-        action_config.len() <= crate::constants::MAX_ACTION_IDXS,
-        crate::errors::SraError::TooManyActionIdxs,
-    );
-    let serialized = action_config
-        .try_to_vec()
-        .expect("SolanaAction serialization should not fail");
-    Ok(keccak_hash(&serialized).to_bytes())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -405,80 +391,6 @@ mod tests {
 
         let err = route_config_hash(&test_owner(), 42161, &mint, &actions).unwrap_err();
 
-        match err {
-            anchor_lang::error::Error::AnchorError(anchor_err) => {
-                assert_eq!(anchor_err.error_name, "TooManyActionIdxs");
-            }
-            other => panic!("expected AnchorError, got {other:?}"),
-        }
-    }
-
-    // -- action_config_hash (commit-by-hash for the route action list) --
-
-    fn sample_actions() -> Vec<SolanaAction> {
-        vec![SolanaAction::SplTransfer {
-            recipient: Pubkey::new_from_array([20u8; 32]),
-            amount_bps: 10_000,
-        }]
-    }
-
-    #[test]
-    fn action_config_hash_deterministic() {
-        let h1 = action_config_hash(&sample_actions()).unwrap();
-        let h2 = action_config_hash(&sample_actions()).unwrap();
-        assert_eq!(h1, h2);
-        assert_ne!(h1, [0u8; 32]);
-    }
-
-    #[test]
-    fn action_config_hash_different_actions() {
-        let a1 = vec![SolanaAction::SplTransfer {
-            recipient: Pubkey::new_from_array([20u8; 32]),
-            amount_bps: 5_000,
-        }];
-        let a2 = vec![SolanaAction::SplTransfer {
-            recipient: Pubkey::new_from_array([20u8; 32]),
-            amount_bps: 10_000,
-        }];
-        assert_ne!(
-            action_config_hash(&a1).unwrap(),
-            action_config_hash(&a2).unwrap()
-        );
-    }
-
-    #[test]
-    fn action_config_hash_empty_differs_from_one_action() {
-        let empty = action_config_hash(&[]).unwrap();
-        assert_ne!(empty, [0u8; 32]);
-        assert_ne!(empty, action_config_hash(&sample_actions()).unwrap());
-    }
-
-    #[test]
-    fn action_config_hash_hashes_actions_alone_not_the_route_tuple() {
-        // The action-config commitment must be over the action list ONLY, so
-        // execute_actions can verify it without reconstructing the
-        // owner/chain/mint route tuple. It must therefore differ from
-        // route_config_hash over the same actions (which folds in the full
-        // route identity).
-        let mint = Pubkey::new_from_array([10u8; 32]);
-        let actions = sample_actions();
-        let route = route_config_hash(&test_owner(), 42161, &mint, &actions).unwrap();
-        assert_ne!(action_config_hash(&actions).unwrap(), route);
-    }
-
-    #[test]
-    fn action_config_hash_too_many_actions_returns_too_many_action_idxs() {
-        let actions: Vec<SolanaAction> = (0..=crate::constants::MAX_ACTION_IDXS)
-            .map(|i| SolanaAction::SplTransfer {
-                recipient: Pubkey::new_from_array([i as u8; 32]),
-                amount_bps: 1,
-            })
-            .collect();
-
-        let result = std::panic::catch_unwind(|| action_config_hash(&actions));
-        assert!(result.is_ok(), "oversized action_config must not panic");
-
-        let err = action_config_hash(&actions).unwrap_err();
         match err {
             anchor_lang::error::Error::AnchorError(anchor_err) => {
                 assert_eq!(anchor_err.error_name, "TooManyActionIdxs");

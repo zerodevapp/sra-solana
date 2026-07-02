@@ -170,14 +170,7 @@ fn lifecycle_finalize_execute_fail_retry_fail_recover() {
     let missing = derive_ata(&recipient, &mint);
     send_ix(
         &mut svm,
-        execute_actions_ix(
-            &payer.pubkey(),
-            &f.route,
-            f.fill_id,
-            cfg.clone(),
-            &mint,
-            &[missing],
-        ),
+        execute_actions_ix(&payer.pubkey(), &f.route, f.fill_id, &mint, &[missing]),
         &payer,
         &[],
     )
@@ -192,14 +185,7 @@ fn lifecycle_finalize_execute_fail_retry_fail_recover() {
     // Finalized); the only forward op is retry_actions (or recover_funds).
     let reexec = send_ix_expect_err(
         &mut svm,
-        execute_actions_ix(
-            &payer.pubkey(),
-            &f.route,
-            f.fill_id,
-            cfg.clone(),
-            &mint,
-            &[missing],
-        ),
+        execute_actions_ix(&payer.pubkey(), &f.route, f.fill_id, &mint, &[missing]),
         &payer,
         &[],
         "execute_actions on an ActionsFailed receipt must reject",
@@ -213,14 +199,7 @@ fn lifecycle_finalize_execute_fail_retry_fail_recover() {
     // retry while the ATA is still missing -> stays ActionsFailed (retryable).
     send_ix(
         &mut svm,
-        retry_actions_ix(
-            &owner.pubkey(),
-            &f.route,
-            f.fill_id,
-            cfg.clone(),
-            &mint,
-            &[missing],
-        ),
+        retry_actions_ix(&owner.pubkey(), &f.route, f.fill_id, &mint, &[missing]),
         &payer,
         &[&owner],
     )
@@ -264,7 +243,6 @@ fn lifecycle_finalize_execute_succeed_terminal() {
             &payer.pubkey(),
             &f.route,
             f.fill_id,
-            cfg,
             &mint,
             &[recipient_ata],
         ),
@@ -295,14 +273,7 @@ fn lifecycle_finalize_execute_fail_retry_succeed_terminal() {
     let missing = derive_ata(&recipient, &mint);
     send_ix(
         &mut svm,
-        execute_actions_ix(
-            &payer.pubkey(),
-            &f.route,
-            f.fill_id,
-            cfg.clone(),
-            &mint,
-            &[missing],
-        ),
+        execute_actions_ix(&payer.pubkey(), &f.route, f.fill_id, &mint, &[missing]),
         &payer,
         &[],
     )
@@ -320,7 +291,6 @@ fn lifecycle_finalize_execute_fail_retry_succeed_terminal() {
             &owner.pubkey(),
             &f.route,
             f.fill_id,
-            cfg,
             &mint,
             &[recipient_ata],
         ),
@@ -377,7 +347,6 @@ fn assert_all_ops_rejected(
     owner: &Keypair,
     f: &Finalized,
     mint: Pubkey,
-    cfg: &[SolanaAction],
     atas: (Pubkey, Pubkey),
 ) {
     let (recipient_ata, owner_ata) = atas;
@@ -391,7 +360,6 @@ fn assert_all_ops_rejected(
             &payer.pubkey(),
             &f.route,
             f.fill_id,
-            cfg.to_vec(),
             &mint,
             &[recipient_ata],
         ),
@@ -407,7 +375,6 @@ fn assert_all_ops_rejected(
             &owner.pubkey(),
             &f.route,
             f.fill_id,
-            cfg.to_vec(),
             &mint,
             &[recipient_ata],
         ),
@@ -457,7 +424,6 @@ fn lifecycle_terminal_states_reject_further_ops() {
             &payer.pubkey(),
             &fa.route,
             fa.fill_id,
-            cfg_a.clone(),
             &mint,
             &[recipient_a_ata],
         ),
@@ -475,7 +441,6 @@ fn lifecycle_terminal_states_reject_further_ops() {
         &owner,
         &fa,
         mint,
-        &cfg_a,
         (recipient_a_ata, owner_ata),
     );
 
@@ -498,7 +463,6 @@ fn lifecycle_terminal_states_reject_further_ops() {
         &owner,
         &fb,
         mint,
-        &cfg_b,
         (recipient_b_ata, owner_ata),
     );
 }
@@ -516,7 +480,7 @@ fn lifecycle_empty_action_config_actions_succeeded_immediately() {
 
     send_ix(
         &mut svm,
-        execute_actions_ix(&payer.pubkey(), &f.route, f.fill_id, vec![], &mint, &[]),
+        execute_actions_ix(&payer.pubkey(), &f.route, f.fill_id, &mint, &[]),
         &payer,
         &[],
     )
@@ -534,15 +498,7 @@ fn lifecycle_empty_action_config_actions_succeeded_immediately() {
     // create-route time. (The recipient ATA slot is irrelevant here — execute/retry
     // reject on the status gate before touching remaining accounts.)
     let owner_ata = create_ata(&mut svm, &payer, &owner.pubkey(), &mint);
-    assert_all_ops_rejected(
-        &mut svm,
-        &payer,
-        &owner,
-        &f,
-        mint,
-        &[],
-        (owner_ata, owner_ata),
-    );
+    assert_all_ops_rejected(&mut svm, &payer, &owner, &f, mint, (owner_ata, owner_ata));
     assert_eq!(fetch_token_balance(&svm, &f.execution_vault), AMOUNT);
 }
 
@@ -580,7 +536,6 @@ struct VerifiedSetup {
     pool_authority: Pubkey,
     pool_input: Pubkey,
     pool_output: Pubkey,
-    action_config: Vec<SolanaAction>,
 }
 
 impl VerifiedSetup {
@@ -678,7 +633,6 @@ fn stage_verified(
         pool_authority,
         pool_input,
         pool_output,
-        action_config,
     }
 }
 
@@ -697,7 +651,6 @@ fn lifecycle_finalize_verified_cpi_swap_succeed_terminal() {
         &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        v.action_config.clone(),
         vec![runtime(swap_data(AMOUNT, out_amount), min_out, expiry)],
         &v.input_mint,
         v.verified_metas(v.destination),
@@ -734,7 +687,6 @@ fn lifecycle_verified_cpi_below_min_out_reverts_then_reexecutes() {
         &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        v.action_config.clone(),
         vec![runtime(swap_data(AMOUNT, 2_000_000), 3_000_000, expiry)],
         &v.input_mint,
         v.verified_metas(v.destination),
@@ -760,7 +712,6 @@ fn lifecycle_verified_cpi_below_min_out_reverts_then_reexecutes() {
         &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        v.action_config.clone(),
         vec![runtime(swap_data(AMOUNT, out_amount), min_out, expiry)],
         &v.input_mint,
         v.verified_metas(v.destination),
@@ -789,7 +740,6 @@ fn lifecycle_verified_cpi_missing_destination_soft_fail_retry_succeed() {
         &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        v.action_config.clone(),
         vec![runtime(swap_data(AMOUNT, 1_000_000), 1_000_000, expiry)],
         &v.input_mint,
         v.verified_metas(v.destination),
@@ -812,7 +762,6 @@ fn lifecycle_verified_cpi_missing_destination_soft_fail_retry_succeed() {
         &v.owner.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        v.action_config.clone(),
         vec![runtime(swap_data(AMOUNT, out_amount), min_out, expiry2)],
         &v.input_mint,
         v.verified_metas(v.destination),
@@ -888,7 +837,6 @@ fn lifecycle_mixed_spl_transfer_and_verified_cpi_in_one_route() {
         pool_authority,
         pool_input,
         pool_output,
-        action_config: action_config.clone(),
     };
 
     let swap_input = AMOUNT * 7_000 / 10_000;
@@ -902,7 +850,6 @@ fn lifecycle_mixed_spl_transfer_and_verified_cpi_in_one_route() {
         &v.payer.pubkey(),
         &v.f.route,
         v.f.fill_id,
-        action_config,
         vec![runtime(
             swap_data(swap_input, out_amount),
             out_amount,

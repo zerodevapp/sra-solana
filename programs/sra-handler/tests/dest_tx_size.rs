@@ -13,10 +13,11 @@
 //! pushes a real transaction past the packet limit.
 //!
 //! A transaction's serialized size is a pure function of its account count and its
-//! instruction-data length — not of whether the referenced accounts exist on-chain,
-//! nor of a route's committed action list (the route stores only a 32-byte hash of
-//! it; `execute_actions` carries the action list as instruction data). So these
-//! tests build the genuine instructions, via the same builders the SDK uses, at the
+//! instruction-data length — not of whether the referenced accounts exist on-chain.
+//! The route stores its committed `action_config` typed on-chain; `execute_actions`
+//! reads it from there instead of carrying it as instruction data, so its wire size
+//! tracks only the per-action runtime data and remaining accounts. So these tests
+//! build the genuine instructions, via the same builders the SDK uses, at the
 //! heaviest payload the program accepts, and serialize them — they never submit.
 //! (Executing the `VerifiedCpi` path end-to-end belongs to the compute-budget and
 //! end-to-end suites; here only the wire size matters.)
@@ -135,23 +136,8 @@ fn finalize_only_ix(d: &Dest) -> Instruction {
 /// static-account action shape), one recipient ATA per action.
 fn max_spl_execute_ix(d: &Dest) -> Instruction {
     let recipients: Vec<Pubkey> = (0..MAX_ACTION_IDXS).map(|_| Pubkey::new_unique()).collect();
-    let bps = BPS_TOTAL / MAX_ACTION_IDXS as u16;
-    let action_config: Vec<SolanaAction> = recipients
-        .iter()
-        .map(|r| SolanaAction::SplTransfer {
-            recipient: *r,
-            amount_bps: bps,
-        })
-        .collect();
     let atas: Vec<Pubkey> = recipients.iter().map(|r| derive_ata(r, &d.mint)).collect();
-    execute_actions_ix(
-        &d.payer.pubkey(),
-        &d.route,
-        FILL_ID,
-        action_config,
-        &d.mint,
-        &atas,
-    )
+    execute_actions_ix(&d.payer.pubkey(), &d.route, FILL_ID, &d.mint, &atas)
 }
 
 /// A template pinning every handler-controlled role, padded with `Free` routing
@@ -215,7 +201,6 @@ fn verified_cpi_ixs(d: &Dest, n: u8) -> Vec<Instruction> {
         &d.payer.pubkey(),
         &d.route,
         FILL_ID,
-        action_config,
         runtimes,
         &d.mint,
         metas,

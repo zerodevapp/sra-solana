@@ -31,9 +31,9 @@ use sra_common::{
     errors::SraError,
     instruction_data::encode_anchor_instruction_data,
     seeds::{
-        action_config_hash, route_config_hash, SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK,
-        SEED_ASSET_FEE_TIER, SEED_EXECUTION, SEED_FEE_CONFIG, SEED_FILL_RECEIPT, SEED_MINT_NONCE,
-        SEED_PROTOCOL_FEE, SEED_SRA, SEED_SRA_ROUTE, SEED_VERIFIED_FILL,
+        route_config_hash, SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_ASSET_FEE_TIER,
+        SEED_EXECUTION, SEED_FEE_CONFIG, SEED_FILL_RECEIPT, SEED_MINT_NONCE, SEED_PROTOCOL_FEE,
+        SEED_SRA, SEED_SRA_ROUTE, SEED_VERIFIED_FILL,
     },
     source_deposit::{AcrossDepositParams, PrepareParams},
     types::{
@@ -1580,10 +1580,6 @@ pub fn route_config_hash_for(owner: &Pubkey, params: &CreateRouteParams) -> [u8;
     .expect("route_config_hash should not exceed the action bound")
 }
 
-pub fn action_config_hash_for(params: &CreateRouteParams) -> [u8; 32] {
-    action_config_hash(&params.action_config).expect("action_config_hash within bound")
-}
-
 /// Build a `create_route` instruction. `route_config_hash` is supplied explicitly
 /// so negative tests can pass a tampered hash; `adapter_accounts` are appended as
 /// `remaining_accounts` (the program loader-owned-executable-checks each).
@@ -2023,7 +2019,6 @@ pub fn execute_actions_ix(
     executor: &Pubkey,
     route: &Pubkey,
     fill_id: [u8; 32],
-    action_config: Vec<SolanaAction>,
     mint: &Pubkey,
     recipient_atas: &[Pubkey],
 ) -> Instruction {
@@ -2031,15 +2026,7 @@ pub fn execute_actions_ix(
         .iter()
         .map(|ata| AccountMeta::new(*ata, false))
         .collect();
-    execute_actions_ix_full(
-        executor,
-        route,
-        fill_id,
-        action_config,
-        vec![],
-        mint,
-        remaining,
-    )
+    execute_actions_ix_full(executor, route, fill_id, vec![], mint, remaining)
 }
 
 /// Full `execute_actions` builder: caller supplies the exact per-action
@@ -2049,7 +2036,6 @@ pub fn execute_actions_ix_full(
     executor: &Pubkey,
     route: &Pubkey,
     fill_id: [u8; 32],
-    action_config: Vec<SolanaAction>,
     verified_runtimes: Vec<VerifiedCpiRuntime>,
     mint: &Pubkey,
     remaining: Vec<AccountMeta>,
@@ -2074,7 +2060,6 @@ pub fn execute_actions_ix_full(
         accounts,
         data: sra_handler::instruction::ExecuteActions {
             fill_id,
-            action_config,
             verified_runtimes,
         }
         .data(),
@@ -2086,7 +2071,6 @@ pub fn retry_actions_ix(
     owner: &Pubkey,
     route: &Pubkey,
     fill_id: [u8; 32],
-    action_config: Vec<SolanaAction>,
     mint: &Pubkey,
     recipient_atas: &[Pubkey],
 ) -> Instruction {
@@ -2094,15 +2078,7 @@ pub fn retry_actions_ix(
         .iter()
         .map(|ata| AccountMeta::new(*ata, false))
         .collect();
-    retry_actions_ix_full(
-        owner,
-        route,
-        fill_id,
-        action_config,
-        vec![],
-        mint,
-        remaining,
-    )
+    retry_actions_ix_full(owner, route, fill_id, vec![], mint, remaining)
 }
 
 /// Full `retry_actions` builder (mirrors `execute_actions_ix_full` + owner signer).
@@ -2110,7 +2086,6 @@ pub fn retry_actions_ix_full(
     owner: &Pubkey,
     route: &Pubkey,
     fill_id: [u8; 32],
-    action_config: Vec<SolanaAction>,
     verified_runtimes: Vec<VerifiedCpiRuntime>,
     mint: &Pubkey,
     remaining: Vec<AccountMeta>,
@@ -2135,7 +2110,6 @@ pub fn retry_actions_ix_full(
         accounts,
         data: sra_handler::instruction::RetryActions {
             fill_id,
-            action_config,
             verified_runtimes,
         }
         .data(),
