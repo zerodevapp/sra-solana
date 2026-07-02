@@ -135,11 +135,12 @@ mod tests {
     #[test]
     fn compute_relay_hash_regression_pin() {
         // Frozen value for the canonical sample. The authoritative cross-check
-        // against a real on-chain Across fill lands in the destination fork suite;
-        // this pin catches accidental preimage drift between now and then.
+        // is the destination fork suite, where the real Across program accepts
+        // (and previously rejected) this preimage; this pin catches accidental
+        // drift between fork runs.
         assert_eq!(
             encode_hex(&compute_relay_hash(&sample(), CHAIN_ID).unwrap()),
-            "b3997061afa185951aac35e3a1502a1643cfd4b3343cabe481f1d7d1eec4b4d1"
+            "f4a171530857981a67dba8ebbd810db29fb7c222ad37f0dbbd39479788f8fb67"
         );
     }
 
