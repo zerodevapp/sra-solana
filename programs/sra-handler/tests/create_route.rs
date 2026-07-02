@@ -5,7 +5,7 @@ use solana_sdk::{pubkey::Pubkey, signer::Signer};
 use sra_common::{
     constants::{MAX_ACTION_IDXS, MAX_ADAPTERS, MAX_EXECUTORS},
     errors::SraError,
-    types::{AccountTemplate, FixedRole, MinOut, SlotRole, SolanaAction},
+    types::{AccountTemplate, FixedRole, SlotRole, SolanaAction},
 };
 
 // --------------------------------------------------------------------------
@@ -524,15 +524,17 @@ fn create_route_duplicate_rejected() {
 // --------------------------------------------------------------------------
 
 fn verified_cpi_action(slots: Vec<SlotRole>) -> SolanaAction {
+    verified_cpi_action_with_quoter(slots, Pubkey::new_unique())
+}
+
+fn verified_cpi_action_with_quoter(slots: Vec<SlotRole>, quoter: Pubkey) -> SolanaAction {
     SolanaAction::VerifiedCpi {
         program_id: Pubkey::new_unique(),
         input_mint: Pubkey::new_unique(),
         input_bps: 10_000,
         account_template: AccountTemplate { slots },
         output_mint: Pubkey::new_unique(),
-        min_out: MinOut::SignedQuote {
-            quoter: Pubkey::new_unique(),
-        },
+        quoter,
         allow_permissioned_output: false,
     }
 }
@@ -593,6 +595,43 @@ fn create_route_verified_cpi_unpinned_template_rejected() {
     );
     let err = send_ix(&mut svm, ix, &payer, &[&owner])
         .expect_err("a VerifiedCpi template missing a pinned value slot must be rejected")
+        .err;
+    assert_eq!(err, custom_error(SraError::InvalidActionConfig));
+}
+
+#[test]
+fn create_route_mixed_quoters_rejected() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+
+    // Two well-formed VerifiedCpi actions committing two different quoters — the
+    // one-co-signing-quoter-per-route invariant must reject this before the route
+    // identity is ever committed.
+    let full_template = || {
+        vec![
+            SlotRole::Fixed(FixedRole::SigningAuthority),
+            SlotRole::Fixed(FixedRole::Source),
+            SlotRole::Fixed(FixedRole::Destination),
+            SlotRole::Fixed(FixedRole::OutputMint),
+            SlotRole::Free,
+        ]
+    };
+    let mut params = sample_create_route_params(mint, [15u8; 32]);
+    params.action_config = vec![
+        verified_cpi_action_with_quoter(full_template(), Pubkey::new_unique()),
+        verified_cpi_action_with_quoter(full_template(), Pubkey::new_unique()),
+    ];
+
+    let ix = create_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    let err = send_ix(&mut svm, ix, &payer, &[&owner])
+        .expect_err("mixed quoters across VerifiedCpi actions must be rejected")
         .err;
     assert_eq!(err, custom_error(SraError::InvalidActionConfig));
 }

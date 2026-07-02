@@ -102,11 +102,10 @@ pub fn swap_data(in_amount: u64, out_amount: u64) -> Vec<u8> {
 }
 
 /// A `VerifiedCpiRuntime` for one mock-swap action.
-pub fn runtime(inner_data: Vec<u8>, min_amount_out: u64, expiry: i64) -> VerifiedCpiRuntime {
+pub fn runtime(inner_data: Vec<u8>, min_amount_out: u64) -> VerifiedCpiRuntime {
     VerifiedCpiRuntime {
         inner_data,
         min_amount_out,
-        expiry,
     }
 }
 
@@ -2014,7 +2013,7 @@ pub fn fabricate_verified_fill(
 /// order) — negative tests can pass wrong pubkeys or flip writability on the
 /// returned instruction.
 /// SplTransfer-only convenience: each recipient ATA rides writable, no verified
-/// runtimes. Delegates to the full builder.
+/// runtimes, no co-signing quoter. Delegates to the full builder.
 pub fn execute_actions_ix(
     executor: &Pubkey,
     route: &Pubkey,
@@ -2026,17 +2025,20 @@ pub fn execute_actions_ix(
         .iter()
         .map(|ata| AccountMeta::new(*ata, false))
         .collect();
-    execute_actions_ix_full(executor, route, fill_id, vec![], mint, remaining)
+    execute_actions_ix_full(executor, route, fill_id, vec![], 0, None, mint, remaining)
 }
 
 /// Full `execute_actions` builder: caller supplies the exact per-action
-/// `remaining_accounts` metas (SplTransfer recipient ATAs and/or VerifiedCpi
-/// `[program, template slots…]` runs) and the per-VerifiedCpi-action runtimes.
+/// `remaining_accounts` metas, the per-VerifiedCpi-action runtimes, the batch
+/// `quote_expiry`, and the co-signing quoter (None for SplTransfer-only routes;
+/// the quoter keypair must also sign the submitted transaction).
 pub fn execute_actions_ix_full(
     executor: &Pubkey,
     route: &Pubkey,
     fill_id: [u8; 32],
     verified_runtimes: Vec<VerifiedCpiRuntime>,
+    quote_expiry: i64,
+    quoter: Option<Pubkey>,
     mint: &Pubkey,
     remaining: Vec<AccountMeta>,
 ) -> Instruction {
@@ -2051,7 +2053,7 @@ pub fn execute_actions_ix_full(
         execution_authority,
         execution_vault,
         token_program: TOKEN_PROGRAM_ID,
-        instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
+        quoter,
     }
     .to_account_metas(None);
     accounts.extend(remaining);
@@ -2061,6 +2063,7 @@ pub fn execute_actions_ix_full(
         data: sra_handler::instruction::ExecuteActions {
             fill_id,
             verified_runtimes,
+            quote_expiry,
         }
         .data(),
     }
@@ -2078,7 +2081,7 @@ pub fn retry_actions_ix(
         .iter()
         .map(|ata| AccountMeta::new(*ata, false))
         .collect();
-    retry_actions_ix_full(owner, route, fill_id, vec![], mint, remaining)
+    retry_actions_ix_full(owner, route, fill_id, vec![], 0, None, mint, remaining)
 }
 
 /// Full `retry_actions` builder (mirrors `execute_actions_ix_full` + owner signer).
@@ -2087,6 +2090,8 @@ pub fn retry_actions_ix_full(
     route: &Pubkey,
     fill_id: [u8; 32],
     verified_runtimes: Vec<VerifiedCpiRuntime>,
+    quote_expiry: i64,
+    quoter: Option<Pubkey>,
     mint: &Pubkey,
     remaining: Vec<AccountMeta>,
 ) -> Instruction {
@@ -2101,7 +2106,7 @@ pub fn retry_actions_ix_full(
         execution_authority,
         execution_vault,
         token_program: TOKEN_PROGRAM_ID,
-        instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
+        quoter,
     }
     .to_account_metas(None);
     accounts.extend(remaining);
@@ -2111,6 +2116,7 @@ pub fn retry_actions_ix_full(
         data: sra_handler::instruction::RetryActions {
             fill_id,
             verified_runtimes,
+            quote_expiry,
         }
         .data(),
     }
@@ -2134,16 +2140,4 @@ pub fn derive_mock_swap_pool(
     let pool_input = derive_ata(&pool_authority, input_mint);
     let pool_output = derive_ata(&pool_authority, output_mint);
     (pool_authority, pool_input, pool_output)
-}
-
-/// Build a self-contained single-signature ed25519 verification instruction over
-/// `message`, signed by `quoter`. Placed alongside `execute_actions` in the same
-/// transaction, it is what the handler's signed-quote check locates.
-pub fn ed25519_quote_ix(quoter: &Keypair, message: &[u8]) -> Instruction {
-    let signature = quoter.sign_message(message);
-    solana_sdk::ed25519_instruction::new_ed25519_instruction_with_signature(
-        message,
-        signature.as_ref().try_into().expect("64-byte ed25519 sig"),
-        &quoter.pubkey().to_bytes(),
-    )
 }

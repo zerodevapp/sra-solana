@@ -83,16 +83,28 @@ pub mod sra_handler {
         ctx: Context<'_, '_, '_, 'info, ExecuteActions<'info>>,
         fill_id: [u8; 32],
         verified_runtimes: Vec<VerifiedCpiRuntime>,
+        quote_expiry: i64,
     ) -> Result<()> {
-        instructions::destination::execute_actions::handler(ctx, fill_id, verified_runtimes)
+        instructions::destination::execute_actions::handler(
+            ctx,
+            fill_id,
+            verified_runtimes,
+            quote_expiry,
+        )
     }
 
     pub fn retry_actions<'info>(
         ctx: Context<'_, '_, '_, 'info, RetryActions<'info>>,
         fill_id: [u8; 32],
         verified_runtimes: Vec<VerifiedCpiRuntime>,
+        quote_expiry: i64,
     ) -> Result<()> {
-        instructions::destination::retry_actions::handler(ctx, fill_id, verified_runtimes)
+        instructions::destination::retry_actions::handler(
+            ctx,
+            fill_id,
+            verified_runtimes,
+            quote_expiry,
+        )
     }
 
     pub fn recover_funds(ctx: Context<RecoverFunds>) -> Result<()> {

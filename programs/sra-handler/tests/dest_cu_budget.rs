@@ -21,16 +21,15 @@
 //! - `finalize_fill` + `execute_actions` combined at the maximum SplTransfer
 //!   fan-out (four recipients);
 //! - `finalize_fill` + `execute_actions` combined for the heaviest action — a
-//!   signed-quote verified-CPI swap (ed25519 verify + scratch move + inner CPI +
-//!   balance-diff post-check + sweep).
+//!   verified-CPI swap (scratch move + inner CPI + balance-diff post-check +
+//!   sweep), co-signed by the route-committed quoter.
 //!
 //! Measurement notes (identical methodology to `source_cu_budget.rs`):
 //! - The runtime CU limit is set to the Solana maximum so a flow that exceeds the
 //!   400k production budget still *executes* and is measured — the assertion, not
 //!   the runtime limit, is the regression gate.
-//! - The reported CU includes the compute-budget instruction's own fixed cost
-//!   (and, for the verified-CPI case, the ed25519 verification cost), which
-//!   production pays identically — so the comparison is apples-to-apples.
+//! - The reported CU includes the compute-budget instruction's own fixed cost,
+//!   which production pays identically — so the comparison is apples-to-apples.
 //! - ALTs compress account *addresses* in the serialized message (tx *size* is a
 //!   separate concern); execution CU is unaffected, so a legacy tx here measures
 //!   the production CU faithfully.
@@ -47,10 +46,7 @@ use solana_sdk::{
     compute_budget::ComputeBudgetInstruction, instruction::AccountMeta, pubkey::Pubkey,
     signature::Keypair, signer::Signer,
 };
-use sra_common::{
-    quote::{action_context_hash, signed_quote_message},
-    types::{CreateRouteParams, ExecutionStatus, MinOut, SolanaAction},
-};
+use sra_common::types::{CreateRouteParams, ExecutionStatus, SolanaAction};
 
 /// The compute-unit budget the production destination fill tx requests — design
 /// parity with the source deposit, which requests the same 400k.
@@ -286,7 +282,8 @@ fn dest_finalize_execute_spl_under_cu_budget() {
 #[test]
 fn dest_finalize_execute_verified_cpi_under_cu_budget() {
     // finalize_fill + execute_actions combined, for the heaviest action: a
-    // signed-quote verified-CPI swap through the shared engine.
+    // verified-CPI swap through the shared engine, co-signed by the
+    // route-committed quoter.
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 100 * SOL);
     let owner = funded_keypair(&mut svm, 100 * SOL);
@@ -300,9 +297,7 @@ fn dest_finalize_execute_verified_cpi_under_cu_budget() {
         input_bps: 10_000,
         account_template: mock_swap_template(),
         output_mint,
-        min_out: MinOut::SignedQuote {
-            quoter: quoter.pubkey(),
-        },
+        quoter: quoter.pubkey(),
         allow_permissioned_output: false,
     }];
     let s = stage_filled(&mut svm, &payer, &owner, input_mint, cfg, [0x12; 32]);
@@ -329,15 +324,6 @@ fn dest_finalize_execute_verified_cpi_under_cu_budget() {
     let out_amount = 3_000_000;
     let min_out = 2_900_000;
     let expiry = now(&svm) + 3_600;
-    let context_hash = action_context_hash(&s.route, &s.relay_hash, 0);
-    let message = signed_quote_message(
-        &context_hash,
-        &input_mint,
-        &output_mint,
-        AMOUNT,
-        min_out,
-        expiry,
-    );
 
     // The per-action `[program, <10 template slots>]` metas the engine resolves
     // (legacy output token program), mirroring the shared mock-swap template.
@@ -358,23 +344,18 @@ fn dest_finalize_execute_verified_cpi_under_cu_budget() {
         &payer.pubkey(),
         &s.route,
         s.relay_hash,
-        vec![runtime(swap_data(AMOUNT, out_amount), min_out, expiry)],
+        vec![runtime(swap_data(AMOUNT, out_amount), min_out)],
+        expiry,
+        Some(quoter.pubkey()),
         &input_mint,
         verified_metas,
     );
 
-    // The engine locates the ed25519 quote record position-independently, so its
-    // index in this batch is not load-bearing.
     let consumed = send_instructions(
         &mut svm,
-        &[
-            cu_limit_ix(),
-            ed25519_quote_ix(&quoter, &message),
-            s.finalize_ix(&payer.pubkey()),
-            exec,
-        ],
+        &[cu_limit_ix(), s.finalize_ix(&payer.pubkey()), exec],
         &payer,
-        &[],
+        &[&quoter],
     )
     .expect("finalize + execute (verified-CPI swap) must execute")
     .compute_units_consumed;

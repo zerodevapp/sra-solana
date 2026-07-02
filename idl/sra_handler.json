@@ -512,11 +512,15 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "instructions_sysvar",
+          "name": "quoter",
           "docs": [
-            "price quote backing a `VerifiedCpi` action's `min_out`."
+            "The route-committed quoter co-signing this transaction. Required when the",
+            "route's committed actions include a `VerifiedCpi`; omitted otherwise. The",
+            "runtime has already verified its signature over the whole transaction, so",
+            "the handler only checks presence + identity + the co-signed expiry."
           ],
-          "address": "Sysvar1nstructions1111111111111111111111111"
+          "signer": true,
+          "optional": true
         }
       ],
       "args": [
@@ -538,6 +542,10 @@
               }
             }
           }
+        },
+        {
+          "name": "quote_expiry",
+          "type": "i64"
         }
       ]
     },
@@ -1670,8 +1678,15 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "instructions_sysvar",
-          "address": "Sysvar1nstructions1111111111111111111111111"
+          "name": "quoter",
+          "docs": [
+            "The route-committed quoter co-signing this transaction. Required when the",
+            "route's committed actions include a `VerifiedCpi`; omitted otherwise. The",
+            "runtime has already verified its signature over the whole transaction, so",
+            "the handler only checks presence + identity + the co-signed expiry."
+          ],
+          "signer": true,
+          "optional": true
         }
       ],
       "args": [
@@ -1693,6 +1708,10 @@
               }
             }
           }
+        },
+        {
+          "name": "quote_expiry",
+          "type": "i64"
         }
       ]
     },
@@ -3886,39 +3905,6 @@
       }
     },
     {
-      "name": "MinOut",
-      "docs": [
-        "Minimum-output reference for a `VerifiedCpi`'s post-fee balance-diff gate."
-      ],
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "SignedQuote",
-            "fields": [
-              {
-                "name": "quoter",
-                "type": "pubkey"
-              }
-            ]
-          },
-          {
-            "name": "Oracle",
-            "fields": [
-              {
-                "name": "feed",
-                "type": "pubkey"
-              },
-              {
-                "name": "max_slippage_bps",
-                "type": "u16"
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
       "name": "MintNonce",
       "docs": [
         "Persistent nonce per `(sra_config, source_mint)`. The owner-signed deposit",
@@ -4265,12 +4251,12 @@
                 "type": "pubkey"
               },
               {
-                "name": "min_out",
-                "type": {
-                  "defined": {
-                    "name": "MinOut"
-                  }
-                }
+                "name": "quoter",
+                "docs": [
+                  "The off-chain quoter that must co-sign any transaction executing this",
+                  "action; it attests the relayer-supplied `min_amount_out`s and expiry."
+                ],
+                "type": "pubkey"
               },
               {
                 "name": "allow_permissioned_output",
@@ -4517,11 +4503,9 @@
       "name": "VerifiedCpiRuntime",
       "docs": [
         "Per-`VerifiedCpi`-action runtime data the relayer supplies to `execute_actions`,",
-        "one entry per `VerifiedCpi` action in action order. Carries the inner CPI's",
-        "instruction data plus the signed-quote fields (`min_amount_out`, `expiry`); the",
-        "quote's signature rides in a separate ed25519 instruction in the same",
-        "transaction. `min_amount_out`/`expiry` are bound into the quote message and",
-        "verified against the route-committed quoter, so a relayer cannot inflate them."
+        "one entry per `VerifiedCpi` action in action order. The route-committed quoter",
+        "co-signs the whole transaction, so `min_amount_out` (and the batch",
+        "`quote_expiry` argument) are quoter-attested with no separate signed message."
       ],
       "type": {
         "kind": "struct",
@@ -4536,16 +4520,9 @@
           {
             "name": "min_amount_out",
             "docs": [
-              "The signed quote's minimum acceptable output (the balance-diff floor)."
+              "The quoter-attested minimum acceptable output (the balance-diff floor)."
             ],
             "type": "u64"
-          },
-          {
-            "name": "expiry",
-            "docs": [
-              "The signed quote's unix expiry."
-            ],
-            "type": "i64"
           }
         ]
       }

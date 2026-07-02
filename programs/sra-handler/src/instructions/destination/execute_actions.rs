@@ -4,8 +4,9 @@
 //! * `SplTransfer` — exact-matched recipient ATA, a percentage of a start-of-run
 //!   vault snapshot. No third-party CPI.
 //! * `VerifiedCpi` — dynamic accounts through the shared engine (scratch-bound
-//!   input, pinned slots, balance-diff `≥ min_out` from a signed quote). Only the
-//!   ed25519 signed-quote source is wired; oracle `min_out` is not yet executable.
+//!   input, pinned slots, balance-diff `≥ min_out`); the route-committed quoter
+//!   must co-sign the transaction, attesting the relayer-supplied `min_amount_out`s
+//!   and `quote_expiry`.
 //!
 //! Failure model (two-pass validate-then-execute): a bad handler-pinned-account
 //! state (missing/frozen recipient/scratch/output ATA, frozen vault) → soft
@@ -24,17 +25,14 @@ use anchor_spl::token::spl_token::state::AccountState;
 use anchor_spl::token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked};
 use sra_common::constants::BPS_DENOMINATOR;
 use sra_common::errors::SraError;
-use sra_common::quote::{action_context_hash, signed_quote_message};
 use sra_common::seeds::{SEED_EXECUTION, SEED_FILL_RECEIPT, SEED_SCRATCH};
 use sra_common::types::{
-    ExecutionStatus, FillReceipt, FixedRole, MinOut, SolanaAction, SolanaSraRoute,
-    VerifiedCpiRuntime,
+    ExecutionStatus, FillReceipt, FixedRole, SolanaAction, SolanaSraRoute, VerifiedCpiRuntime,
 };
 
 use super::verified_engine::{
     execute_verified, fixed_slot, mint_is_permissioned, token_account_usable,
-    validate_pinned_program, validate_template_slots, verify_signed_quote, TokenBalanceCheck,
-    VerifiedCpiCall,
+    validate_pinned_program, validate_template_slots, TokenBalanceCheck, VerifiedCpiCall,
 };
 use crate::events::{ActionsExecuted, ActionsFailed};
 
@@ -69,10 +67,11 @@ pub struct ExecuteActions<'info> {
     )]
     pub execution_vault: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
-    /// CHECK: instructions sysvar, pinned by address; read to locate the signed
-    /// price quote backing a `VerifiedCpi` action's `min_out`.
-    #[account(address = anchor_lang::solana_program::sysvar::instructions::ID)]
-    pub instructions_sysvar: UncheckedAccount<'info>,
+    /// The route-committed quoter co-signing this transaction. Required when the
+    /// route's committed actions include a `VerifiedCpi`; omitted otherwise. The
+    /// runtime has already verified its signature over the whole transaction, so
+    /// the handler only checks presence + identity + the co-signed expiry.
+    pub quoter: Option<Signer<'info>>,
     // Per-action accounts ride in `remaining_accounts`, in action order:
     //   SplTransfer -> [recipient ATA]
     //   VerifiedCpi -> [inner program, then the template slots in order]
@@ -113,7 +112,7 @@ pub(crate) struct ActionAccounts<'a, 'info> {
     pub execution_authority: &'a UncheckedAccount<'info>,
     pub execution_vault: &'a Account<'info, TokenAccount>,
     pub token_program: &'a Program<'info, Token>,
-    pub instructions_sysvar: &'a UncheckedAccount<'info>,
+    pub quoter: Option<&'a Signer<'info>>,
     pub remaining_accounts: &'a [AccountInfo<'info>],
     pub execution_authority_bump: u8,
 }
@@ -122,6 +121,7 @@ pub(crate) fn handler<'info>(
     ctx: Context<'_, '_, '_, 'info, ExecuteActions<'info>>,
     fill_id: [u8; 32],
     verified_runtimes: Vec<VerifiedCpiRuntime>,
+    quote_expiry: i64,
 ) -> Result<()> {
     // Must be settled and not yet acted on (ActionsFailed is retried via retry_actions).
     require!(
@@ -145,12 +145,12 @@ pub(crate) fn handler<'info>(
         execution_authority: &ctx.accounts.execution_authority,
         execution_vault: &ctx.accounts.execution_vault,
         token_program: &ctx.accounts.token_program,
-        instructions_sysvar: &ctx.accounts.instructions_sysvar,
+        quoter: ctx.accounts.quoter.as_ref(),
         remaining_accounts: ctx.remaining_accounts,
         execution_authority_bump: ctx.bumps.execution_authority,
     };
 
-    match run_committed_actions(&accounts, fill_id, &verified_runtimes)? {
+    match run_committed_actions(&accounts, &verified_runtimes, quote_expiry)? {
         ActionOutcome::Succeeded => {
             ctx.accounts.fill_receipt.execution_status = ExecutionStatus::ActionsSucceeded;
             emit!(ActionsExecuted { route, fill_id });
@@ -169,8 +169,8 @@ pub(crate) fn handler<'info>(
 /// after the whole batch; hard-rejects return `Err`. Caller sets the receipt status.
 pub(crate) fn run_committed_actions<'info>(
     accounts: &ActionAccounts<'_, 'info>,
-    fill_id: [u8; 32],
     verified_runtimes: &[VerifiedCpiRuntime],
+    quote_expiry: i64,
 ) -> Result<ActionOutcome> {
     let action_config: &[SolanaAction] = &accounts.route.action_config;
 
@@ -201,7 +201,21 @@ pub(crate) fn run_committed_actions<'info>(
             )
         });
 
-    let now = Clock::get()?.unix_timestamp;
+    // One co-signing quoter attests the whole transaction (every min_amount_out,
+    // quote_expiry, inner_data, and account). The runtime verified that signature
+    // before this program ran, so the gate is presence + identity + freshness.
+    let committed_quoter = action_config.iter().find_map(|action| match action {
+        SolanaAction::VerifiedCpi { quoter, .. } => Some(*quoter),
+        _ => None,
+    });
+    if let Some(committed) = committed_quoter {
+        let quoter = accounts.quoter.ok_or(SraError::InvalidPriceSignature)?;
+        require_keys_eq!(quoter.key(), committed, SraError::InvalidPriceSignature);
+        require!(
+            Clock::get()?.unix_timestamp <= quote_expiry,
+            SraError::PriceQuoteExpired
+        );
+    }
 
     // Pass 1: validate accounts (hard reject) + runtime state (soft fail) and plan,
     // moving nothing — so any failure leaves the batch atomic (EVM-parity).
@@ -242,14 +256,9 @@ pub(crate) fn run_committed_actions<'info>(
                 input_bps,
                 account_template,
                 output_mint,
-                min_out,
+                quoter: _,
                 allow_permissioned_output,
             } => {
-                // Only the ed25519 signed-quote min_out source is wired; oracle is
-                // not yet executable (fail-closed, receipt stays Finalized).
-                let MinOut::SignedQuote { quoter } = min_out else {
-                    return Err(SraError::UnsupportedAction.into());
-                };
                 // The vault holds expected_mint, so that is what is spent.
                 require_keys_eq!(*input_mint, expected_mint, SraError::InvalidInputMint);
 
@@ -323,24 +332,7 @@ pub(crate) fn run_committed_actions<'info>(
                     continue;
                 }
 
-                // Verify the authorized, unexpired signed quote (hard reject).
                 let input_amount = vault_amount_for_bps(vault_snapshot, *input_bps);
-                let context_hash = action_context_hash(&route_key, &fill_id, action_index as u8);
-                let message = signed_quote_message(
-                    &context_hash,
-                    input_mint,
-                    output_mint,
-                    input_amount,
-                    runtime.min_amount_out,
-                    runtime.expiry,
-                );
-                verify_signed_quote(
-                    accounts.instructions_sysvar,
-                    quoter,
-                    &message,
-                    runtime.expiry,
-                    now,
-                )?;
 
                 plan.push(Planned::Verified {
                     action_index,
@@ -453,10 +445,10 @@ pub(crate) fn run_committed_actions<'info>(
 }
 
 /// `floor(amount_bps * vault_snapshot / BPS_DENOMINATOR)`. `amount_bps <= 10_000`
-/// is guaranteed upstream (`validate_action_config`, enforced once at
-/// `create_route` on the action list the route stores and later reads directly),
-/// so the product is `<= vault_snapshot` (lossless `u64` cast); the floor can
-/// leave a few base units of recoverable dust.
+/// is guaranteed upstream (`validate_action_config`, checked once at
+/// `create_route` and read back unmodified from the route thereafter), so the
+/// product is `<= vault_snapshot` (lossless `u64` cast); the floor can leave a
+/// few base units of recoverable dust.
 fn vault_amount_for_bps(vault_snapshot: u64, amount_bps: u16) -> u64 {
     ((vault_snapshot as u128 * amount_bps as u128) / BPS_DENOMINATOR as u128) as u64
 }

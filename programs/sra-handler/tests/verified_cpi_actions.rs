@@ -1,14 +1,14 @@
-//! Verified-CPI action execution (the shared engine + ed25519 signed-quote path +
+//! Verified-CPI action execution (the shared engine + co-signing quoter path +
 //! Token-2022 output handling).
 //!
 //! Exercises the engine's security model against a generic balance-diff swap mock:
 //! scratch-bounded input, pinned source/destination/authority, balance-diff
-//! `≥ min_out` from an authorized signed quote, fail-closed, scratch swept empty.
-//! The output may be a Token-2022 mint: the balance-diff is post-fee, and a
+//! `≥ min_out` from a route-committed co-signing quoter, fail-closed, scratch swept
+//! empty. The output may be a Token-2022 mint: the balance-diff is post-fee, and a
 //! permissioned (permanent-delegate / pausable / default-frozen) output requires an
-//! explicit opt-in. The concrete Jupiter template and the oracle `min_out` fallback
-//! are follow-ups; here the swap is a mock and `min_out` is a signed quote (the
-//! EVM-parity primary resolver, ed25519 on Solana).
+//! explicit opt-in. The concrete Jupiter template is a follow-up; here the swap is a
+//! mock and every `min_amount_out` (plus the batch `quote_expiry`) is attested by the
+//! one quoter that co-signs the transaction.
 
 mod common;
 
@@ -23,8 +23,7 @@ use solana_sdk::{
 };
 use sra_common::{
     errors::SraError,
-    quote::{action_context_hash, signed_quote_message},
-    types::{CreateRouteParams, ExecutionStatus, MinOut, SolanaAction},
+    types::{CreateRouteParams, ExecutionStatus, SolanaAction},
 };
 
 const VAULT: u64 = 4_000_000;
@@ -37,9 +36,10 @@ fn custom_error_at(index: u8, err: SraError) -> TransactionError {
     TransactionError::InstructionError(index, InstructionError::Custom(err.into()))
 }
 
-/// The execute_actions instruction sits at index 1 (the ed25519 quote is index 0).
+/// The execute_actions instruction sits alone (index 0) once the ed25519 quote
+/// instruction is gone — the quoter co-signs the transaction instead.
 fn exec_error(err: SraError) -> TransactionError {
-    custom_error_at(1, err)
+    custom_error_at(0, err)
 }
 
 /// How the staged route's output mint is created — drives its token program and
@@ -65,7 +65,7 @@ fn verified_cpi(
     input_mint: Pubkey,
     output_mint: Pubkey,
     input_bps: u16,
-    min_out: MinOut,
+    quoter: Pubkey,
 ) -> SolanaAction {
     SolanaAction::VerifiedCpi {
         program_id: mock_swap::ID,
@@ -73,13 +73,9 @@ fn verified_cpi(
         input_bps,
         account_template: mock_swap_template(),
         output_mint,
-        min_out,
+        quoter,
         allow_permissioned_output: false,
     }
-}
-
-fn signed(quoter: Pubkey) -> MinOut {
-    MinOut::SignedQuote { quoter }
 }
 
 struct Staged {
@@ -204,7 +200,7 @@ fn staged_single(svm: &mut litesvm::LiteSVM, quoter: &Keypair) -> Staged {
         svm,
         quoter,
         OutKind::Legacy,
-        |input, output, q| vec![verified_cpi(input, output, 10_000, signed(q))],
+        |input, output, q| vec![verified_cpi(input, output, 10_000, q)],
         true,
     )
 }
@@ -228,31 +224,6 @@ impl Staged {
             AccountMeta::new(self.pool_output, false),
         ]
     }
-
-    /// Reconstruct the signed-quote message for the single VerifiedCpi at action 0.
-    fn quote_message(&self, input_amount: u64, min_amount_out: u64, expiry: i64) -> Vec<u8> {
-        self.quote_message_at(0, input_amount, min_amount_out, expiry)
-    }
-
-    /// Reconstruct the signed-quote message for the VerifiedCpi at `action_index`.
-    fn quote_message_at(
-        &self,
-        action_index: u8,
-        input_amount: u64,
-        min_amount_out: u64,
-        expiry: i64,
-    ) -> Vec<u8> {
-        let context_hash = action_context_hash(&self.route, &FILL_ID, action_index);
-        signed_quote_message(
-            &context_hash,
-            &self.input_mint,
-            &self.output_mint,
-            input_amount,
-            min_amount_out,
-            expiry,
-        )
-        .to_vec()
-    }
 }
 
 // --------------------------------------------------------------------------
@@ -268,17 +239,18 @@ fn verified_cpi_swap_succeeds() {
     let out_amount = 3_000_000;
     let min_out = 2_900_000;
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, min_out, expiry));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, out_amount), min_out, expiry)],
+        vec![runtime(swap_data(VAULT, out_amount), min_out)],
+        expiry,
+        Some(quoter.pubkey()),
         &s.input_mint,
         s.verified_metas(s.destination),
     );
 
-    send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]).expect("verified swap succeeds");
+    send_instructions(&mut svm, &[exec], &s.payer, &[&quoter]).expect("verified swap succeeds");
 
     assert_eq!(fetch_token_balance(&svm, &s.destination), out_amount);
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), 0);
@@ -303,17 +275,18 @@ fn verified_cpi_sweeps_unspent_input() {
     let pulled = 3_000_000;
     let out_amount = 1_000_000;
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, out_amount, expiry));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(pulled, out_amount), out_amount, expiry)],
+        vec![runtime(swap_data(pulled, out_amount), out_amount)],
+        expiry,
+        Some(quoter.pubkey()),
         &s.input_mint,
         s.verified_metas(s.destination),
     );
 
-    send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]).expect("partial-pull swap succeeds");
+    send_instructions(&mut svm, &[exec], &s.payer, &[&quoter]).expect("partial-pull swap succeeds");
 
     assert_eq!(fetch_token_balance(&svm, &s.destination), out_amount);
     assert_eq!(
@@ -337,17 +310,18 @@ fn verified_cpi_emits_actions_executed() {
     let quoter = Keypair::new();
     let s = staged_single(&mut svm, &quoter);
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
+        expiry,
+        Some(quoter.pubkey()),
         &s.input_mint,
         s.verified_metas(s.destination),
     );
     let meta =
-        send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]).expect("verified swap succeeds");
+        send_instructions(&mut svm, &[exec], &s.payer, &[&quoter]).expect("verified swap succeeds");
     let event: sra_handler::events::ActionsExecuted =
         extract_anchor_event(&meta.logs).expect("ActionsExecuted emitted");
     assert_eq!(event.route, s.route);
@@ -365,17 +339,18 @@ fn verified_cpi_below_min_out_reverts_funds_safe() {
     let s = staged_single(&mut svm, &quoter);
     let expiry = now(&svm) + 3_600;
     // Deliver less than the signed minimum.
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 3_000_000, expiry));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, 2_000_000), 3_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 2_000_000), 3_000_000)],
+        expiry,
+        Some(quoter.pubkey()),
         &s.input_mint,
         s.verified_metas(s.destination),
     );
 
-    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    let err = send_instructions_expect_err(&mut svm, &[exec], &s.payer, &[&quoter]);
     assert_eq!(err, exec_error(SraError::MinOutNotMet));
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
     assert_eq!(fetch_token_balance(&svm, &s.destination), 0);
@@ -390,17 +365,18 @@ fn verified_cpi_scratch_bounds_input() {
     let expiry = now(&svm) + 3_600;
     // Ask the swap to pull MORE than the engine moved into scratch — the SPL
     // transfer fails and the whole transaction reverts; the vault is untouched.
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT * 2, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT * 2, 1_000_000), 1_000_000)],
+        expiry,
+        Some(quoter.pubkey()),
         &s.input_mint,
         s.verified_metas(s.destination),
     );
 
-    let res = send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    let res = send_instructions(&mut svm, &[exec], &s.payer, &[&quoter]);
     assert!(res.is_err(), "pulling beyond the scratch bound must revert");
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
     assert_eq!(fetch_token_balance(&svm, &s.destination), 0);
@@ -420,17 +396,18 @@ fn verified_cpi_destination_redirect_rejected() {
     let attacker = Pubkey::new_unique();
     let attacker_ata = create_ata(&mut svm, &s.payer, &attacker, &s.output_mint);
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
+        expiry,
+        Some(quoter.pubkey()),
         &s.input_mint,
         s.verified_metas(attacker_ata),
     );
 
-    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    let err = send_instructions_expect_err(&mut svm, &[exec], &s.payer, &[&quoter]);
     assert_eq!(err, exec_error(SraError::DestinationNotPinned));
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
     assert_eq!(fetch_token_balance(&svm, &attacker_ata), 0);
@@ -446,24 +423,25 @@ fn verified_cpi_program_substitution_rejected() {
     let mut metas = s.verified_metas(s.destination);
     metas[0] = AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false);
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
+        expiry,
+        Some(quoter.pubkey()),
         &s.input_mint,
         metas,
     );
 
-    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    let err = send_instructions_expect_err(&mut svm, &[exec], &s.payer, &[&quoter]);
     assert_eq!(err, exec_error(SraError::ProgramNotPinned));
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
     assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
 }
 
 // --------------------------------------------------------------------------
-// Signed-quote authorization & context binding (hard reject)
+// Co-signing quoter authorization (hard reject)
 // --------------------------------------------------------------------------
 
 #[test]
@@ -472,17 +450,18 @@ fn verified_cpi_signed_quote_expired_rejected() {
     let quoter = Keypair::new();
     let s = staged_single(&mut svm, &quoter);
     let expired = now(&svm) - 1;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expired));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expired)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
+        expired,
+        Some(quoter.pubkey()),
         &s.input_mint,
         s.verified_metas(s.destination),
     );
 
-    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    let err = send_instructions_expect_err(&mut svm, &[exec], &s.payer, &[&quoter]);
     assert_eq!(err, exec_error(SraError::PriceQuoteExpired));
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
 }
@@ -492,44 +471,21 @@ fn verified_cpi_wrong_quoter_rejected() {
     let mut svm = setup_svm();
     let quoter = Keypair::new();
     let s = staged_single(&mut svm, &quoter);
-    // A stranger signs the (otherwise valid) quote.
+    // A stranger co-signs instead of the route-committed quoter.
     let stranger = Keypair::new();
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&stranger, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
+        expiry,
+        Some(stranger.pubkey()),
         &s.input_mint,
         s.verified_metas(s.destination),
     );
 
-    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
-    assert_eq!(err, exec_error(SraError::InvalidPriceSignature));
-    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
-}
-
-#[test]
-fn verified_cpi_min_out_tamper_rejected() {
-    let mut svm = setup_svm();
-    let quoter = Keypair::new();
-    let s = staged_single(&mut svm, &quoter);
-    let expiry = now(&svm) + 3_600;
-    // The quoter signs min_out = 3_000_000, but the relayer submits a runtime
-    // claiming 1_000_000 (to slip a worse swap through). The reconstructed message
-    // no longer matches the signature.
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 3_000_000, expiry));
-    let exec = execute_actions_ix_full(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
-        &s.input_mint,
-        s.verified_metas(s.destination),
-    );
-
-    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    let err = send_instructions_expect_err(&mut svm, &[exec], &s.payer, &[&stranger]);
     assert_eq!(err, exec_error(SraError::InvalidPriceSignature));
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
 }
@@ -540,30 +496,31 @@ fn verified_cpi_missing_quote_rejected() {
     let quoter = Keypair::new();
     let s = staged_single(&mut svm, &quoter);
     let expiry = now(&svm) + 3_600;
-    // A correct runtime, but NO ed25519 instruction in the transaction.
+    // A correct runtime, but no quoter account co-signs the transaction.
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
+        expiry,
+        None,
         &s.input_mint,
         s.verified_metas(s.destination),
     );
 
-    // Only one instruction, so the error lands on index 0.
     let err = send_ix_expect_err(
         &mut svm,
         exec,
         &s.payer,
         &[],
-        "missing signed quote rejected",
+        "missing co-signing quoter rejected",
     );
     assert_eq!(err, custom_error_at(0, SraError::InvalidPriceSignature));
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
 }
 
 // --------------------------------------------------------------------------
-// Soft fail (recoverable) and deferred-feature gates
+// Soft fail (recoverable)
 // --------------------------------------------------------------------------
 
 #[test]
@@ -575,67 +532,29 @@ fn verified_cpi_missing_destination_ata_soft_fails() {
         &mut svm,
         &quoter,
         OutKind::Legacy,
-        |input, output, q| vec![verified_cpi(input, output, 10_000, signed(q))],
+        |input, output, q| vec![verified_cpi(input, output, 10_000, q)],
         false,
     );
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
+        expiry,
+        Some(quoter.pubkey()),
         &s.input_mint,
         s.verified_metas(s.destination),
     );
 
     // Soft fail returns Ok and persists ActionsFailed; funds stay staged.
-    send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[])
+    send_instructions(&mut svm, &[exec], &s.payer, &[&quoter])
         .expect("missing destination ATA -> ActionsFailed, not abort");
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
     assert_eq!(
         status(&svm, &s.fill_receipt),
         ExecutionStatus::ActionsFailed
     );
-}
-
-#[test]
-fn verified_cpi_oracle_min_out_unsupported() {
-    let mut svm = setup_svm();
-    let quoter = Keypair::new();
-    // An oracle-min_out VerifiedCpi is creatable but not yet executable.
-    let s = stage(
-        &mut svm,
-        &quoter,
-        OutKind::Legacy,
-        |input, output, _q| {
-            vec![verified_cpi(
-                input,
-                output,
-                10_000,
-                MinOut::Oracle {
-                    feed: Pubkey::new_unique(),
-                    max_slippage_bps: 50,
-                },
-            )]
-        },
-        true,
-    );
-    let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
-    let exec = execute_actions_ix_full(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
-        &s.input_mint,
-        s.verified_metas(s.destination),
-    );
-
-    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
-    assert_eq!(err, exec_error(SraError::UnsupportedAction));
-    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
-    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
 }
 
 // --------------------------------------------------------------------------
@@ -652,12 +571,7 @@ fn spl_and_verified_cpi_compose() {
         &mut svm,
         &quoter,
         OutKind::Legacy,
-        |input, output, q| {
-            vec![
-                spl(recipient, 3_000),
-                verified_cpi(input, output, 7_000, signed(q)),
-            ]
-        },
+        |input, output, q| vec![spl(recipient, 3_000), verified_cpi(input, output, 7_000, q)],
         true,
     );
     let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.input_mint);
@@ -665,11 +579,6 @@ fn spl_and_verified_cpi_compose() {
     let swap_input = VAULT * 7_000 / 10_000;
     let out_amount = 1_500_000;
     let expiry = now(&svm) + 3_600;
-    // The VerifiedCpi is the second action (index 1) — the quote binds to that index.
-    let ed_ix = ed25519_quote_ix(
-        &quoter,
-        &s.quote_message_at(1, swap_input, out_amount, expiry),
-    );
     // remaining = [SplTransfer recipient ATA] ++ [VerifiedCpi run]
     let mut remaining = vec![AccountMeta::new(recipient_ata, false)];
     remaining.extend(s.verified_metas(s.destination));
@@ -677,16 +586,14 @@ fn spl_and_verified_cpi_compose() {
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(
-            swap_data(swap_input, out_amount),
-            out_amount,
-            expiry,
-        )],
+        vec![runtime(swap_data(swap_input, out_amount), out_amount)],
+        expiry,
+        Some(quoter.pubkey()),
         &s.input_mint,
         remaining,
     );
 
-    send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]).expect("compose succeeds");
+    send_instructions(&mut svm, &[exec], &s.payer, &[&quoter]).expect("compose succeeds");
 
     assert_eq!(
         fetch_token_balance(&svm, &recipient_ata),
@@ -715,24 +622,25 @@ fn verified_cpi_token_2022_output_succeeds() {
         &mut svm,
         &quoter,
         OutKind::Token2022,
-        |input, output, q| vec![verified_cpi(input, output, 10_000, signed(q))],
+        |input, output, q| vec![verified_cpi(input, output, 10_000, q)],
         true,
     );
 
     let out_amount = 3_000_000;
     let min_out = 2_900_000;
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, min_out, expiry));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, out_amount), min_out, expiry)],
+        vec![runtime(swap_data(VAULT, out_amount), min_out)],
+        expiry,
+        Some(quoter.pubkey()),
         &s.input_mint,
         s.verified_metas(s.destination),
     );
 
-    send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[])
+    send_instructions(&mut svm, &[exec], &s.payer, &[&quoter])
         .expect("token-2022 output swap succeeds");
 
     assert_eq!(fetch_token_balance(&svm, &s.destination), out_amount);
@@ -761,7 +669,7 @@ fn verified_cpi_transfer_fee_output_uses_post_fee_balance() {
             fee_bps: 100, // 1%
             max_fee: 1_000_000_000,
         },
-        |input, output, q| vec![verified_cpi(input, output, 10_000, signed(q))],
+        |input, output, q| vec![verified_cpi(input, output, 10_000, q)],
         true,
     );
 
@@ -770,17 +678,18 @@ fn verified_cpi_transfer_fee_output_uses_post_fee_balance() {
     let landed = out_amount - fee;
     let expiry = now(&svm) + 3_600;
     // Quote the post-fee floor; the swap nominally outputs `out_amount`.
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, landed, expiry));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, out_amount), landed, expiry)],
+        vec![runtime(swap_data(VAULT, out_amount), landed)],
+        expiry,
+        Some(quoter.pubkey()),
         &s.input_mint,
         s.verified_metas(s.destination),
     );
 
-    send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[])
+    send_instructions(&mut svm, &[exec], &s.payer, &[&quoter])
         .expect("transfer-fee output swap succeeds at the post-fee floor");
 
     // The owner receives the post-fee amount, not the nominal output.
@@ -804,24 +713,25 @@ fn verified_cpi_transfer_fee_min_out_against_post_fee_reverts() {
             fee_bps: 100,
             max_fee: 1_000_000_000,
         },
-        |input, output, q| vec![verified_cpi(input, output, 10_000, signed(q))],
+        |input, output, q| vec![verified_cpi(input, output, 10_000, q)],
         true,
     );
 
     let out_amount = 1_000_000;
     let expiry = now(&svm) + 3_600;
     // Quote at the nominal output; post-fee landing (990_000) falls short.
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, out_amount, expiry));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, out_amount), out_amount, expiry)],
+        vec![runtime(swap_data(VAULT, out_amount), out_amount)],
+        expiry,
+        Some(quoter.pubkey()),
         &s.input_mint,
         s.verified_metas(s.destination),
     );
 
-    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    let err = send_instructions_expect_err(&mut svm, &[exec], &s.payer, &[&quoter]);
     assert_eq!(err, exec_error(SraError::MinOutNotMet));
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
     assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
@@ -837,22 +747,23 @@ fn verified_cpi_permissioned_output_requires_optin() {
         &mut svm,
         &quoter,
         OutKind::Token2022Permissioned,
-        |input, output, q| vec![verified_cpi(input, output, 10_000, signed(q))],
+        |input, output, q| vec![verified_cpi(input, output, 10_000, q)],
         true,
     );
 
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, 3_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 3_000_000), 1_000_000)],
+        expiry,
+        Some(quoter.pubkey()),
         &s.input_mint,
         s.verified_metas(s.destination),
     );
 
-    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    let err = send_instructions_expect_err(&mut svm, &[exec], &s.payer, &[&quoter]);
     assert_eq!(err, exec_error(SraError::PermissionedOutputNotAllowed));
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
     assert_eq!(fetch_token_balance(&svm, &s.destination), 0);
@@ -876,7 +787,7 @@ fn verified_cpi_permissioned_output_optin_succeeds() {
                 input_bps: 10_000,
                 account_template: mock_swap_template(),
                 output_mint: output,
-                min_out: signed(q),
+                quoter: q,
                 allow_permissioned_output: true,
             }]
         },
@@ -886,17 +797,18 @@ fn verified_cpi_permissioned_output_optin_succeeds() {
     let out_amount = 3_000_000;
     let min_out = 2_900_000;
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, min_out, expiry));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, out_amount), min_out, expiry)],
+        vec![runtime(swap_data(VAULT, out_amount), min_out)],
+        expiry,
+        Some(quoter.pubkey()),
         &s.input_mint,
         s.verified_metas(s.destination),
     );
 
-    send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[])
+    send_instructions(&mut svm, &[exec], &s.payer, &[&quoter])
         .expect("opted-in permissioned output succeeds");
 
     assert_eq!(fetch_token_balance(&svm, &s.destination), out_amount);
@@ -920,18 +832,246 @@ fn verified_cpi_wrong_output_mint_account_rejected() {
     let mut metas = s.verified_metas(s.destination);
     metas[5] = AccountMeta::new_readonly(s.input_mint, false);
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
         FILL_ID,
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
+        expiry,
+        Some(quoter.pubkey()),
         &s.input_mint,
         metas,
     );
 
-    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    let err = send_instructions_expect_err(&mut svm, &[exec], &s.payer, &[&quoter]);
     assert_eq!(err, exec_error(SraError::ActionAccountMismatch));
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
+    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+}
+
+// --------------------------------------------------------------------------
+// Multiple VerifiedCpi actions under one co-signing quoter
+// --------------------------------------------------------------------------
+
+/// Two 50%-input_bps VerifiedCpi actions, each swapping into its own output mint
+/// through its own mock-swap pool, sharing one committed quoter.
+struct TwoStaged {
+    payer: Keypair,
+    input_mint: Pubkey,
+    output_mint_a: Pubkey,
+    output_mint_b: Pubkey,
+    route: Pubkey,
+    execution_vault: Pubkey,
+    fill_receipt: Pubkey,
+    scratch_authority: Pubkey,
+    scratch: Pubkey,
+    destination_a: Pubkey,
+    destination_b: Pubkey,
+    pool_authority: Pubkey,
+    pool_input_a: Pubkey,
+    pool_output_a: Pubkey,
+    pool_input_b: Pubkey,
+    pool_output_b: Pubkey,
+}
+
+impl TwoStaged {
+    /// `[program, <10 template slots>]` for the action swapping into `output_mint`
+    /// via its own pool ATAs.
+    fn verified_metas(
+        &self,
+        destination: Pubkey,
+        output_mint: Pubkey,
+        pool_input: Pubkey,
+        pool_output: Pubkey,
+    ) -> Vec<AccountMeta> {
+        vec![
+            AccountMeta::new_readonly(mock_swap::ID, false),
+            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+            AccountMeta::new_readonly(self.scratch_authority, false),
+            AccountMeta::new(self.scratch, false),
+            AccountMeta::new(destination, false),
+            AccountMeta::new_readonly(output_mint, false),
+            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+            AccountMeta::new_readonly(self.input_mint, false),
+            AccountMeta::new_readonly(self.pool_authority, false),
+            AccountMeta::new(pool_input, false),
+            AccountMeta::new(pool_output, false),
+        ]
+    }
+}
+
+/// Stage a route committing two 50%-input_bps VerifiedCpi actions sharing one
+/// quoter, each swapping into a distinct output mint through its own mock-swap
+/// pool.
+fn stage_two(svm: &mut litesvm::LiteSVM, quoter: &Keypair) -> TwoStaged {
+    let payer = funded_keypair(svm, 100 * SOL);
+    let owner = funded_keypair(svm, 100 * SOL);
+    let input_mint = create_mint(svm, &payer, &payer.pubkey(), DECIMALS);
+    let output_mint_a = create_mint(svm, &payer, &payer.pubkey(), DECIMALS);
+    let output_mint_b = create_mint(svm, &payer, &payer.pubkey(), DECIMALS);
+    let action_config = vec![
+        verified_cpi(input_mint, output_mint_a, 5_000, quoter.pubkey()),
+        verified_cpi(input_mint, output_mint_b, 5_000, quoter.pubkey()),
+    ];
+    let salt = [5u8; 32];
+
+    let params = CreateRouteParams {
+        source_chain_id: SOURCE_CHAIN_ID,
+        expected_mint: input_mint,
+        action_config,
+        salt,
+        allowed_adapters: vec![ADAPTER_PROGRAM_ID],
+        allowed_executors: vec![payer.pubkey()],
+    };
+    let hash = route_config_hash_for(&owner.pubkey(), &params);
+    let (route, _) = derive_route_pda(&owner.pubkey(), &hash, &salt);
+    let ix = create_route_ix_with_hash(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        hash,
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    send_ix(svm, ix, &payer, &[&owner]).expect("create_route should succeed");
+
+    let (execution_authority, _) = derive_execution_authority_pda(&route);
+    let execution_vault = derive_ata(&execution_authority, &input_mint);
+    mint_to(svm, &payer, &payer, &input_mint, &execution_vault, VAULT);
+
+    let (scratch_authority, _) = derive_scratch_authority_pda(&route);
+    let scratch = create_ata(svm, &payer, &scratch_authority, &input_mint);
+
+    let destination_a = create_ata(svm, &payer, &owner.pubkey(), &output_mint_a);
+    let destination_b = create_ata(svm, &payer, &owner.pubkey(), &output_mint_b);
+
+    let (pool_authority, pool_input_a, pool_output_a) =
+        derive_mock_swap_pool(&input_mint, &output_mint_a);
+    create_ata(svm, &payer, &pool_authority, &input_mint);
+    create_ata(svm, &payer, &pool_authority, &output_mint_a);
+    mint_to(
+        svm,
+        &payer,
+        &payer,
+        &output_mint_a,
+        &pool_output_a,
+        POOL_LIQUIDITY,
+    );
+
+    let (_, pool_input_b, pool_output_b) = derive_mock_swap_pool(&input_mint, &output_mint_b);
+    create_ata(svm, &payer, &pool_authority, &output_mint_b);
+    mint_to(
+        svm,
+        &payer,
+        &payer,
+        &output_mint_b,
+        &pool_output_b,
+        POOL_LIQUIDITY,
+    );
+
+    let fill_receipt =
+        seed_fill_receipt_with_status(svm, &route, FILL_ID, VAULT, ExecutionStatus::Finalized);
+
+    TwoStaged {
+        payer,
+        input_mint,
+        output_mint_a,
+        output_mint_b,
+        route,
+        execution_vault,
+        fill_receipt,
+        scratch_authority,
+        scratch,
+        destination_a,
+        destination_b,
+        pool_authority,
+        pool_input_a,
+        pool_output_a,
+        pool_input_b,
+        pool_output_b,
+    }
+}
+
+/// The behavioral headline of the co-signing quoter migration: two VerifiedCpi
+/// actions execute atomically in one transaction under a single quoter
+/// co-signature, each landing its own swap output.
+#[test]
+fn two_verified_cpi_actions_one_cosigning_quoter_succeeds() {
+    let mut svm = setup_svm();
+    let quoter = Keypair::new();
+    let s = stage_two(&mut svm, &quoter);
+
+    let half = VAULT / 2;
+    let out_a = 1_500_000;
+    let out_b = 2_500_000;
+    let min_out_a = 1_400_000;
+    let min_out_b = 2_400_000;
+    let expiry = now(&svm) + 3_600;
+
+    let mut remaining = s.verified_metas(
+        s.destination_a,
+        s.output_mint_a,
+        s.pool_input_a,
+        s.pool_output_a,
+    );
+    remaining.extend(s.verified_metas(
+        s.destination_b,
+        s.output_mint_b,
+        s.pool_input_b,
+        s.pool_output_b,
+    ));
+
+    let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        vec![
+            runtime(swap_data(half, out_a), min_out_a),
+            runtime(swap_data(half, out_b), min_out_b),
+        ],
+        expiry,
+        Some(quoter.pubkey()),
+        &s.input_mint,
+        remaining,
+    );
+
+    send_instructions(&mut svm, &[exec], &s.payer, &[&quoter])
+        .expect("two VerifiedCpi actions under one quoter co-signature succeed");
+
+    assert_eq!(fetch_token_balance(&svm, &s.destination_a), out_a);
+    assert_eq!(fetch_token_balance(&svm, &s.destination_b), out_b);
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), 0);
+    assert_eq!(
+        fetch_token_balance(&svm, &s.scratch),
+        0,
+        "scratch swept empty after both actions"
+    );
+    assert_eq!(
+        status(&svm, &s.fill_receipt),
+        ExecutionStatus::ActionsSucceeded
+    );
+}
+
+#[test]
+fn quoter_account_present_but_route_uncommitted_quoter_rejected() {
+    let mut svm = setup_svm();
+    let quoter = Keypair::new();
+    let s = staged_single(&mut svm, &quoter);
+    // A different signer co-signs; the route committed `quoter`, not `other`.
+    let other = Keypair::new();
+    let expiry = now(&svm) + 3_600;
+    let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000)],
+        expiry,
+        Some(other.pubkey()),
+        &s.input_mint,
+        s.verified_metas(s.destination),
+    );
+
+    let err = send_instructions_expect_err(&mut svm, &[exec], &s.payer, &[&other]);
+    assert_eq!(err, exec_error(SraError::InvalidPriceSignature));
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
     assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
 }

@@ -13,11 +13,10 @@
 //! pushes a real transaction past the packet limit.
 //!
 //! A transaction's serialized size is a pure function of its account count and its
-//! instruction-data length — not of whether the referenced accounts exist on-chain.
-//! The route stores its committed `action_config` typed on-chain; `execute_actions`
-//! reads it from there instead of carrying it as instruction data, so its wire size
-//! tracks only the per-action runtime data and remaining accounts. So these tests
-//! build the genuine instructions, via the same builders the SDK uses, at the
+//! instruction-data length — not of whether the referenced accounts exist on-chain,
+//! nor of a route's committed action list (the route stores only a 32-byte hash of
+//! it; `execute_actions` carries the action list as instruction data). So these
+//! tests build the genuine instructions, via the same builders the SDK uses, at the
 //! heaviest payload the program accepts, and serialize them — they never submit.
 //! (Executing the `VerifiedCpi` path end-to-end belongs to the compute-budget and
 //! end-to-end suites; here only the wire size matters.)
@@ -46,8 +45,7 @@ use solana_sdk::{
 };
 use sra_common::{
     constants::{MAX_ACTION_IDXS, MAX_TEMPLATE_SLOTS},
-    quote::{action_context_hash, signed_quote_message},
-    types::{AccountTemplate, FixedRole, MinOut, SlotRole, SolanaAction},
+    types::{AccountTemplate, FixedRole, SlotRole, SolanaAction},
 };
 
 const AMOUNT: u64 = 1_000_000;
@@ -55,10 +53,9 @@ const FILL_ID: [u8; 32] = [9u8; 32];
 /// Matches `sample_create_route_params` — the route's bound source chain.
 const SOURCE_CHAIN_ID: u64 = 42_161;
 const BPS_TOTAL: u16 = 10_000;
-/// Far-future fixed unix expiry for the representative signed quote (never executed).
+/// Far-future fixed unix expiry for the representative quote batch (never executed).
 const EXPIRY: i64 = 1_900_000_000;
-// Representative VerifiedCpi quote figures (sized, never executed here).
-const VAULT: u64 = 4_000_000;
+// Representative VerifiedCpi quote figure (sized, never executed here).
 const MIN_OUT: u64 = 2_900_000;
 /// Representative relayer-supplied inner-instruction length for a `VerifiedCpi`
 /// (e.g. an aggregator route plan). It is NOT bounded by `validate_action_config`
@@ -91,15 +88,20 @@ fn dest() -> Dest {
 }
 
 /// Compile `ixs` into a v0 transaction (optionally with lookup tables) and sign it
-/// with `payer` — the sole signer across every destination shape.
+/// with `payer` plus any `extra_signers` (e.g. a co-signing quoter) — every
+/// destination shape's fee payer plus whatever else the batch requires signatures
+/// from.
 fn compile_v0(
     payer: &Keypair,
     ixs: &[Instruction],
     lookup_tables: &[AddressLookupTableAccount],
+    extra_signers: &[&Keypair],
 ) -> VersionedTransaction {
     let msg = v0::Message::try_compile(&payer.pubkey(), ixs, lookup_tables, Hash::default())
         .expect("compile v0 message");
-    VersionedTransaction::try_new(VersionedMessage::V0(msg), &[payer]).expect("sign versioned tx")
+    let mut signers: Vec<&Keypair> = vec![payer];
+    signers.extend_from_slice(extra_signers);
+    VersionedTransaction::try_new(VersionedMessage::V0(msg), &signers).expect("sign versioned tx")
 }
 
 fn serialized_len(tx: &VersionedTransaction) -> usize {
@@ -158,30 +160,27 @@ fn max_template() -> AccountTemplate {
     AccountTemplate { slots }
 }
 
-/// `n` max-template `VerifiedCpi` actions plus the single `execute_actions` that
-/// runs them atomically. Each action carries a representative relayer-supplied
-/// `inner_data` and its OWN ed25519 signed quote — the quote's context hash folds
-/// the action index, so one quote cannot cover another. Returns
-/// `[ed25519 × n, execute_actions]`, the exact shape the SDK submits for a route
-/// of `n` verified swaps.
-fn verified_cpi_ixs(d: &Dest, n: u8) -> Vec<Instruction> {
-    let mut ixs = Vec::new();
+/// `n` max-template `VerifiedCpi` actions sharing one co-signing quoter, plus the
+/// single `execute_actions` that runs them atomically. Each action carries a
+/// representative relayer-supplied `inner_data`; the quoter's co-signature attests
+/// every action's `min_amount_out` and the batch `quote_expiry`. Returns
+/// `(vec![execute_actions], quoter)`, the exact shape the SDK submits for a route
+/// of `n` verified swaps — the caller signs with `payer` + the returned quoter.
+fn verified_cpi_ixs(d: &Dest, n: u8) -> (Vec<Instruction>, Keypair) {
+    let quoter = Keypair::new();
     let mut action_config = Vec::new();
     let mut runtimes = Vec::new();
     let mut metas = Vec::new();
 
-    for i in 0..n {
+    for _ in 0..n {
         let output_mint = Pubkey::new_unique();
-        let quoter = Keypair::new();
         action_config.push(SolanaAction::VerifiedCpi {
             program_id: mock_swap::ID,
             input_mint: d.mint,
             input_bps: BPS_TOTAL / n as u16,
             account_template: max_template(),
             output_mint,
-            min_out: MinOut::SignedQuote {
-                quoter: quoter.pubkey(),
-            },
+            quoter: quoter.pubkey(),
             allow_permissioned_output: false,
         });
         // The per-action run: [inner program, then one account per template slot].
@@ -189,23 +188,20 @@ fn verified_cpi_ixs(d: &Dest, n: u8) -> Vec<Instruction> {
         for _ in 0..MAX_TEMPLATE_SLOTS {
             metas.push(AccountMeta::new(Pubkey::new_unique(), false));
         }
-        runtimes.push(runtime(vec![0u8; INNER_DATA_LEN], MIN_OUT, EXPIRY));
-
-        let context_hash = action_context_hash(&d.route, &FILL_ID, i);
-        let message =
-            signed_quote_message(&context_hash, &d.mint, &output_mint, VAULT, MIN_OUT, EXPIRY);
-        ixs.push(ed25519_quote_ix(&quoter, &message));
+        runtimes.push(runtime(vec![0u8; INNER_DATA_LEN], MIN_OUT));
     }
 
-    ixs.push(execute_actions_ix_full(
+    let exec = execute_actions_ix_full(
         &d.payer.pubkey(),
         &d.route,
         FILL_ID,
         runtimes,
+        EXPIRY,
+        Some(quoter.pubkey()),
         &d.mint,
         metas,
-    ));
-    ixs
+    );
+    (vec![exec], quoter)
 }
 
 // --- verify_across_fill + finalize_fill (action-config-independent floor) ------
@@ -215,7 +211,7 @@ fn dest_verify_finalize_2ix_fits_within_packet_limit_with_alt() {
     let d = dest();
     let ixs = verify_finalize_ixs(&d);
     let alt = representative_lookup_table(&ixs);
-    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt]));
+    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt], &[]));
 
     println!("dest verify+finalize 2-IX with ALT: {size} / {PACKET_DATA_SIZE} bytes");
     assert!(
@@ -228,7 +224,7 @@ fn dest_verify_finalize_2ix_fits_within_packet_limit_with_alt() {
 fn dest_verify_finalize_2ix_fits_without_alt() {
     let d = dest();
     let ixs = verify_finalize_ixs(&d);
-    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[]));
+    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[], &[]));
 
     // Unlike the source pair, verify+finalize touches few accounts and fits
     // unaided — an address lookup table is not mandatory for this shape.
@@ -246,7 +242,7 @@ fn dest_finalize_plus_max_spl_execute_actions_fits_with_alt() {
     let d = dest();
     let ixs = vec![finalize_only_ix(&d), max_spl_execute_ix(&d)];
     let alt = representative_lookup_table(&ixs);
-    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt]));
+    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt], &[]));
 
     println!("dest finalize + execute_actions(max SplTransfer) with ALT: {size} / {PACKET_DATA_SIZE} bytes");
     assert!(
@@ -260,9 +256,9 @@ fn dest_finalize_plus_max_spl_execute_actions_fits_with_alt() {
 #[test]
 fn dest_single_verified_cpi_execute_actions_fits_with_alt() {
     let d = dest();
-    let ixs = verified_cpi_ixs(&d, 1);
+    let (ixs, quoter) = verified_cpi_ixs(&d, 1);
     let alt = representative_lookup_table(&ixs);
-    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt]));
+    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt], &[&quoter]));
 
     println!("dest execute_actions(1 VerifiedCpi, max template) with ALT: {size} / {PACKET_DATA_SIZE} bytes");
     assert!(
@@ -274,8 +270,8 @@ fn dest_single_verified_cpi_execute_actions_fits_with_alt() {
 #[test]
 fn dest_single_verified_cpi_execute_actions_exceeds_without_alt() {
     let d = dest();
-    let ixs = verified_cpi_ixs(&d, 1);
-    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[]));
+    let (ixs, quoter) = verified_cpi_ixs(&d, 1);
+    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[], &[&quoter]));
 
     // The Jupiter-scale account list pushes even a single verified swap past the
     // limit unaided — an address lookup table is mandatory for it.
@@ -289,12 +285,12 @@ fn dest_single_verified_cpi_execute_actions_exceeds_without_alt() {
 #[test]
 fn dest_finalize_plus_single_verified_cpi_execute_actions_fits_with_alt() {
     let d = dest();
-    // [ed25519, finalize, execute_actions(1 VerifiedCpi)] — the SDK can batch the
-    // settle and one verified swap; measure whether the combined shape still fits.
-    let mut ixs = verified_cpi_ixs(&d, 1);
-    ixs.insert(1, finalize_only_ix(&d));
+    // [finalize, execute_actions(1 VerifiedCpi)] — the SDK can batch the settle and
+    // one verified swap; measure whether the combined shape still fits.
+    let (mut ixs, quoter) = verified_cpi_ixs(&d, 1);
+    ixs.insert(0, finalize_only_ix(&d));
     let alt = representative_lookup_table(&ixs);
-    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt]));
+    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt], &[&quoter]));
 
     println!("dest finalize + execute_actions(1 VerifiedCpi, max template) with ALT: {size} / {PACKET_DATA_SIZE} bytes");
     assert!(
@@ -308,22 +304,22 @@ fn dest_finalize_plus_single_verified_cpi_execute_actions_fits_with_alt() {
 // `validate_action_config` accepts up to `MAX_ACTION_IDXS` actions of any mix, with
 // no cap on the number of `VerifiedCpi` actions, and `execute_actions` runs the
 // WHOLE committed list atomically in one instruction (no chunking). Each extra
-// `VerifiedCpi` adds an address-lookup-table-INCOMPRESSIBLE cost — its own ed25519
-// quote instruction (the quote's context hash folds the action index) plus its
-// committed action bytes and runtime `inner_data` — so the genuine worst case is
-// `MAX_ACTION_IDXS` verified swaps. This canary sizes that ceiling.
+// `VerifiedCpi` adds an address-lookup-table-INCOMPRESSIBLE cost — its own committed
+// action bytes and runtime `inner_data` — so the genuine worst case is
+// `MAX_ACTION_IDXS` verified swaps sharing one co-signing quoter. This canary sizes
+// that ceiling.
 
 #[test]
 fn dest_max_verified_cpi_execute_actions_exceeds_packet_limit_even_with_alt() {
     let d = dest();
-    let ixs = verified_cpi_ixs(&d, MAX_ACTION_IDXS as u8);
+    let (ixs, quoter) = verified_cpi_ixs(&d, MAX_ACTION_IDXS as u8);
     let alt = representative_lookup_table(&ixs);
-    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt]));
+    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt], &[&quoter]));
 
     // FINDING: the program permits routes whose single, atomic `execute_actions`
     // cannot fit in one transaction even with an address lookup table — an ALT
-    // compresses account addresses, but the per-action ed25519 quotes + action
-    // bytes + runtime data are incompressible. Because actions execute atomically
+    // compresses account addresses, but the per-action committed action bytes and
+    // runtime data are incompressible. Because actions execute atomically
     // (no partial execution), such a route's actions can never run on-chain; the
     // bridged funds settle into the execution vault and are owner-recoverable, but
     // the intended actions do not execute. The route-creation / SDK layer must

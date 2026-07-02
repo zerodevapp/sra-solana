@@ -2,7 +2,7 @@
 //!
 //! `SolanaAction` itself lives in [`super::destination`]; this module carries the
 //! types its `VerifiedCpi` variant references (`AccountTemplate`, `SlotRole`,
-//! `FixedRole`, `MinOut`) plus the pure `validate_action_config` checked at
+//! `FixedRole`) plus the pure `validate_action_config` checked at
 //! `create_route`. Account resolution and amount math are handler-side (they
 //! read on-chain accounts) and live with `execute_actions`.
 
@@ -46,15 +46,6 @@ pub enum FixedRole {
     OutputMint,
 }
 
-/// Minimum-output reference for a `VerifiedCpi`'s post-fee balance-diff gate.
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Debug, InitSpace)]
-pub enum MinOut {
-    /// Primary: an ed25519-signed quote bound to the fill/action context.
-    SignedQuote { quoter: Pubkey },
-    /// Fallback: an on-chain price feed with a slippage tolerance.
-    Oracle { feed: Pubkey, max_slippage_bps: u16 },
-}
-
 impl AccountTemplate {
     fn pins(&self, role: FixedRole) -> bool {
         self.slots.iter().any(|slot| slot == &SlotRole::Fixed(role))
@@ -70,6 +61,7 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
     );
 
     let mut spl_transfer_bps: u32 = 0;
+    let mut committed_quoter: Option<Pubkey> = None;
     for action in actions {
         match action {
             SolanaAction::SplTransfer {
@@ -89,7 +81,7 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
                 input_bps,
                 account_template,
                 output_mint,
-                min_out,
+                quoter,
                 ..
             } => {
                 require!(
@@ -116,21 +108,12 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
                         && account_template.pins(FixedRole::OutputMint),
                     SraError::InvalidActionConfig
                 );
-                // The min-out reference must name a real signer/feed.
-                match min_out {
-                    MinOut::SignedQuote { quoter } => {
-                        require!(*quoter != Pubkey::default(), SraError::InvalidActionConfig);
-                    }
-                    MinOut::Oracle {
-                        feed,
-                        max_slippage_bps,
-                    } => {
-                        require!(*feed != Pubkey::default(), SraError::InvalidActionConfig);
-                        require!(
-                            *max_slippage_bps <= BPS_DENOMINATOR,
-                            SraError::InvalidActionConfig
-                        );
-                    }
+                // One co-signing quoter per transaction: non-zero and shared by every
+                // VerifiedCpi action in the route.
+                require!(*quoter != Pubkey::default(), SraError::InvalidActionConfig);
+                match committed_quoter {
+                    None => committed_quoter = Some(*quoter),
+                    Some(q) => require!(q == *quoter, SraError::InvalidActionConfig),
                 }
             }
         }
@@ -149,9 +132,9 @@ mod tests {
     use crate::constants::MAX_TEMPLATE_SLOTS;
     use crate::errors::SraError;
     use crate::types::{
-        validate_action_config, AccountTemplate, FixedRole, MinOut, SlotRole, SolanaAction,
+        validate_action_config, AccountTemplate, FixedRole, SlotRole, SolanaAction,
     };
-    use anchor_lang::{prelude::*, AnchorDeserialize, AnchorSerialize};
+    use anchor_lang::prelude::*;
 
     fn full_template() -> AccountTemplate {
         AccountTemplate {
@@ -166,6 +149,12 @@ mod tests {
         }
     }
 
+    // Fixed (not `new_unique()`) so independent `valid_verified_cpi()` calls
+    // share a quoter, matching the one-quoter-per-route invariant.
+    fn valid_quoter() -> Pubkey {
+        Pubkey::new_from_array([42u8; 32])
+    }
+
     fn valid_verified_cpi() -> SolanaAction {
         SolanaAction::VerifiedCpi {
             program_id: Pubkey::new_unique(),
@@ -173,9 +162,7 @@ mod tests {
             input_bps: 10_000,
             account_template: full_template(),
             output_mint: Pubkey::new_unique(),
-            min_out: MinOut::SignedQuote {
-                quoter: Pubkey::new_unique(),
-            },
+            quoter: valid_quoter(),
             allow_permissioned_output: false,
         }
     }
@@ -191,31 +178,6 @@ mod tests {
     fn account_template_init_space() {
         // 4 (vec len) + MAX_TEMPLATE_SLOTS * SlotRole (1 disc + 1 FixedRole disc).
         assert_eq!(AccountTemplate::INIT_SPACE, 4 + MAX_TEMPLATE_SLOTS * 2);
-    }
-
-    #[test]
-    fn min_out_init_space_covers_oracle() {
-        // 1 disc + max(SignedQuote 32, Oracle 32+2) = 35.
-        assert_eq!(MinOut::INIT_SPACE, 35);
-    }
-
-    #[test]
-    fn min_out_borsh_round_trip_signed_quote() {
-        let m = MinOut::SignedQuote {
-            quoter: Pubkey::new_unique(),
-        };
-        let bytes = m.try_to_vec().unwrap();
-        assert_eq!(MinOut::try_from_slice(&bytes).unwrap(), m);
-    }
-
-    #[test]
-    fn min_out_borsh_round_trip_oracle() {
-        let m = MinOut::Oracle {
-            feed: Pubkey::new_unique(),
-            max_slippage_bps: 50,
-        };
-        let bytes = m.try_to_vec().unwrap();
-        assert_eq!(MinOut::try_from_slice(&bytes).unwrap(), m);
     }
 
     #[test]
@@ -403,10 +365,8 @@ mod tests {
     #[test]
     fn validate_action_config_verified_cpi_zero_quoter_rejected() {
         let mut action = valid_verified_cpi();
-        if let SolanaAction::VerifiedCpi { min_out, .. } = &mut action {
-            *min_out = MinOut::SignedQuote {
-                quoter: Pubkey::default(),
-            };
+        if let SolanaAction::VerifiedCpi { quoter, .. } = &mut action {
+            *quoter = Pubkey::default();
         }
         assert_eq!(
             validate_action_config(&[action]).unwrap_err(),
@@ -415,33 +375,28 @@ mod tests {
     }
 
     #[test]
-    fn validate_action_config_verified_cpi_zero_oracle_feed_rejected() {
-        let mut action = valid_verified_cpi();
-        if let SolanaAction::VerifiedCpi { min_out, .. } = &mut action {
-            *min_out = MinOut::Oracle {
-                feed: Pubkey::default(),
-                max_slippage_bps: 50,
-            };
-        }
-        assert_eq!(
-            validate_action_config(&[action]).unwrap_err(),
-            SraError::InvalidActionConfig.into()
-        );
+    fn validate_action_config_mixed_quoters_rejected() {
+        // One co-signing quoter per transaction: every VerifiedCpi action in a
+        // route must commit the same quoter.
+        let mut a = valid_verified_cpi();
+        let mut b = valid_verified_cpi();
+        let SolanaAction::VerifiedCpi { quoter, .. } = &mut a else {
+            unreachable!()
+        };
+        *quoter = Pubkey::new_from_array([1u8; 32]);
+        let SolanaAction::VerifiedCpi { quoter, .. } = &mut b else {
+            unreachable!()
+        };
+        *quoter = Pubkey::new_from_array([2u8; 32]);
+        let err = validate_action_config(&[a, b]).unwrap_err();
+        assert_eq!(err, SraError::InvalidActionConfig.into());
     }
 
     #[test]
-    fn validate_action_config_verified_cpi_oracle_slippage_over_10000_rejected() {
-        let mut action = valid_verified_cpi();
-        if let SolanaAction::VerifiedCpi { min_out, .. } = &mut action {
-            *min_out = MinOut::Oracle {
-                feed: Pubkey::new_unique(),
-                max_slippage_bps: 10_001,
-            };
-        }
-        assert_eq!(
-            validate_action_config(&[action]).unwrap_err(),
-            SraError::InvalidActionConfig.into()
-        );
+    fn validate_action_config_shared_quoter_accepted() {
+        let a = valid_verified_cpi();
+        let b = valid_verified_cpi();
+        validate_action_config(&[a, b]).expect("same quoter across actions is valid");
     }
 
     fn assert_template_rejected(slots: &[SlotRole]) {
@@ -453,10 +408,7 @@ mod tests {
                 slots: slots.to_vec(),
             },
             output_mint: Pubkey::new_unique(),
-            min_out: MinOut::Oracle {
-                feed: Pubkey::new_unique(),
-                max_slippage_bps: 50,
-            },
+            quoter: Pubkey::new_unique(),
             allow_permissioned_output: false,
         };
         assert_eq!(
