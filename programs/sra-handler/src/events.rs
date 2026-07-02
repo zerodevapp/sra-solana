@@ -78,8 +78,6 @@ pub struct RouteCreated {
     pub owner: Pubkey,
     pub source_chain_id: u64,
     pub expected_mint: Pubkey,
-    /// keccak256(borsh(action_config)) — committed by hash, not stored inline.
-    pub action_config_hash: [u8; 32],
     pub salt: [u8; 32],
     pub allowed_adapters: Vec<Pubkey>,
     pub allowed_executors: Vec<Pubkey>,

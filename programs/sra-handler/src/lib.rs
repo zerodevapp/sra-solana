@@ -1,9 +1,7 @@
 use anchor_lang::prelude::*;
 use sra_common::{
     source_deposit::PrepareParams,
-    types::{
-        CreateRouteParams, ManageRouteParams, SolanaAction, SourceHandlerData, VerifiedCpiRuntime,
-    },
+    types::{CreateRouteParams, ManageRouteParams, SourceHandlerData, VerifiedCpiRuntime},
 };
 
 pub mod events;
@@ -84,29 +82,17 @@ pub mod sra_handler {
     pub fn execute_actions<'info>(
         ctx: Context<'_, '_, '_, 'info, ExecuteActions<'info>>,
         fill_id: [u8; 32],
-        action_config: Vec<SolanaAction>,
         verified_runtimes: Vec<VerifiedCpiRuntime>,
     ) -> Result<()> {
-        instructions::destination::execute_actions::handler(
-            ctx,
-            fill_id,
-            action_config,
-            verified_runtimes,
-        )
+        instructions::destination::execute_actions::handler(ctx, fill_id, verified_runtimes)
     }
 
     pub fn retry_actions<'info>(
         ctx: Context<'_, '_, '_, 'info, RetryActions<'info>>,
         fill_id: [u8; 32],
-        action_config: Vec<SolanaAction>,
         verified_runtimes: Vec<VerifiedCpiRuntime>,
     ) -> Result<()> {
-        instructions::destination::retry_actions::handler(
-            ctx,
-            fill_id,
-            action_config,
-            verified_runtimes,
-        )
+        instructions::destination::retry_actions::handler(ctx, fill_id, verified_runtimes)
     }
 
     pub fn recover_funds(ctx: Context<RecoverFunds>) -> Result<()> {

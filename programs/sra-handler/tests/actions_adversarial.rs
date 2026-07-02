@@ -179,14 +179,7 @@ fn action_drain_at_full_bps_drains_vault_without_overflow() {
 
     send_ix(
         &mut svm,
-        execute_actions_ix(
-            &payer.pubkey(),
-            &fr.route,
-            fr.fill_id,
-            action_config,
-            &mint,
-            &atas,
-        ),
+        execute_actions_ix(&payer.pubkey(), &fr.route, fr.fill_id, &mint, &atas),
         &payer,
         &[],
     )
@@ -244,32 +237,35 @@ fn bps_sum_over_10000_rejected_at_create_and_uninjectable_at_execution() {
     );
     assert_eq!(err, custom_error(SraError::ActionBpsSumExceeded));
 
-    // 2. A legitimate route (Σbps == 100%) cannot have the over-100% list smuggled
-    // in at execution — the committed hash binds the exact list.
+    // 2. A legitimate route (Σbps == 100%) commits its exact action list on-chain
+    // (`route.action_config`), so a relayer cannot smuggle a differently-shaped
+    // remaining-accounts list at execution — the account-count/identity check
+    // rejects it before any balance is read.
     let committed = vec![spl(a.pubkey(), 5_000), spl(b.pubkey(), 5_000)];
     let ata_a = create_ata(&mut svm, &payer, &a.pubkey(), &mint);
     let ata_b = create_ata(&mut svm, &payer, &b.pubkey(), &mint);
     let fr = finalize_route(&mut svm, &payer, &owner, mint, committed, [9u8; 32], VAULT);
-    // Pass the tampered over-100% list to execute_actions.
+    // Supply one more remaining account (extra_ata) than the 2-action config requires,
+    // to test that the account-count/identity check rejects mismatched shapes.
+    let extra_ata = create_ata(&mut svm, &payer, &Pubkey::new_unique(), &mint);
     let err = send_ix_expect_err(
         &mut svm,
         execute_actions_ix(
             &payer.pubkey(),
             &fr.route,
             fr.fill_id,
-            over,
             &mint,
-            &[ata_a, ata_b],
+            &[ata_a, ata_b, extra_ata],
         ),
         &payer,
         &[],
-        "tampered action list",
+        "mismatched remaining-accounts shape",
     );
-    assert_eq!(err, custom_error(SraError::ActionConfigHashMismatch));
+    assert_eq!(err, custom_error(SraError::ActionAccountMismatch));
     assert_eq!(
         fetch_token_balance(&svm, &fr.execution_vault),
         VAULT,
-        "funds untouched after the hash-mismatch reject"
+        "funds untouched after the account-mismatch reject"
     );
     assert_eq!(status(&svm, &fr.fill_receipt), ExecutionStatus::Finalized);
 }
@@ -305,7 +301,6 @@ fn recipient_ata_frozen_soft_fails_then_recovers() {
             &payer.pubkey(),
             &fr.route,
             fr.fill_id,
-            action_config,
             &mint,
             &[recipient_ata],
         ),
@@ -384,7 +379,6 @@ fn unsolicited_topup_of_execution_vault_distributed_deterministically() {
             &payer.pubkey(),
             &fr.route,
             fr.fill_id,
-            action_config,
             &mint,
             &[recipient_ata],
         ),
@@ -460,7 +454,6 @@ fn double_finalize_rejected_and_execute_after_success_rejected() {
             &payer.pubkey(),
             &fr.route,
             fr.fill_id,
-            action_config.clone(),
             &mint,
             &[recipient_ata],
         ),
@@ -481,7 +474,6 @@ fn double_finalize_rejected_and_execute_after_success_rejected() {
             &payer.pubkey(),
             &fr.route,
             fr.fill_id,
-            action_config,
             &mint,
             &[recipient_ata],
         ),
@@ -587,7 +579,6 @@ fn stranded_funds_inventory_holds() {
             &payer.pubkey(),
             &fr2.route,
             fr2.fill_id,
-            failed_config,
             &mint,
             &[frozen_ata],
         ),
@@ -628,14 +619,7 @@ fn stranded_funds_inventory_holds() {
     );
     send_ix(
         &mut svm,
-        execute_actions_ix(
-            &payer.pubkey(),
-            &fr3.route,
-            fr3.fill_id,
-            succ_config,
-            &mint,
-            &[succ_ata],
-        ),
+        execute_actions_ix(&payer.pubkey(), &fr3.route, fr3.fill_id, &mint, &[succ_ata]),
         &payer,
         &[],
     )
@@ -671,7 +655,6 @@ struct StagedVerified {
     pool_authority: Pubkey,
     pool_input: Pubkey,
     pool_output: Pubkey,
-    action_config: Vec<SolanaAction>,
 }
 
 const V_FILL_ID: [u8; 32] = [33u8; 32];
@@ -772,7 +755,6 @@ fn stage_verified(
         pool_authority,
         pool_input,
         pool_output,
-        action_config,
     }
 }
 
@@ -871,7 +853,6 @@ fn malicious_cpi_target_rejected_funds_safe() {
         &s.payer.pubkey(),
         &s.route,
         s.fill_id,
-        s.action_config.clone(),
         vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
         &s.input_mint,
         s.honest_metas(),
@@ -903,7 +884,6 @@ fn verified_cpi_source_slot_substitution_rejected() {
         &s.payer.pubkey(),
         &s.route,
         s.fill_id,
-        s.action_config.clone(),
         vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
         &s.input_mint,
         s.metas(
@@ -938,7 +918,6 @@ fn verified_cpi_signing_authority_substitution_rejected() {
         &s.payer.pubkey(),
         &s.route,
         s.fill_id,
-        s.action_config.clone(),
         vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
         &s.input_mint,
         s.metas(mock_swap::ID, attacker_authority, s.scratch, s.destination),
@@ -973,7 +952,6 @@ fn verified_cpi_hostile_account_set_bounded_by_input_bps() {
         &s.payer.pubkey(),
         &s.route,
         s.fill_id,
-        s.action_config.clone(),
         vec![runtime(
             swap_data(input_amount, out_amount),
             out_amount,
@@ -1034,7 +1012,6 @@ fn verified_cpi_prefunded_scratch_swept_to_vault() {
         &s.payer.pubkey(),
         &s.route,
         s.fill_id,
-        s.action_config.clone(),
         vec![runtime(swap_data(pulled, out_amount), out_amount, expiry)],
         &s.input_mint,
         s.honest_metas(),
@@ -1089,7 +1066,6 @@ fn mixed_variant_combined_draw_over_100pct_reverts_funds_safe() {
         &s.payer.pubkey(),
         &s.route,
         s.fill_id,
-        s.action_config.clone(),
         vec![runtime(swap_data(VAULT, 1), 1, expiry)],
         &s.input_mint,
         remaining,

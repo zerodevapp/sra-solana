@@ -28,7 +28,6 @@ struct Staged {
     route: Pubkey,
     execution_vault: Pubkey,
     fill_receipt: Pubkey,
-    action_config: Vec<SolanaAction>,
 }
 
 /// Create a route, fund its execution vault, and seed a `FillReceipt` in
@@ -76,7 +75,6 @@ fn stage(
         route,
         execution_vault,
         fill_receipt,
-        action_config,
     }
 }
 
@@ -98,14 +96,7 @@ fn retry_actions_after_fix_succeeds() {
 
     // First execution soft-fails: the recipient ATA does not exist yet.
     let missing = derive_ata(&recipient, &s.mint);
-    let exec = execute_actions_ix(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        s.action_config.clone(),
-        &s.mint,
-        &[missing],
-    );
+    let exec = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[missing]);
     send_ix(&mut svm, exec, &s.payer, &[]).expect("missing ATA -> ActionsFailed");
     assert_eq!(
         status(&svm, &s.fill_receipt),
@@ -118,7 +109,6 @@ fn retry_actions_after_fix_succeeds() {
         &s.owner.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -148,7 +138,6 @@ fn retry_actions_emits_actions_retried() {
         &s.owner.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -175,7 +164,6 @@ fn retry_actions_does_not_close_fill_receipt() {
         &s.owner.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -209,14 +197,7 @@ fn retry_actions_still_failing_stays_actions_failed() {
     // The recipient ATA is still missing — the underlying problem is unfixed.
     let missing = derive_ata(&recipient, &s.mint);
 
-    let retry = retry_actions_ix(
-        &s.owner.pubkey(),
-        &s.route,
-        FILL_ID,
-        s.action_config.clone(),
-        &s.mint,
-        &[missing],
-    );
+    let retry = retry_actions_ix(&s.owner.pubkey(), &s.route, FILL_ID, &s.mint, &[missing]);
     // Returns Ok; the status stays ActionsFailed and can be retried again later.
     send_ix(&mut svm, retry, &s.payer, &[&s.owner])
         .expect("still-missing ATA -> stays ActionsFailed");
@@ -255,7 +236,6 @@ fn retry_actions_non_actions_failed_status_rejected() {
             &s.owner.pubkey(),
             &s.route,
             FILL_ID,
-            s.action_config.clone(),
             &s.mint,
             &[recipient_ata],
         );
@@ -291,7 +271,6 @@ fn retry_actions_non_owner_rejected() {
         &attacker.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -345,7 +324,6 @@ fn retry_actions_paused_route_rejected() {
         &s.owner.pubkey(),
         &s.route,
         FILL_ID,
-        s.action_config.clone(),
         &s.mint,
         &[recipient_ata],
     );
@@ -381,14 +359,7 @@ fn retry_actions_spl_transfer_substitution_rejected() {
     // SplTransfer check must still bite on the retry path.
     let wrong_ata = derive_ata(&Pubkey::new_unique(), &s.mint);
 
-    let retry = retry_actions_ix(
-        &s.owner.pubkey(),
-        &s.route,
-        FILL_ID,
-        s.action_config.clone(),
-        &s.mint,
-        &[wrong_ata],
-    );
+    let retry = retry_actions_ix(&s.owner.pubkey(), &s.route, FILL_ID, &s.mint, &[wrong_ata]);
     let err = send_ix_expect_err(
         &mut svm,
         retry,
@@ -435,7 +406,6 @@ struct VerifiedStaged {
     pool_authority: Pubkey,
     pool_input: Pubkey,
     pool_output: Pubkey,
-    action_config: Vec<SolanaAction>,
 }
 
 impl VerifiedStaged {
@@ -538,7 +508,6 @@ fn stage_verified(svm: &mut litesvm::LiteSVM, quoter: &Keypair) -> VerifiedStage
         pool_authority,
         pool_input,
         pool_output,
-        action_config,
     }
 }
 
@@ -556,7 +525,6 @@ fn retry_actions_verified_cpi_reuses_engine() {
         &v.owner.pubkey(),
         &v.route,
         FILL_ID,
-        v.action_config.clone(),
         vec![runtime(swap_data(VAULT, out_amount), min_out, expiry)],
         &v.input_mint,
         v.verified_metas(),
