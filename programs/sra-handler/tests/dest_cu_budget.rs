@@ -3,7 +3,7 @@
 //! The production destination fill is a versioned transaction over an ALT that
 //! batches the two-instruction flow `[verify_across_fill (adapter, IX 1),
 //! finalize_fill (handler, IX 2)]`, requesting a 400k CU limit — the same budget
-//! the source deposit requests. The owner's hash-committed actions then run in a
+//! the source deposit requests. The owner's route-committed actions then run in a
 //! follow-up `execute_actions` transaction (the fill receipt gates the sequence,
 //! so they need not share a transaction).
 //!
@@ -241,7 +241,7 @@ fn dest_finalize_execute_spl_under_cu_budget() {
     // (AMOUNT is divisible by 4, so the floor splits leave no dust).
     let recipients: Vec<Pubkey> = (0..4).map(|_| Pubkey::new_unique()).collect();
     let cfg: Vec<SolanaAction> = recipients.iter().map(|r| spl(*r, 2_500)).collect();
-    let s = stage_filled(&mut svm, &payer, &owner, mint, cfg.clone(), [0x11; 32]);
+    let s = stage_filled(&mut svm, &payer, &owner, mint, cfg, [0x11; 32]);
 
     // verify is the separately-measured 2-IX leg, so it is setup here. The
     // recipient ATAs must exist so execute takes the heavy transfer path (a
@@ -262,7 +262,6 @@ fn dest_finalize_execute_spl_under_cu_budget() {
                 &payer.pubkey(),
                 &s.route,
                 s.relay_hash,
-                cfg,
                 &mint,
                 &recipient_atas,
             ),
@@ -306,14 +305,7 @@ fn dest_finalize_execute_verified_cpi_under_cu_budget() {
         },
         allow_permissioned_output: false,
     }];
-    let s = stage_filled(
-        &mut svm,
-        &payer,
-        &owner,
-        input_mint,
-        cfg.clone(),
-        [0x12; 32],
-    );
+    let s = stage_filled(&mut svm, &payer, &owner, input_mint, cfg, [0x12; 32]);
 
     // verify is setup; stand up the scratch ATA, the owner's output destination,
     // and a funded mock-swap pool.
@@ -366,7 +358,6 @@ fn dest_finalize_execute_verified_cpi_under_cu_budget() {
         &payer.pubkey(),
         &s.route,
         s.relay_hash,
-        cfg,
         vec![runtime(swap_data(AMOUNT, out_amount), min_out, expiry)],
         &input_mint,
         verified_metas,
