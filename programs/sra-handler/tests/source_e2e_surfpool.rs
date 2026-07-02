@@ -35,6 +35,9 @@ fn default_prepare_params_rpc(fx: &SurfpoolSourceFixture) -> PrepareParams {
     params
 }
 
+// Pins the SHARED `common::surfpool::lookup_table_is_active` helper. It lives
+// here (not in `common/`) because a `#[test]` in `common/` would re-run in
+// every test binary that includes the module.
 #[test]
 fn lookup_table_activation_waits_for_last_extended_slot() {
     assert!(!lookup_table_is_active(10, 10));

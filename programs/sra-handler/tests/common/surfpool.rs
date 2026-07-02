@@ -158,6 +158,15 @@ pub fn send_versioned_transaction(
 ) -> TestResult<Signature> {
     let blockhash = rpc.get_latest_blockhash()?;
     let message = v0::Message::try_compile(&payer.pubkey(), ixs, lookup_tables, blockhash)?;
+    // A caller passing lookup tables is claiming an ALT-resolved shape; if the
+    // compiled message drew nothing from them, the test would silently stop
+    // exercising lookup-table account resolution — fail instead.
+    if !lookup_tables.is_empty() && message.address_table_lookups.is_empty() {
+        return Err(format!(
+            "send_versioned_transaction[{label}]: no address was resolved through the provided lookup table(s)"
+        )
+        .into());
+    }
     let mut all_signers = vec![payer];
     all_signers.extend_from_slice(signers);
     let tx = VersionedTransaction::try_new(VersionedMessage::V0(message), &all_signers)?;

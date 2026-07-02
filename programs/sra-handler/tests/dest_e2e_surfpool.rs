@@ -12,13 +12,17 @@
 //!
 //!   fill_relay (real Across writes FillStatus, pays route vault)
 //!     → verify_across_fill + finalize_fill (one v0 tx, real ALT, 400k CU)
-//!     → execute_actions          (happy path: committed SplTransfer payout)
+//!     → execute_actions          (happy path: committed 60/40 SplTransfer split)
 //!     → recover_funds            (recovery path: owner drains execution vault)
-//!     → finalize_fill again      (replay: rejected on the FillReceipt)
+//!     → finalize_fill again      (replay: rejected on the FillReceipt while the
+//!                                 route vault is funded by a second real fill)
 //!
-//! Every hop asserts EXACT balance conservation — vaults drain to exactly 0
-//! and recipients receive exactly the fill amount (full-amount forwarding: no
-//! destination-side fees; fees are collected on the source deposit).
+//! Every hop asserts EXACT balance conservation (full-amount forwarding: no
+//! destination-side fees; fees are collected on the source deposit), with the
+//! amounts deliberately de-aliased: unrelated dust escrowed in the route vault
+//! must survive finalize untouched (finalize draws exactly the verified
+//! amount, not the vault balance), and the 60/40 split gives each recipient a
+//! delta distinct from every vault total.
 //!
 //! The fill is sent with an EMPTY `message`: that is the production shape for
 //! a vault recipient (the real program would otherwise CPI a handler), and it
@@ -55,6 +59,22 @@ const RELAYER_STARTING_BALANCE: u64 = 10_000_000;
 const ORIGIN_CHAIN_ID: u64 = 42_161;
 /// How far past the fork's current time the fill deadline sits.
 const FILL_DEADLINE_WINDOW_SECS: i64 = 3_600;
+/// The route commits a 60/40 SplTransfer split. Distinct per-recipient
+/// amounts keep "pay bps of the snapshot" distinguishable from "pay the whole
+/// vault" (with a single 100% action every correct and incorrect amount
+/// formula produces the same number).
+const SPLIT_A_BPS: u16 = 6_000;
+const SPLIT_B_BPS: u16 = 4_000;
+const SPLIT_A_AMOUNT: u64 = 600_000;
+const SPLIT_B_AMOUNT: u64 = 400_000;
+/// Unrelated balance seeded into the route vault before finalization. The
+/// vault must hold exactly this after `finalize_fill` — pinning that finalize
+/// moves exactly the verified fill amount, not the vault's whole balance.
+const ROUTE_VAULT_DUST: u64 = 12_345;
+/// The replay test's second, larger fill: ≥ the first fill's amount so a
+/// hypothetical replay double-draw would actually have funds to steal, and
+/// distinct from it so amounts never alias.
+const SECOND_FILL_AMOUNT: u64 = 1_500_000;
 
 /// The delegate signer the real `fill_relay` moves relayer funds through:
 /// `["delegate", keccak256(borsh(relay_hash ‖ repayment_chain_id ‖
@@ -85,7 +105,8 @@ struct SurfpoolDestFixture {
     execution_vault: Pubkey,
     relayer_ata: Pubkey,
     owner_ata: Pubkey,
-    recipient_ata: Pubkey,
+    recipient_a_ata: Pubkey,
+    recipient_b_ata: Pubkey,
 }
 
 impl SurfpoolDestFixture {
@@ -99,7 +120,8 @@ impl SurfpoolDestFixture {
         let payer = read_keypair_file(payer_keypair_path())?;
         let owner = Keypair::new();
         let relayer = Keypair::new();
-        let action_recipient = Keypair::new().pubkey();
+        let recipient_a = Keypair::new().pubkey();
+        let recipient_b = Keypair::new().pubkey();
 
         wait_for_program_deploys(&rpc, &[PROGRAM_ID, ADAPTER_PROGRAM_ID])?;
         surfpool_log("bootstrap: local programs are deployed");
@@ -122,13 +144,13 @@ impl SurfpoolDestFixture {
 
         // A fresh route per bootstrap (fresh owner + salt) — its PDA is the
         // fill recipient, so every test run gets a unique relay hash on the
-        // shared fork. The route commits one 100% SplTransfer payout and
-        // allows the payer as executor.
+        // shared fork. The route commits a 60/40 SplTransfer split and allows
+        // the payer as executor.
         let salt = Keypair::new().pubkey().to_bytes();
         let params = CreateRouteParams {
             source_chain_id: ORIGIN_CHAIN_ID,
             expected_mint: USDC_MINT,
-            action_config: vec![spl(action_recipient, 10_000)],
+            action_config: vec![spl(recipient_a, SPLIT_A_BPS), spl(recipient_b, SPLIT_B_BPS)],
             salt,
             allowed_adapters: vec![ADAPTER_PROGRAM_ID],
             allowed_executors: vec![payer.pubkey()],
@@ -150,14 +172,16 @@ impl SurfpoolDestFixture {
         let execution_vault = derive_ata(&execution_authority, &USDC_MINT);
         let relayer_ata = derive_ata(&relayer.pubkey(), &USDC_MINT);
         let owner_ata = derive_ata(&owner.pubkey(), &USDC_MINT);
-        let recipient_ata = derive_ata(&action_recipient, &USDC_MINT);
+        let recipient_a_ata = derive_ata(&recipient_a, &USDC_MINT);
+        let recipient_b_ata = derive_ata(&recipient_b, &USDC_MINT);
 
         // ATAs the flow pays into (and the relayer's funding ATA). The route
         // and execution vaults are created by `create_route` itself.
         let create_atas: Vec<Instruction> = [
             (&relayer.pubkey(), "relayer"),
             (&owner.pubkey(), "owner"),
-            (&action_recipient, "action recipient"),
+            (&recipient_a, "action recipient A"),
+            (&recipient_b, "action recipient B"),
         ]
         .into_iter()
         .map(|(wallet, _)| {
@@ -199,7 +223,8 @@ impl SurfpoolDestFixture {
             execution_vault,
             relayer_ata,
             owner_ata,
-            recipient_ata,
+            recipient_a_ata,
+            recipient_b_ata,
         })
     }
 
@@ -209,6 +234,14 @@ impl SurfpoolDestFixture {
     /// docs). `deposit_id` carries the route address, so it is unique per
     /// bootstrap on the shared fork.
     fn relay_data(&self) -> TestResult<RelayData> {
+        self.relay_data_with(self.route.to_bytes(), OUTPUT_AMOUNT)
+    }
+
+    /// [`Self::relay_data`] with a caller-chosen `deposit_id` and amount — a
+    /// SECOND, distinct deposit against the same route (the replay test fills
+    /// two deposits so the route vault is funded when the first fill's
+    /// settlement is replayed).
+    fn relay_data_with(&self, deposit_id: [u8; 32], output_amount: u64) -> TestResult<RelayData> {
         let now = clock_unix_timestamp(&self.rpc)?;
         Ok(RelayData {
             depositor: Pubkey::new_from_array([0x11; 32]),
@@ -216,10 +249,10 @@ impl SurfpoolDestFixture {
             exclusive_relayer: Pubkey::default(),
             input_token: Pubkey::new_from_array([0x33; 32]),
             output_token: USDC_MINT,
-            input_amount: u256_from_u64(OUTPUT_AMOUNT),
-            output_amount: OUTPUT_AMOUNT,
+            input_amount: u256_from_u64(output_amount),
+            output_amount,
             origin_chain_id: ORIGIN_CHAIN_ID,
-            deposit_id: self.route.to_bytes(),
+            deposit_id,
             fill_deadline: u32::try_from(now + FILL_DEADLINE_WINDOW_SECS)
                 .map_err(|_| "fill deadline exceeds u32")?,
             exclusivity_deadline: 0,
@@ -249,7 +282,7 @@ impl SurfpoolDestFixture {
             &delegate,
             &self.relayer.pubkey(),
             &[],
-            OUTPUT_AMOUNT,
+            relay_data.output_amount,
         )?;
         let fill_ix = Instruction {
             program_id: ACROSS_SPOKE_POOL_ID,
@@ -332,6 +365,28 @@ impl SurfpoolDestFixture {
         )
     }
 
+    /// Plain SPL transfer of unrelated funds into the route vault — the
+    /// "another fill is already escrowed / someone topped the vault up" state
+    /// finalize must NOT sweep.
+    fn seed_route_vault_dust(&self) -> TestResult<()> {
+        let transfer_ix = anchor_spl::token::spl_token::instruction::transfer(
+            &anchor_spl::token::ID,
+            &self.relayer_ata,
+            &self.route_vault,
+            &self.relayer.pubkey(),
+            &[],
+            ROUTE_VAULT_DUST,
+        )?;
+        send_legacy_transaction(
+            &self.rpc,
+            "seed_route_vault_dust",
+            &self.relayer,
+            &[],
+            &[transfer_ix],
+        )?;
+        Ok(())
+    }
+
     /// `execute_actions` (payer is the allowed executor) as a v0 transaction
     /// with a real address lookup table — the shape the SDK submits.
     fn execute_actions(&self, fill_id: [u8; 32]) -> TestResult<()> {
@@ -340,7 +395,7 @@ impl SurfpoolDestFixture {
             &self.route,
             fill_id,
             &USDC_MINT,
-            &[self.recipient_ata],
+            &[self.recipient_a_ata, self.recipient_b_ata],
         );
         let lookup_addresses = representative_lookup_addresses(std::slice::from_ref(&execute_ix));
         let lookup_table = prepare_lookup_table(&self.rpc, &self.payer, lookup_addresses)?;
@@ -419,25 +474,30 @@ fn dest_e2e_real_across_happy_path() {
         0,
         "fresh route vault must start empty"
     );
-    assert_eq!(
-        fx.token_amount(&fx.recipient_ata)
-            .expect("read recipient ATA"),
-        0,
-        "fresh action recipient must start empty"
-    );
+    for (label, ata) in [("A", &fx.recipient_a_ata), ("B", &fx.recipient_b_ata)] {
+        assert_eq!(
+            fx.token_amount(ata).expect("read recipient ATA"),
+            0,
+            "fresh action recipient {label} must start empty"
+        );
+    }
 
     let (_, logs) = fx
         .execute_real_fill(&relay_data)
         .expect("real fill_relay should succeed against real Across");
     assert_real_spoke_pool_ran(&logs);
     assert_eq!(
-        fx.token_amount(&fx.relayer_ata).expect("read relayer ATA"),
-        pre_relayer - OUTPUT_AMOUNT
-    );
-    assert_eq!(
         fx.token_amount(&fx.route_vault).expect("read route vault"),
         OUTPUT_AMOUNT,
         "real fill must deliver the exact output amount to the route vault"
+    );
+
+    // Unrelated funds escrowed in the route vault (e.g. another fill awaiting
+    // settlement) — finalize must move exactly the verified amount past them.
+    fx.seed_route_vault_dust().expect("seed route vault dust");
+    assert_eq!(
+        fx.token_amount(&fx.relayer_ata).expect("read relayer ATA"),
+        pre_relayer - OUTPUT_AMOUNT - ROUTE_VAULT_DUST
     );
 
     let fill_id = fx
@@ -445,8 +505,8 @@ fn dest_e2e_real_across_happy_path() {
         .expect("verify_across_fill + finalize_fill should succeed against the real FillStatus");
     assert_eq!(
         fx.token_amount(&fx.route_vault).expect("read route vault"),
-        0,
-        "finalize must drain the route vault to exactly 0"
+        ROUTE_VAULT_DUST,
+        "finalize must draw exactly the verified amount — the unrelated vault balance stays"
     );
     assert_eq!(
         fx.token_amount(&fx.execution_vault)
@@ -454,15 +514,18 @@ fn dest_e2e_real_across_happy_path() {
         OUTPUT_AMOUNT,
         "finalize must forward the FULL amount (no destination fees)"
     );
+    let receipt = fx.fill_receipt(fill_id).expect("read fill receipt");
+    assert_eq!(receipt.execution_status, ExecutionStatus::Finalized);
+    assert_eq!(receipt.route, fx.route);
+    assert_eq!(receipt.fill_id, fill_id);
     assert_eq!(
-        fx.fill_receipt(fill_id)
-            .expect("read fill receipt")
-            .execution_status,
-        ExecutionStatus::Finalized
+        receipt.amount, OUTPUT_AMOUNT,
+        "the receipt must record the verified fill amount"
     );
+    assert_eq!(receipt.expected_amount, OUTPUT_AMOUNT);
 
     fx.execute_actions(fill_id)
-        .expect("execute_actions should run the committed SplTransfer");
+        .expect("execute_actions should run the committed SplTransfer split");
     assert_eq!(
         fx.token_amount(&fx.execution_vault)
             .expect("read execution vault"),
@@ -470,10 +533,16 @@ fn dest_e2e_real_across_happy_path() {
         "actions must drain the execution vault to exactly 0"
     );
     assert_eq!(
-        fx.token_amount(&fx.recipient_ata)
-            .expect("read recipient ATA"),
-        OUTPUT_AMOUNT,
-        "the 100% SplTransfer recipient must receive the exact fill amount"
+        fx.token_amount(&fx.recipient_a_ata)
+            .expect("read recipient A ATA"),
+        SPLIT_A_AMOUNT,
+        "recipient A must receive exactly its committed 60% share"
+    );
+    assert_eq!(
+        fx.token_amount(&fx.recipient_b_ata)
+            .expect("read recipient B ATA"),
+        SPLIT_B_AMOUNT,
+        "recipient B must receive exactly its committed 40% share"
     );
     assert_eq!(
         fx.fill_receipt(fill_id)
@@ -496,6 +565,13 @@ fn dest_e2e_real_across_recovery_path() {
         .verify_and_finalize(&relay_data)
         .expect("verify_across_fill + finalize_fill should succeed against the real FillStatus");
 
+    assert_eq!(
+        fx.fill_receipt(fill_id)
+            .expect("read fill receipt")
+            .execution_status,
+        ExecutionStatus::Finalized,
+        "recovery must start from a Finalized receipt"
+    );
     let pre_owner = fx.token_amount(&fx.owner_ata).expect("read owner ATA");
     fx.recover_funds(fill_id)
         .expect("owner should recover the finalized funds instead of executing actions");
@@ -530,10 +606,29 @@ fn dest_e2e_real_across_replay_rejected() {
     let fill_id = fx
         .verify_and_finalize(&relay_data)
         .expect("first finalize succeeds");
-    let vault_after_first = fx
-        .token_amount(&fx.execution_vault)
-        .expect("read execution vault");
-    assert_eq!(vault_after_first, OUTPUT_AMOUNT);
+    assert_eq!(
+        fx.token_amount(&fx.execution_vault)
+            .expect("read execution vault"),
+        OUTPUT_AMOUNT
+    );
+
+    // A SECOND, distinct deposit is filled into the same route, so the route
+    // vault holds ≥ the first fill's amount when its settlement is replayed —
+    // if replay protection failed, the replay would actually have funds to
+    // double-draw. (With an empty vault the replay could be rejected for the
+    // wrong reason — insufficient balance — and prove nothing.)
+    let second_relay_data = fx
+        .relay_data_with(
+            keccak::hash(&fx.route.to_bytes()).to_bytes(),
+            SECOND_FILL_AMOUNT,
+        )
+        .expect("build second relay data");
+    fx.execute_real_fill(&second_relay_data)
+        .expect("second real fill_relay should succeed against real Across");
+    assert_eq!(
+        fx.token_amount(&fx.route_vault).expect("read route vault"),
+        SECOND_FILL_AMOUNT
+    );
 
     // Replay the settle leg: the VerifiedFill evidence still exists on-chain,
     // but the persistent FillReceipt at ["fill_receipt", route, fill_id]
@@ -547,17 +642,28 @@ fn dest_e2e_real_across_replay_rejected() {
         &[],
         &[fx.finalize_ix(fill_id, &verified_fill)],
     );
+    let replay_err = format!(
+        "{}",
+        replay.expect_err("second finalize_fill of the same fill must be rejected")
+    );
     assert!(
-        replay.is_err(),
-        "second finalize_fill of the same fill must be rejected on the FillReceipt"
+        replay_err.contains("already in use"),
+        "replay must be rejected on the existing FillReceipt account (init collision), got: {replay_err}"
     );
 
-    // Rejection preserves state: no double draw, receipt still Finalized.
+    // Rejection preserves state: the funded route vault is untouched (no
+    // double draw), the execution vault holds only the first settlement, and
+    // the receipt is still Finalized.
+    assert_eq!(
+        fx.token_amount(&fx.route_vault).expect("read route vault"),
+        SECOND_FILL_AMOUNT,
+        "rejected replay must not draw from the route vault"
+    );
     assert_eq!(
         fx.token_amount(&fx.execution_vault)
             .expect("read execution vault"),
-        vault_after_first,
-        "rejected replay must not move funds"
+        OUTPUT_AMOUNT,
+        "rejected replay must not move funds into the execution vault"
     );
     assert_eq!(
         fx.fill_receipt(fill_id)

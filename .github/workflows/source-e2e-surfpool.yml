@@ -133,5 +133,5 @@ jobs:
           cat /tmp/surfpool.log
           exit 1
 
-      - name: Run Step 21 Surfpool test
+      - name: Run source Surfpool E2E
         run: NO_DNA=1 cargo test -p sra-handler --test source_e2e_surfpool -- --ignored --nocapture

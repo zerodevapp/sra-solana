@@ -230,21 +230,15 @@ pub fn sample_prepare_params(target_token: [u8; 32]) -> PrepareParams {
     )
 }
 
+/// SYNTHETIC in-memory lookup table for LiteSVM tx-size/CU shaping — its key
+/// is random and the table never exists on-chain, so it cannot be sent to a
+/// live cluster. For a real, on-chain table (the Surfpool E2E suites) collect
+/// the addresses with [`surfpool::representative_lookup_addresses`] and create
+/// the table via [`surfpool::prepare_lookup_table`].
 pub fn representative_lookup_table(ixs: &[Instruction]) -> AddressLookupTableAccount {
-    let mut addresses = Vec::new();
-
-    for ix in ixs {
-        for meta in &ix.accounts {
-            if meta.is_signer || addresses.contains(&meta.pubkey) {
-                continue;
-            }
-            addresses.push(meta.pubkey);
-        }
-    }
-
     AddressLookupTableAccount {
         key: Pubkey::new_unique(),
-        addresses,
+        addresses: surfpool::representative_lookup_addresses(ixs),
     }
 }
 
