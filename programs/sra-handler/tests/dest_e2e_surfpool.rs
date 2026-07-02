@@ -646,9 +646,13 @@ fn dest_e2e_real_across_replay_rejected() {
         "{}",
         replay.expect_err("second finalize_fill of the same fill must be rejected")
     );
+    // The system program logs `Allocate: account <address> already in use`,
+    // and the RPC error surfaces the simulation logs — pin BOTH the collision
+    // and that the colliding account is the FillReceipt itself.
+    let (fill_receipt_pda, _) = derive_fill_receipt_pda(&fx.route, &fill_id);
     assert!(
-        replay_err.contains("already in use"),
-        "replay must be rejected on the existing FillReceipt account (init collision), got: {replay_err}"
+        replay_err.contains("already in use") && replay_err.contains(&fill_receipt_pda.to_string()),
+        "replay must be rejected on the existing FillReceipt account {fill_receipt_pda} (init collision), got: {replay_err}"
     );
 
     // Rejection preserves state: the funded route vault is untouched (no
@@ -668,6 +672,29 @@ fn dest_e2e_real_across_replay_rejected() {
     assert_eq!(
         fx.fill_receipt(fill_id)
             .expect("read fill receipt")
+            .execution_status,
+        ExecutionStatus::Finalized
+    );
+
+    // Post-rejection liveness: the rejected replay must not have wedged the
+    // route — the second fill settles normally afterwards, drawing exactly
+    // its own amount.
+    let second_fill_id = fx
+        .verify_and_finalize(&second_relay_data)
+        .expect("second fill settles normally after the rejected replay");
+    assert_eq!(
+        fx.token_amount(&fx.route_vault).expect("read route vault"),
+        0,
+        "settling the second fill must drain exactly its own escrow"
+    );
+    assert_eq!(
+        fx.token_amount(&fx.execution_vault)
+            .expect("read execution vault"),
+        OUTPUT_AMOUNT + SECOND_FILL_AMOUNT
+    );
+    assert_eq!(
+        fx.fill_receipt(second_fill_id)
+            .expect("read second fill receipt")
             .execution_status,
         ExecutionStatus::Finalized
     );
