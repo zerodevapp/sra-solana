@@ -2,22 +2,14 @@ mod common;
 
 use anchor_lang::AccountDeserialize;
 use anchor_spl::associated_token::spl_associated_token_account;
+use common::surfpool::*;
 use common::*;
 use reqwest::blocking::Client;
-use serde_json::{json, Value};
+use serde_json::json;
 use solana_client::rpc_client::RpcClient;
-use solana_program::address_lookup_table::{
-    instruction::{create_lookup_table, extend_lookup_table},
-    state::AddressLookupTable,
-    AddressLookupTableAccount,
-};
 use solana_sdk::{
-    clock::Slot,
-    commitment_config::CommitmentConfig,
-    message::{v0, VersionedMessage},
     pubkey::Pubkey,
-    signature::{read_keypair_file, Keypair, Signature, Signer},
-    transaction::{Transaction, VersionedTransaction},
+    signature::{read_keypair_file, Keypair, Signer},
 };
 use sra_common::abi::u256_from_u64;
 use sra_common::{
@@ -25,7 +17,6 @@ use sra_common::{
     source_deposit::{AcrossDepositParams, PrepareParams},
     types::{MintNonce, SourceHandlerData, SraConfig},
 };
-use std::{env, error::Error, path::PathBuf, sync::Mutex, thread::sleep, time::Duration};
 
 const INPUT_AMOUNT: u64 = 1_000_000;
 // Quoted output must remain within `SLIPPAGE_BPS` of `INPUT_AMOUNT`, i.e.
@@ -36,18 +27,6 @@ const TARGET_TOKEN_DECIMALS: u8 = 6;
 // Across deposit window: 1h fill deadline, 15m exclusive-relayer window.
 const FILL_DEADLINE_OFFSET_SECS: u32 = 3_600;
 const EXCLUSIVITY_PERIOD_SECS: u32 = 900;
-const SURFPOOL_RPC_URL: &str = "http://127.0.0.1:8899";
-const SURFPOOL_RETRY_COUNT: usize = 30;
-const SURFPOOL_RETRY_DELAY_MS: u64 = 1_000;
-const SURFPOOL_HTTP_TIMEOUT_SECS: u64 = 30;
-
-type TestResult<T> = Result<T, Box<dyn Error>>;
-
-static SURFPOOL_TEST_MUTEX: Mutex<()> = Mutex::new(());
-
-fn surfpool_log(message: impl AsRef<str>) {
-    eprintln!("[surfpool-test] {}", message.as_ref());
-}
 
 fn default_prepare_params_rpc(fx: &SurfpoolSourceFixture) -> PrepareParams {
     let mut params = sample_prepare_params(fx.target_token);
@@ -56,162 +35,11 @@ fn default_prepare_params_rpc(fx: &SurfpoolSourceFixture) -> PrepareParams {
     params
 }
 
-fn payer_keypair_path() -> PathBuf {
-    PathBuf::from(env::var("HOME").expect("HOME must be set")).join(".config/solana/id.json")
-}
-
-fn wait_for_surfpool(rpc: &RpcClient) -> TestResult<()> {
-    for attempt in 1..=SURFPOOL_RETRY_COUNT {
-        surfpool_log(format!(
-            "wait_for_surfpool: attempt {attempt}/{SURFPOOL_RETRY_COUNT} against {SURFPOOL_RPC_URL}"
-        ));
-        match rpc.get_latest_blockhash() {
-            Ok(_) => {
-                surfpool_log(format!(
-                    "wait_for_surfpool: RPC ready on attempt {attempt}/{SURFPOOL_RETRY_COUNT}"
-                ));
-                return Ok(());
-            }
-            Err(err) => {
-                surfpool_log(format!(
-                    "wait_for_surfpool: RPC not ready on attempt {attempt}/{SURFPOOL_RETRY_COUNT}: {err}"
-                ));
-            }
-        }
-        sleep(Duration::from_millis(SURFPOOL_RETRY_DELAY_MS));
-    }
-
-    surfpool_log(format!(
-        "wait_for_surfpool: timed out after {SURFPOOL_RETRY_COUNT} attempts"
-    ));
-    Err("Surfpool RPC did not become ready".into())
-}
-
-fn wait_for_program_deploys(rpc: &RpcClient, program_ids: &[Pubkey]) -> TestResult<()> {
-    let expected_programs = program_ids
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(", ");
-    for attempt in 1..=SURFPOOL_RETRY_COUNT {
-        surfpool_log(format!(
-            "wait_for_program_deploys: attempt {attempt}/{SURFPOOL_RETRY_COUNT} for [{expected_programs}]"
-        ));
-        if program_ids
-            .iter()
-            .all(|program_id| rpc.get_account(program_id).is_ok())
-        {
-            surfpool_log(format!(
-                "wait_for_program_deploys: all programs detected on attempt {attempt}/{SURFPOOL_RETRY_COUNT}"
-            ));
-            return Ok(());
-        }
-        sleep(Duration::from_millis(SURFPOOL_RETRY_DELAY_MS));
-    }
-
-    surfpool_log(format!(
-        "wait_for_program_deploys: timed out after {SURFPOOL_RETRY_COUNT} attempts for [{expected_programs}]"
-    ));
-    Err("Surfpool did not finish auto-deploying local programs".into())
-}
-
-fn rpc_client() -> RpcClient {
-    RpcClient::new_with_commitment(SURFPOOL_RPC_URL.to_string(), CommitmentConfig::confirmed())
-}
-
-fn send_legacy_transaction(
-    rpc: &RpcClient,
-    label: &str,
-    payer: &Keypair,
-    signers: &[&Keypair],
-    ixs: &[solana_sdk::instruction::Instruction],
-) -> TestResult<Signature> {
-    let blockhash = rpc.get_latest_blockhash()?;
-    let mut all_signers = vec![payer];
-    all_signers.extend_from_slice(signers);
-    let tx =
-        Transaction::new_signed_with_payer(ixs, Some(&payer.pubkey()), &all_signers, blockhash);
-    surfpool_log(format!(
-        "send_legacy_transaction[{label}]: sending {} instruction(s)",
-        ixs.len()
-    ));
-    let signature = rpc.send_and_confirm_transaction(&tx)?;
-    surfpool_log(format!(
-        "send_legacy_transaction[{label}]: confirmed signature {signature}"
-    ));
-    Ok(signature)
-}
-
-fn send_versioned_transaction(
-    rpc: &RpcClient,
-    label: &str,
-    payer: &Keypair,
-    signers: &[&Keypair],
-    ixs: &[solana_sdk::instruction::Instruction],
-    lookup_tables: &[AddressLookupTableAccount],
-) -> TestResult<Signature> {
-    let blockhash = rpc.get_latest_blockhash()?;
-    let message = v0::Message::try_compile(&payer.pubkey(), ixs, lookup_tables, blockhash)?;
-    let mut all_signers = vec![payer];
-    all_signers.extend_from_slice(signers);
-    let tx = VersionedTransaction::try_new(VersionedMessage::V0(message), &all_signers)?;
-    surfpool_log(format!(
-        "send_versioned_transaction[{label}]: sending {} instruction(s) with {} lookup table(s)",
-        ixs.len(),
-        lookup_tables.len()
-    ));
-    let signature = rpc.send_and_confirm_transaction(&tx)?;
-    surfpool_log(format!(
-        "send_versioned_transaction[{label}]: confirmed signature {signature}"
-    ));
-    Ok(signature)
-}
-
-fn representative_lookup_table(ixs: &[solana_sdk::instruction::Instruction]) -> Vec<Pubkey> {
-    let mut addresses = Vec::new();
-
-    for ix in ixs {
-        for meta in &ix.accounts {
-            if meta.is_signer || addresses.contains(&meta.pubkey) {
-                continue;
-            }
-            addresses.push(meta.pubkey);
-        }
-    }
-
-    addresses
-}
-
-fn lookup_table_is_active(current_slot: Slot, last_extended_slot: Slot) -> bool {
-    current_slot > last_extended_slot
-}
-
-fn lookup_table_account_from_rpc(
-    rpc: &RpcClient,
-    lookup_table_address: &Pubkey,
-) -> TestResult<(AddressLookupTableAccount, Slot)> {
-    let account = rpc.get_account(lookup_table_address)?;
-    let table = AddressLookupTable::deserialize(account.data.as_slice())
-        .map_err(|err| format!("failed to deserialize ALT: {err:?}"))?;
-    Ok((
-        AddressLookupTableAccount {
-            key: *lookup_table_address,
-            addresses: table.addresses.into_owned(),
-        },
-        table.meta.last_extended_slot,
-    ))
-}
-
 #[test]
 fn lookup_table_activation_waits_for_last_extended_slot() {
     assert!(!lookup_table_is_active(10, 10));
     assert!(!lookup_table_is_active(10, 11));
     assert!(lookup_table_is_active(12, 11));
-}
-
-fn read_anchor_account<T: AccountDeserialize>(rpc: &RpcClient, address: &Pubkey) -> TestResult<T> {
-    let data = rpc.get_account_data(address)?;
-    Ok(T::try_deserialize(&mut data.as_slice())?)
 }
 
 struct SurfpoolSourceFixture {
@@ -236,9 +64,7 @@ impl SurfpoolSourceFixture {
         wait_for_surfpool(&rpc)?;
         surfpool_log("bootstrap: Surfpool RPC is ready");
 
-        let http = Client::builder()
-            .timeout(Duration::from_secs(SURFPOOL_HTTP_TIMEOUT_SECS))
-            .build()?;
+        let http = http_client()?;
         let payer = read_keypair_file(payer_keypair_path())?;
         let owner = Keypair::new();
         let address_book_root = Keypair::new();
@@ -391,7 +217,8 @@ impl SurfpoolSourceFixture {
     }
 
     fn seed_owner_usdc(&self, amount: u64) -> TestResult<()> {
-        self.surfpool_rpc(
+        surfpool_rpc(
+            &self.http,
             "surfnet_setTokenAccount",
             json!([
                 self.owner.pubkey().to_string(),
@@ -401,30 +228,6 @@ impl SurfpoolSourceFixture {
             ]),
         )?;
         Ok(())
-    }
-
-    fn surfpool_rpc(&self, method: &str, params: Value) -> TestResult<Value> {
-        surfpool_log(format!("surfpool_rpc[{method}]: sending request"));
-        let response: Value = self
-            .http
-            .post(SURFPOOL_RPC_URL)
-            .json(&json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": method,
-                "params": params,
-            }))
-            .send()?
-            .error_for_status()?
-            .json()?;
-
-        if let Some(err) = response.get("error") {
-            surfpool_log(format!("surfpool_rpc[{method}]: error {err}"));
-            return Err(format!("{method} failed: {err}").into());
-        }
-
-        surfpool_log(format!("surfpool_rpc[{method}]: request succeeded"));
-        Ok(response["result"].clone())
     }
 
     fn invoke_source_flow(&self, params: PrepareParams) -> TestResult<Vec<String>> {
@@ -485,49 +288,8 @@ impl SurfpoolSourceFixture {
         );
 
         let lookup_addresses =
-            representative_lookup_table(&[validate_ix.clone(), execute_ix.clone()]);
-        let recent_slot: Slot = self.rpc.get_slot()?;
-        let (create_lookup_table_ix, lookup_table_address) =
-            create_lookup_table(self.payer.pubkey(), self.payer.pubkey(), recent_slot);
-        surfpool_log(format!(
-            "invoke_source_flow: creating lookup table {} at recent slot {} with {} address(es)",
-            lookup_table_address,
-            recent_slot,
-            lookup_addresses.len()
-        ));
-        let extend_lookup_table_ix = extend_lookup_table(
-            lookup_table_address,
-            self.payer.pubkey(),
-            Some(self.payer.pubkey()),
-            lookup_addresses,
-        );
-        send_legacy_transaction(
-            &self.rpc,
-            "create_and_extend_lookup_table",
-            &self.payer,
-            &[],
-            &[create_lookup_table_ix, extend_lookup_table_ix],
-        )?;
-
-        // Solana only activates newly extended ALT addresses in a later slot.
-        let mut lookup_table = None;
-        for attempt in 1..=SURFPOOL_RETRY_COUNT {
-            let current_slot = self.rpc.get_slot()?;
-            let (candidate_lookup_table, last_extended_slot) =
-                lookup_table_account_from_rpc(&self.rpc, &lookup_table_address)?;
-            surfpool_log(format!(
-                "invoke_source_flow: ALT activation attempt {attempt}/{SURFPOOL_RETRY_COUNT} current_slot={current_slot} last_extended_slot={last_extended_slot}"
-            ));
-            if lookup_table_is_active(current_slot, last_extended_slot) {
-                surfpool_log(format!(
-                    "invoke_source_flow: ALT {lookup_table_address} active on attempt {attempt}/{SURFPOOL_RETRY_COUNT}"
-                ));
-                lookup_table = Some(candidate_lookup_table);
-                break;
-            }
-            sleep(Duration::from_millis(200));
-        }
-        let lookup_table = lookup_table.ok_or("lookup table did not become active")?;
+            representative_lookup_addresses(&[validate_ix.clone(), execute_ix.clone()]);
+        let lookup_table = prepare_lookup_table(&self.rpc, &self.payer, lookup_addresses)?;
 
         let signature = send_versioned_transaction(
             &self.rpc,
@@ -538,7 +300,7 @@ impl SurfpoolSourceFixture {
             &[lookup_table],
         )?;
 
-        let logs = self.logs_for_signature(&signature)?;
+        let logs = logs_for_signature(&self.http, &signature)?;
         surfpool_log(format!(
             "invoke_source_flow: fetched {} local log line(s) for signature {signature}",
             logs.len()
@@ -588,34 +350,12 @@ impl SurfpoolSourceFixture {
             .amount
             .parse()?)
     }
-
-    fn logs_for_signature(&self, signature: &Signature) -> TestResult<Vec<String>> {
-        let local = self.surfpool_rpc("surfnet_getLocalSignatures", json!([20]))?;
-        let entries = local["value"]
-            .as_array()
-            .ok_or("surfnet_getLocalSignatures returned non-array value")?;
-        let entry = entries
-            .iter()
-            .find(|entry| entry["signature"].as_str() == Some(&signature.to_string()))
-            .ok_or("signature not found in Surfpool local signatures")?;
-        let logs = entry["logs"]
-            .as_array()
-            .ok_or("signature entry missing logs")?
-            .iter()
-            .map(|line| {
-                line.as_str()
-                    .map(ToOwned::to_owned)
-                    .ok_or_else(|| "log line was not a string".into())
-            })
-            .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
-        Ok(logs)
-    }
 }
 
 #[test]
 #[ignore = "requires Surfpool at http://127.0.0.1:8899"]
 fn source_e2e_real_across_happy_path() {
-    let _guard = SURFPOOL_TEST_MUTEX.lock().expect("lock surfpool mutex");
+    let _lock = surfpool_lock().expect("acquire surfpool lock");
     let fx = SurfpoolSourceFixture::bootstrap().expect("bootstrap fixture");
     let pre_owner = fx
         .owner_token_amount()
@@ -685,7 +425,7 @@ fn source_e2e_real_across_happy_path() {
 #[test]
 #[ignore = "requires Surfpool at http://127.0.0.1:8899"]
 fn source_e2e_real_across_nonce_increments() {
-    let _guard = SURFPOOL_TEST_MUTEX.lock().expect("lock surfpool mutex");
+    let _lock = surfpool_lock().expect("acquire surfpool lock");
     let fx = SurfpoolSourceFixture::bootstrap().expect("bootstrap fixture");
     surfpool_log("source_e2e_real_across_nonce_increments: running first deposit");
 
