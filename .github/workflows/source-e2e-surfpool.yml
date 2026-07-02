@@ -36,6 +36,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The full Solana dependency tree (debug host builds + SBF toolchain +
+      # restored rust-cache) runs the default runner out of disk — the linker
+      # dies with SIGBUS mid-build. Drop the large preinstalled toolchains we
+      # never use (~20 GB).
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
