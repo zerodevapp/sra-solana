@@ -3,7 +3,9 @@
 Solana programs for **Smart Routing Accounts (SRA)** — deterministic-address smart accounts that route tokens between Solana and EVM chains. This repo is the Solana counterpart to the EVM SRA contracts in [`sra-stx/`](../sra-stx).
 
 > ⚠️ **Status: pre-production / experimental.**
-> The programs are still under active development. Only a subset of the source-side handler instructions are wired up today. Treat anything here as testbed code — fine to clone, build, and play with on a local validator or devnet, **not** ready for mainnet, real funds, or third-party integrations. APIs, account layouts, and program IDs will change.
+> Both the source and destination flows — including fees and destination action execution — are implemented, but the code is unaudited and still under active development. Treat anything here as testbed code — fine to clone, build, and play with on a local validator or devnet, **not** ready for mainnet, real funds, or third-party integrations. APIs, account layouts, and program IDs will change.
+
+**Auditors:** for a self-contained walkthrough of the whole system — programs, flows, trust model, invariants, and known divergences — start with [`before-audit.md`](./before-audit.md).
 
 ---
 
@@ -12,27 +14,28 @@ Solana programs for **Smart Routing Accounts (SRA)** — deterministic-address s
 An SRA is a deterministic per-(owner, app, target) PDA that:
 
 - Receives tokens on Solana and routes them to a target chain via a pluggable bridge adapter (Across in v1).
-- Receives bridged-in tokens on Solana via a fill verifier, deducts protocol/app fees, and runs pre-registered actions on the user's behalf.
+- Receives bridged-in tokens on Solana via a fill verifier and runs pre-registered actions on the user's behalf. Protocol fees are taken once on the source side, not on arrival.
 - Stays bridge-agnostic and target-agnostic at the handler layer — bridge- and EVM-specific encoding lives in adapter programs.
 
 ## Architecture
 
-Two core on-chain programs plus a shared crate, plus a test-only mock:
+Two core on-chain programs plus a shared crate, plus test-only mocks:
 
 | Crate / Program          | Role                                                                                                   |
 | ------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `sra-handler`            | Bridge- and target-agnostic. Source: validation, vault custody handoff, raw routing-event emission. Planned destination: fill finalization, fee deduction, action execution. |
-| `sra-across-adapter`     | Across-specific. Source: builds the canonical EVM ABI message + CPIs into Across `deposit_now`. Planned destination: reads `FillStatusAccount` and produces a `VerifiedFill`. |
+| `sra-handler`            | Bridge- and target-agnostic. Source: validation, vault custody handoff, raw routing-event emission. Destination: fill finalization, action execution, recovery. Also hosts fee administration. |
+| `sra-across-adapter`     | Across-specific. Source: builds the canonical EVM ABI message + CPIs into Across `deposit_now`. Destination: reads `FillStatusAccount` and produces a `VerifiedFill`. |
 | `sra-common`             | Shared types, PDA seeds, constants, errors, and the manual ABI encoder. `declare_id!` matches `sra-handler`'s ID so handler-owned `#[account]` types deserialize correctly across both programs. |
-| `mock-spoke-pool`        | Test-only minimal Across SVM SpokePool mock used by the LiteSVM source-flow tests. |
+| `mock-spoke-pool`        | Test-only minimal Across SVM SpokePool mock used by the LiteSVM/Surfpool tests. |
+| `mock-swap`              | Test-only swap target used to exercise the destination verified-CPI engine. |
 
-A source-side deposit currently ships as a 2-IX versioned transaction (`validate_and_prepare` + `execute_deposit_across`) and now requires an ALT-backed transaction path to stay within Solana's packet limit. The paired source instructions are bound together via the Instructions sysvar so neither can execute in isolation. The planned destination-side fill follows the same two-instruction pattern (`verify_across_fill` + `finalize_fill`).
+A source-side deposit currently ships as a 2-IX versioned transaction (`validate_and_prepare` + `execute_deposit_across`) and now requires an ALT-backed transaction path to stay within Solana's packet limit. The paired source instructions are bound together via the Instructions sysvar so neither can execute in isolation. The destination-side fill follows the same two-instruction pattern (`verify_across_fill` + `finalize_fill`), after which `execute_actions` runs the route's committed actions.
 
 Local program IDs (see `Anchor.toml`):
 
 ```
 sra_handler         Gte7LViTnE2UixBF59Xfu2sSqcmHhMNANj42yUkYpkdo
-sra_across_adapter  8n167Xs4Xx7zEq5fuyCDVgYd3vUjFmHAkGTdK2SCpmXD
+sra_across_adapter  9xsKH8vdhYbNy9hYEp4e9svbMRjGWpBo2Zbt8NWFnj2D
 ```
 
 ## Project layout
@@ -47,8 +50,9 @@ sra-solana/
 │   └── sra-common/          # Shared types, seeds, ABI encoder, constants
 ├── programs/
 │   ├── sra-handler/         # Handler program + LiteSVM tests under tests/
-│   ├── sra-across-adapter/  # Across source adapter + deposit execution
-│   └── mock-spoke-pool/     # Minimal Across mock used by LiteSVM tests
+│   ├── sra-across-adapter/  # Across adapter: source deposit + destination fill verification
+│   ├── mock-spoke-pool/     # Test-only Across SpokePool mock
+│   └── mock-swap/           # Test-only swap target for the verified-CPI engine
 ├── tests/                   # Anchor TS smoke tests (mocha + ts-mocha)
 ├── idl/                     # Generated IDL artifacts
 ├── migrations/              # Anchor deploy script
@@ -151,21 +155,24 @@ Source-side handler:
 - [x] `set_address_book_entry`
 - [x] `validate_and_prepare`
 - [x] Across adapter `execute_deposit_across`
+- [x] Across adapter `recover_stuck_custody`
 
 Destination-side handler:
 
-- [ ] `create_route` / `manage_route`
-- [ ] `finalize_fill`
-- [ ] `execute_actions` / `recover_funds` / `retry_actions`
-- [ ] Across adapter `verify_across_fill`
+- [x] `create_route` / `manage_route`
+- [x] `finalize_fill`
+- [x] `execute_actions` / `recover_funds` / `retry_actions`
+- [x] Across adapter `verify_across_fill`
 
 Shared:
 
 - [x] `sra-common`: PDA seeds, types, ABI encoder, constants, errors
-- [ ] `initialize_fee_config` / `register_app_fee`
+- [x] Fee administration (`initialize_fee_config`, `set_protocol_fee`, `set_asset_fee_tier`, two-step admin transfer)
 - [x] Foundry golden-vector cross-validation suite
 - [x] ALT-backed source transaction reference path in tests
-- [ ] Devnet staging
+- [x] Destination E2E against real Across via Surfpool
+- [x] Devnet deployment
+- [ ] Security audit
 
 ## Linting & formatting
 
