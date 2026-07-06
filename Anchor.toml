@@ -14,10 +14,10 @@ url = "https://api.apr.dev"
 
 [provider]
 cluster = "localnet"
-wallet = "../../solana/fee-payer.json"
+wallet = "~/.config/solana/id.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 \"tests/**/*.ts\""
 build-mainnet = "anchor build"
 build-devnet = "anchor build --program-name sra_handler -- --features devnet && anchor build --program-name sra_across_adapter -- --features devnet"
-deploy-devnet = "cp deploy/keys/*-keypair.json target/deploy/ && anchor deploy --provider.cluster devnet --program-name sra_handler && anchor deploy --provider.cluster devnet --program-name sra_across_adapter"
+deploy-devnet = "cp deploy/keys/*-keypair.json target/deploy/ && anchor deploy --provider.cluster devnet --provider.wallet ../../solana/fee-payer.json --program-name sra_handler && anchor deploy --provider.cluster devnet --provider.wallet ../../solana/fee-payer.json --program-name sra_across_adapter"
