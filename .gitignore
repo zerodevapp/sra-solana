@@ -1,9 +1,11 @@
 .anchor
 .DS_Store
 target
+docker-target
 **/*.rs.bk
 node_modules
 test-ledger
 .yarn
 .worktrees/
 docs/
+deploy/keys/*.json

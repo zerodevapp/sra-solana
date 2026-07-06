@@ -6,6 +6,9 @@ edition = "2021"
 
 [features]
 idl-build = ["anchor-lang/idl-build"]
+# Selects devnet network constants (Across SpokePool ID, Solana chain ID).
+# Default (feature off) = mainnet, matching the Surfpool mainnet-fork test suite.
+devnet = []
 
 [dependencies]
 anchor-lang = "0.32.1"

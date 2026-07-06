@@ -19,6 +19,8 @@ anchor-debug = []
 custom-heap = []
 custom-panic = []
 test-utils = []
+# Build for Solana devnet: selects devnet network constants in sra-common.
+devnet = ["sra-common/devnet"]
 
 [dependencies]
 anchor-lang = "0.32.1"

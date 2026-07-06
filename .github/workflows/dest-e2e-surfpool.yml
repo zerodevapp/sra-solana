@@ -132,9 +132,9 @@ jobs:
       - name: Wait for local program auto-deploy
         run: |
           for i in $(seq 1 60); do
-            echo "[surfpool-ci] Waiting for local program auto-deploy (attempt ${i}/60) for Gte7LViTnE2UixBF59Xfu2sSqcmHhMNANj42yUkYpkdo and 8n167Xs4Xx7zEq5fuyCDVgYd3vUjFmHAkGTdK2SCpmXD"
+            echo "[surfpool-ci] Waiting for local program auto-deploy (attempt ${i}/60) for Gte7LViTnE2UixBF59Xfu2sSqcmHhMNANj42yUkYpkdo and 9xsKH8vdhYbNy9hYEp4e9svbMRjGWpBo2Zbt8NWFnj2D"
             solana account --url http://127.0.0.1:8899 Gte7LViTnE2UixBF59Xfu2sSqcmHhMNANj42yUkYpkdo >/dev/null 2>&1 && \
-            solana account --url http://127.0.0.1:8899 8n167Xs4Xx7zEq5fuyCDVgYd3vUjFmHAkGTdK2SCpmXD >/dev/null 2>&1 && \
+            solana account --url http://127.0.0.1:8899 9xsKH8vdhYbNy9hYEp4e9svbMRjGWpBo2Zbt8NWFnj2D >/dev/null 2>&1 && \
             echo "[surfpool-ci] Local programs auto-deployed on attempt ${i}/60" && exit 0
             sleep 2
           done

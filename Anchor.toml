@@ -7,14 +7,17 @@ skip-lint = false
 
 [programs.localnet]
 sra_handler = "Gte7LViTnE2UixBF59Xfu2sSqcmHhMNANj42yUkYpkdo"
-sra_across_adapter = "8n167Xs4Xx7zEq5fuyCDVgYd3vUjFmHAkGTdK2SCpmXD"
+sra_across_adapter = "9xsKH8vdhYbNy9hYEp4e9svbMRjGWpBo2Zbt8NWFnj2D"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
 cluster = "localnet"
-wallet = "~/.config/solana/id.json"
+wallet = "../../solana/fee-payer.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 \"tests/**/*.ts\""
+build-mainnet = "anchor build"
+build-devnet = "anchor build --program-name sra_handler -- --features devnet && anchor build --program-name sra_across_adapter -- --features devnet"
+deploy-devnet = "cp deploy/keys/*-keypair.json target/deploy/ && anchor deploy --provider.cluster devnet --program-name sra_handler && anchor deploy --provider.cluster devnet --program-name sra_across_adapter"
