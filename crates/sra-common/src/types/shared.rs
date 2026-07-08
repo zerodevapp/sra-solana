@@ -22,8 +22,7 @@ pub struct ProtocolFeeConfig {
     pub default_fee_bps: u16,
     /// Honor a per-deposit bps override (EVM `allowOverride`).
     pub allow_override: bool,
-    /// Honor a per-deposit `is_sponsor` fee skip (EVM `allowSponsored`). When
-    /// the PDA is absent this defaults to disallowed, like EVM's unset storage.
+    /// Honor a per-deposit `is_sponsor` fee skip (EVM `allowSponsored`).
     pub allow_sponsored: bool,
     pub bump: u8,
 }

@@ -144,13 +144,11 @@ fn finalize_route(
 // SplTransfer adversarial — drain bound, commitment defense, soft-fail recovery
 // ==========================================================================
 
-/// Each `SplTransfer` amount is a fraction of one start-of-run vault snapshot, and
-/// `create_route` caps Σ `SplTransfer.amount_bps` ≤ 100% — so a full-allocation
-/// SplTransfer route distributes exactly the snapshot (minus floor dust), never more.
-/// (A combined over-commitment that spans variants is not caught at create time but
-/// is fail-closed at execution — see
-/// `mixed_variant_combined_draw_over_100pct_reverts_funds_safe`.) Serves the same
-/// over-draw-safety goal as the EVM cap-to-balance, by a snapshot×bps mechanism.
+/// Each `SplTransfer` amount is a fraction of one start-of-run vault snapshot,
+/// and `create_route` requires the committed bps (both variants) to sum to
+/// exactly 100% — so a full-allocation route distributes exactly the snapshot
+/// (minus floor dust), never more. Serves the same over-draw-safety goal as the
+/// EVM cap-to-balance, by a snapshot×bps mechanism.
 #[test]
 fn action_drain_at_full_bps_drains_vault_without_overflow() {
     let mut svm = setup_svm();
@@ -929,12 +927,10 @@ fn verified_cpi_signing_authority_substitution_rejected() {
     assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
 }
 
-/// The scratch bound caps the spend at `input_bps` of the vault, no matter how
-/// greedy the inner program or how the relayer routes the Free slots: only the
-/// scratch is exposed to the CPI, and the scratch holds at most `input_bps` of the
-/// snapshot. Here `input_bps == 50%` and the swap tries to pull the entire scratch —
-/// the SplTransfer that runs AFTER the hostile CPI still pays its 50% in full,
-/// proving the other half of the vault was never reachable from inside the CPI.
+/// The scratch bound caps the spend at `input_bps` of the vault no matter how
+/// greedy the inner program: here it pulls the full scratch (50%), yet the
+/// SplTransfer running AFTER it still pays its 50% in full — the other half was
+/// never reachable from inside the CPI.
 #[test]
 fn verified_cpi_hostile_account_set_bounded_by_input_bps() {
     let mut svm = setup_svm();
@@ -1041,11 +1037,9 @@ fn verified_cpi_prefunded_scratch_swept_to_vault() {
     );
 }
 
-/// A combined over-commitment that spans action variants — `SplTransfer{100%}` plus
-/// `VerifiedCpi{input_bps:100%}`, each a fraction of the same snapshot — could never
-/// execute (200% of the vault). The bps sum at `create_route` covers BOTH variants,
-/// so the config is refused at the commitment point and no funds can ever stage
-/// behind an un-executable route.
+/// A combined over-commitment spanning variants (`SplTransfer{100%}` +
+/// `VerifiedCpi{100%}` of one snapshot) can never execute; the create-time bps
+/// sum covers BOTH variants, so it is refused before funds can stage.
 #[test]
 fn mixed_variant_combined_draw_over_100pct_rejected_at_create() {
     let mut svm = setup_svm();

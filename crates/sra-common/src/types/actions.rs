@@ -52,9 +52,8 @@ pub enum MinOut {
     /// Primary: an ed25519-signed quote bound to the fill/action context.
     SignedQuote { quoter: Pubkey },
     /// Reserved: an on-chain price feed with a slippage tolerance. Not yet
-    /// executable, so `validate_action_config` refuses it at `create_route`;
-    /// wiring the oracle path later means lifting that gate (and restoring
-    /// feed/slippage field validation) together with the execute arm.
+    /// executable — refused at `create_route` until the oracle path is wired
+    /// (restore feed/slippage validation when lifting the gate).
     Oracle { feed: Pubkey, max_slippage_bps: u16 },
 }
 
@@ -67,11 +66,9 @@ impl AccountTemplate {
 /// Validates a route's committed action list — the single fail-fast gate before
 /// the list is folded into the route's identity hash at `create_route`.
 ///
-/// Every action spends a fraction of the same start-of-run vault snapshot, so
-/// the committed fractions must cover the vault exactly: under 100% (including
-/// an empty list) would mark the receipt terminal with funds still staged and
-/// no recovery path, and over 100% could never execute. Requiring the sum to be
-/// exactly 100% leaves floor dust as the only possible post-success residue.
+/// The committed bps (SplTransfer amounts + VerifiedCpi inputs, fractions of
+/// one vault snapshot) must sum to exactly 100%: under strands funds past
+/// terminal success, over can never execute; only floor dust may remain.
 pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
     require!(
         actions.len() <= MAX_ACTION_IDXS,
@@ -128,9 +125,8 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
                     MinOut::SignedQuote { quoter } => {
                         require!(*quoter != Pubkey::default(), SraError::InvalidActionConfig);
                     }
-                    // The engine cannot execute an oracle min-out, so a route
-                    // committing one could only ever stage-and-recover. Refuse
-                    // it here — at commit time — rather than after funds land.
+                    // Not executable by the engine — refuse at commit time,
+                    // not after funds land.
                     MinOut::Oracle { .. } => {
                         return Err(SraError::UnsupportedAction.into());
                     }
@@ -238,8 +234,7 @@ mod tests {
 
     #[test]
     fn validate_action_config_empty_rejected() {
-        // An empty commitment would let a receipt go terminal-success with the
-        // whole fill still staged and unrecoverable.
+        // An empty commitment would strand the whole fill past terminal success.
         assert_eq!(
             validate_action_config(&[]).unwrap_err(),
             SraError::InvalidActionBpsSum.into()
@@ -281,8 +276,7 @@ mod tests {
 
     #[test]
     fn validate_action_config_mixed_bps_sum_over_10000_rejected() {
-        // SplTransfer and VerifiedCpi inputs draw from the same snapshot, so
-        // their COMBINED commitment over 100% could never execute.
+        // Both variants draw from the same snapshot: combined > 100% can never execute.
         let actions = vec![valid_spl_transfer(4_000), valid_verified_cpi()];
         assert_eq!(
             validate_action_config(&actions).unwrap_err(),
@@ -454,9 +448,7 @@ mod tests {
 
     #[test]
     fn validate_action_config_oracle_min_out_rejected_at_create() {
-        // The execute engine cannot run an oracle min-out; committing one would
-        // create a route whose actions can never succeed. Fail at create, even
-        // for an otherwise well-formed oracle reference.
+        // Even a well-formed oracle reference is refused at create.
         let mut action = valid_verified_cpi();
         if let SolanaAction::VerifiedCpi { min_out, .. } = &mut action {
             *min_out = MinOut::Oracle {

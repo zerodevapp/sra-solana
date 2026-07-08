@@ -4027,9 +4027,8 @@
           {
             "name": "is_sponsor",
             "docs": [
-              "Owner-signed assertion that skips the protocol fee. Honored only when",
-              "the fee admin enabled `allow_sponsored` (EVM `allowSponsored`);",
-              "otherwise the deposit rejects with `SponsoredNotAllowed`."
+              "Owner-signed assertion that skips the protocol fee; honored only when",
+              "the fee admin enabled `allow_sponsored`, else `SponsoredNotAllowed`."
             ],
             "type": "bool"
           },
@@ -4070,8 +4069,7 @@
           {
             "name": "allow_sponsored",
             "docs": [
-              "Honor a per-deposit `is_sponsor` fee skip (EVM `allowSponsored`). When",
-              "the PDA is absent this defaults to disallowed, like EVM's unset storage."
+              "Honor a per-deposit `is_sponsor` fee skip (EVM `allowSponsored`)."
             ],
             "type": "bool"
           },

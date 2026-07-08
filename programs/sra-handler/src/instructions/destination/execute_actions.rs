@@ -248,10 +248,9 @@ pub(crate) fn run_committed_actions<'info>(
                 min_out,
                 allow_permissioned_output,
             } => {
-                // Only the ed25519 signed-quote min_out source is wired. Oracle
-                // configs are refused at create_route; this reject is defense in
-                // depth for routes committed before that gate (fail-closed, the
-                // receipt stays Finalized and recoverable).
+                // Only the signed-quote min_out source is wired; oracle is
+                // refused at create_route — this reject covers routes committed
+                // before that gate (receipt stays Finalized, recoverable).
                 let MinOut::SignedQuote { quoter } = min_out else {
                     return Err(SraError::UnsupportedAction.into());
                 };
@@ -371,10 +370,9 @@ pub(crate) fn run_committed_actions<'info>(
         runtime_index == verified_runtimes.len(),
         SraError::ActionAccountMismatch
     );
-    // The committed config must consume the whole snapshot. `create_route`
-    // enforces this at commit time; re-checking here means a route committed
-    // before that rule (or under any future committer bug) hard-rejects and
-    // stays recoverable instead of going terminal with funds still staged.
+    // Re-assert create_route's full-consumption rule so a route committed
+    // before it hard-rejects (recoverable) instead of going terminal with
+    // funds still staged.
     require!(
         committed_bps == BPS_DENOMINATOR as u32,
         SraError::InvalidActionBpsSum
@@ -466,11 +464,9 @@ pub(crate) fn run_committed_actions<'info>(
     Ok(ActionOutcome::Succeeded)
 }
 
-/// `floor(amount_bps * vault_snapshot / BPS_DENOMINATOR)`. The committed bps sum
-/// to exactly 10_000 (`validate_action_config` at `create_route`, re-asserted in
-/// pass 1 above), so each `amount_bps <= 10_000` and the product is
-/// `<= vault_snapshot` (lossless `u64` cast); the floor can leave a few base
-/// units of dust, swept by any later fill's execution or sibling recovery.
+/// `floor(amount_bps * vault_snapshot / BPS_DENOMINATOR)`. Committed bps sum to
+/// exactly 10_000 (checked at create, re-asserted in pass 1), so the product is
+/// `<= vault_snapshot` (lossless `u64` cast); the floor can leave dust.
 fn vault_amount_for_bps(vault_snapshot: u64, amount_bps: u16) -> u64 {
     ((vault_snapshot as u128 * amount_bps as u128) / BPS_DENOMINATOR as u128) as u64
 }

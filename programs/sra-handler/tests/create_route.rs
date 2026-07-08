@@ -380,8 +380,7 @@ fn create_route_action_bps_sum_over_10000_rejected() {
 
 #[test]
 fn create_route_action_bps_sum_under_10000_rejected() {
-    // Under-consumption would leave a residual staged past terminal success
-    // with no exit; the config must commit the whole vault.
+    // Under-consumption would strand a residual past terminal success.
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);
@@ -407,8 +406,7 @@ fn create_route_action_bps_sum_under_10000_rejected() {
 
 #[test]
 fn create_route_empty_action_config_rejected() {
-    // An empty commitment would mark receipts terminal-success while the whole
-    // fill stays staged and unrecoverable.
+    // An empty commitment would strand the whole fill past terminal success.
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);
@@ -590,8 +588,7 @@ fn verified_cpi_action(slots: Vec<SlotRole>) -> SolanaAction {
 
 #[test]
 fn create_route_oracle_min_out_rejected() {
-    // The execute engine only runs signed-quote min-outs; a committed oracle
-    // min-out could never execute, so it is refused before funds can stage.
+    // A committed oracle min-out could never execute; refuse before funds stage.
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);

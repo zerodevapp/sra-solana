@@ -142,10 +142,8 @@ fn execute_actions_full_bps_sum_floor_dust_stays_staged() {
     let mut svm = setup_svm();
     let r1 = Pubkey::new_unique();
     let r2 = Pubkey::new_unique();
-    // A 100%-summing split over an amount that floors on both legs: the base
-    // unit lost to flooring stays staged past terminal success. It is swept by
-    // any later fill's execution or sibling recovery (amounts are fractions of
-    // the live snapshot), so only a route with no future activity strands it.
+    // A 100%-summing split that floors on both legs: the dust unit stays
+    // staged past terminal success, swept by any later fill or sibling recovery.
     let s = stage(&mut svm, vec![spl(r1, 6_000), spl(r2, 4_000)], AMOUNT + 1);
     let a1 = create_ata(&mut svm, &s.payer, &r1, &s.mint);
     let a2 = create_ata(&mut svm, &s.payer, &r2, &s.mint);
@@ -168,10 +166,8 @@ fn execute_actions_full_bps_sum_floor_dust_stays_staged() {
 
 #[test]
 fn execute_actions_legacy_under_consuming_config_hard_rejects_recoverable() {
-    // create_route now refuses configs that don't consume 100%, but routes
-    // committed BEFORE that rule still store them. Execution must hard-reject
-    // (receipt stays Finalized, funds recoverable) rather than go terminal
-    // with the residual staged.
+    // A route committed before the full-consumption rule must hard-reject at
+    // execution (receipt stays Finalized, recoverable), not go terminal.
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 100 * SOL);
     let owner = funded_keypair(&mut svm, 100 * SOL);
@@ -222,9 +218,8 @@ fn execute_actions_legacy_under_consuming_config_hard_rejects_recoverable() {
 
 #[test]
 fn execute_actions_legacy_oracle_min_out_hard_rejects_recoverable() {
-    // Oracle min-outs are refused at create_route; a route committed before
-    // that gate must still fail closed at execution, leaving the receipt
-    // Finalized and the funds recoverable.
+    // A route committed with an oracle min-out before the create-gate must
+    // still fail closed at execution (receipt Finalized, recoverable).
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 100 * SOL);
     let owner = funded_keypair(&mut svm, 100 * SOL);

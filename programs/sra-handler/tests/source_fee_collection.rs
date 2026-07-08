@@ -224,8 +224,7 @@ fn sponsor_skips_fee_when_admin_allows() {
 
 #[test]
 fn sponsor_rejected_when_not_admin_allowed() {
-    // A depositor cannot self-declare `is_sponsor = true` to zero the fee unless
-    // the admin has enabled sponsorship (EVM `protocolFeeConfig.allowSponsored`).
+    // A depositor cannot self-declare sponsorship without the admin flag.
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
@@ -243,9 +242,8 @@ fn sponsor_rejected_when_not_admin_allowed() {
 
 #[test]
 fn sponsor_rejected_when_protocol_fee_config_absent() {
-    // With no ProtocolFeeConfig PDA, sponsorship defaults to disallowed — same as
-    // EVM's unset `protocolFeeConfig` storage (allowSponsored = false), and even
-    // though a non-sponsored deposit would pay zero fee here anyway.
+    // No ProtocolFeeConfig PDA = sponsorship disallowed (EVM unset storage),
+    // even though a non-sponsored deposit would pay zero here anyway.
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
 

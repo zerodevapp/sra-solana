@@ -39,11 +39,7 @@ pub fn resolve_protocol_fee_bps(
 /// them); otherwise `fee = floor(amount * bps / 10_000)`.
 ///
 /// A sponsored deposit is honored only when the admin enabled it (EVM
-/// `protocolFeeConfig.allowSponsored`; an absent config disallows, like EVM's
-/// unset storage) — otherwise the deposit errors rather than paying: the party
-/// asserting `is_sponsor` is the party that benefits, so the skip cannot be
-/// self-granted. The gate lives here, with the other admin-flag policy, so no
-/// caller can forget it.
+/// `allowSponsored`; an absent config disallows) — else `SponsoredNotAllowed`.
 ///
 /// Takes the recipient itself so the "`Pubkey::default()` = fees disabled
 /// globally" sentinel stays owned by the fee layer, not re-derived at call
@@ -132,8 +128,7 @@ mod tests {
 
     #[test]
     fn sponsor_rejected_when_not_admin_allowed() {
-        // EVM `require(!isSponsor || allowSponsored, SponsoredNotAllowed)` — a
-        // self-declared sponsor cannot zero the fee without the admin flag.
+        // A self-declared sponsor cannot zero the fee without the admin flag.
         let mut config = cfg(false, 30);
         config.allow_sponsored = false;
         assert_fee_err(
@@ -151,9 +146,8 @@ mod tests {
 
     #[test]
     fn sponsor_rejected_when_config_absent() {
-        // An absent config PDA disallows sponsorship — EVM's unset storage
-        // defaults allowSponsored to false — even though the recipient-unset /
-        // config-absent paths would charge zero anyway.
+        // An absent config PDA disallows sponsorship (EVM unset storage),
+        // even though a non-sponsored deposit would charge zero here anyway.
         assert_fee_err(
             compute_protocol_fee(
                 true,

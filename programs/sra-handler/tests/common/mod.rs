@@ -1758,9 +1758,8 @@ pub fn derive_fill_receipt_pda(route: &Pubkey, fill_id: &[u8; 32]) -> (Pubkey, u
 /// `finalize_fill` receipt — `finalized_at` is 0 and `expected_amount == amount`.
 /// Mirrors `seed_mint_nonce_account`.
 /// Raw-seed a route account, bypassing `create_route`'s validation — models a
-/// route committed before a create-time rule existed (the account layout is
-/// identical; only the validation era differs). `execute_actions` does not
-/// seed-bind the route, so an arbitrary program-owned address suffices.
+/// route committed before a create-time rule existed. `execute_actions` does
+/// not seed-bind the route, so an arbitrary program-owned address suffices.
 pub fn seed_route_with_config(
     svm: &mut LiteSVM,
     owner: &Pubkey,
