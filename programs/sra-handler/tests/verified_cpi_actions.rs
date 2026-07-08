@@ -599,45 +599,6 @@ fn verified_cpi_missing_destination_ata_soft_fails() {
     );
 }
 
-#[test]
-fn verified_cpi_oracle_min_out_unsupported() {
-    let mut svm = setup_svm();
-    let quoter = Keypair::new();
-    // An oracle-min_out VerifiedCpi is creatable but not yet executable.
-    let s = stage(
-        &mut svm,
-        &quoter,
-        OutKind::Legacy,
-        |input, output, _q| {
-            vec![verified_cpi(
-                input,
-                output,
-                10_000,
-                MinOut::Oracle {
-                    feed: Pubkey::new_unique(),
-                    max_slippage_bps: 50,
-                },
-            )]
-        },
-        true,
-    );
-    let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
-    let exec = execute_actions_ix_full(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
-        &s.input_mint,
-        s.verified_metas(s.destination),
-    );
-
-    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
-    assert_eq!(err, exec_error(SraError::UnsupportedAction));
-    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
-    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
-}
-
 // --------------------------------------------------------------------------
 // Composition with SplTransfer
 // --------------------------------------------------------------------------

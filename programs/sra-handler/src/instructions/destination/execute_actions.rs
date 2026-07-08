@@ -5,7 +5,8 @@
 //!   vault snapshot. No third-party CPI.
 //! * `VerifiedCpi` — dynamic accounts through the shared engine (scratch-bound
 //!   input, pinned slots, balance-diff `≥ min_out` from a signed quote). Only the
-//!   ed25519 signed-quote source is wired; oracle `min_out` is not yet executable.
+//!   ed25519 signed-quote source is wired; oracle `min_out` is not yet executable
+//!   (and is refused at `create_route`).
 //!
 //! Failure model (two-pass validate-then-execute): a bad handler-pinned-account
 //! state (missing/frozen recipient/scratch/output ATA, frozen vault) → soft
@@ -209,6 +210,7 @@ pub(crate) fn run_committed_actions<'info>(
     let mut runtime_index = 0usize;
     let mut plan: Vec<Planned> = Vec::new();
     let mut any_action_would_fail = false;
+    let mut committed_bps: u32 = 0;
 
     for (action_index, action) in action_config.iter().enumerate() {
         match action {
@@ -234,6 +236,7 @@ pub(crate) fn run_committed_actions<'info>(
                         amount: vault_amount_for_bps(vault_snapshot, *amount_bps),
                     });
                 }
+                committed_bps += *amount_bps as u32;
                 cursor += 1;
             }
             SolanaAction::VerifiedCpi {
@@ -245,13 +248,16 @@ pub(crate) fn run_committed_actions<'info>(
                 min_out,
                 allow_permissioned_output,
             } => {
-                // Only the ed25519 signed-quote min_out source is wired; oracle is
-                // not yet executable (fail-closed, receipt stays Finalized).
+                // Only the ed25519 signed-quote min_out source is wired. Oracle
+                // configs are refused at create_route; this reject is defense in
+                // depth for routes committed before that gate (fail-closed, the
+                // receipt stays Finalized and recoverable).
                 let MinOut::SignedQuote { quoter } = min_out else {
                     return Err(SraError::UnsupportedAction.into());
                 };
                 // The vault holds expected_mint, so that is what is spent.
                 require_keys_eq!(*input_mint, expected_mint, SraError::InvalidInputMint);
+                committed_bps += *input_bps as u32;
 
                 let (scratch_auth, _, scratch_account) =
                     scratch.expect("scratch derived when a VerifiedCpi action is present");
@@ -365,6 +371,14 @@ pub(crate) fn run_committed_actions<'info>(
         runtime_index == verified_runtimes.len(),
         SraError::ActionAccountMismatch
     );
+    // The committed config must consume the whole snapshot. `create_route`
+    // enforces this at commit time; re-checking here means a route committed
+    // before that rule (or under any future committer bug) hard-rejects and
+    // stays recoverable instead of going terminal with funds still staged.
+    require!(
+        committed_bps == BPS_DENOMINATOR as u32,
+        SraError::InvalidActionBpsSum
+    );
 
     // Soft fail (no transfers ran) — caller persists ActionsFailed.
     if any_action_would_fail {
@@ -452,11 +466,11 @@ pub(crate) fn run_committed_actions<'info>(
     Ok(ActionOutcome::Succeeded)
 }
 
-/// `floor(amount_bps * vault_snapshot / BPS_DENOMINATOR)`. `amount_bps <= 10_000`
-/// is guaranteed upstream (`validate_action_config`, enforced once at
-/// `create_route` on the action list the route stores and later reads directly),
-/// so the product is `<= vault_snapshot` (lossless `u64` cast); the floor can
-/// leave a few base units of recoverable dust.
+/// `floor(amount_bps * vault_snapshot / BPS_DENOMINATOR)`. The committed bps sum
+/// to exactly 10_000 (`validate_action_config` at `create_route`, re-asserted in
+/// pass 1 above), so each `amount_bps <= 10_000` and the product is
+/// `<= vault_snapshot` (lossless `u64` cast); the floor can leave a few base
+/// units of dust, swept by any later fill's execution or sibling recovery.
 fn vault_amount_for_bps(vault_snapshot: u64, amount_bps: u16) -> u64 {
     ((vault_snapshot as u128 * amount_bps as u128) / BPS_DENOMINATOR as u128) as u64
 }

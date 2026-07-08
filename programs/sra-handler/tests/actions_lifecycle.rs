@@ -467,41 +467,6 @@ fn lifecycle_terminal_states_reject_further_ops() {
     );
 }
 
-#[test]
-fn lifecycle_empty_action_config_actions_succeeded_immediately() {
-    // An empty action_config is a valid (if degenerate) commitment: execute_actions
-    // runs no transfers and marks ActionsSucceeded. The staged funds simply stay in
-    // the execution vault (the owner committed to doing nothing with them).
-    let mut svm = setup_svm();
-    let payer = funded_keypair(&mut svm, 100 * SOL);
-    let owner = funded_keypair(&mut svm, 100 * SOL);
-    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), DECIMALS);
-    let f = create_route_and_finalize(&mut svm, &payer, &owner, mint, vec![], [0x07; 32]);
-
-    send_ix(
-        &mut svm,
-        execute_actions_ix(&payer.pubkey(), &f.route, f.fill_id, &mint, &[]),
-        &payer,
-        &[],
-    )
-    .expect("empty action config -> ActionsSucceeded immediately");
-
-    assert_eq!(
-        status(&svm, &f.fill_receipt),
-        ExecutionStatus::ActionsSucceeded
-    );
-    assert_eq!(fetch_token_balance(&svm, &f.execution_vault), AMOUNT);
-
-    // The receipt is now terminal, so the still-staged funds are NOT recoverable:
-    // recover_funds rejects on the status gate, not the empty-vault gate. An empty
-    // action_config is therefore a self-inflicted stranding the owner commits to at
-    // create-route time. (The recipient ATA slot is irrelevant here — execute/retry
-    // reject on the status gate before touching remaining accounts.)
-    let owner_ata = create_ata(&mut svm, &payer, &owner.pubkey(), &mint);
-    assert_all_ops_rejected(&mut svm, &payer, &owner, &f, mint, (owner_ata, owner_ata));
-    assert_eq!(fetch_token_balance(&svm, &f.execution_vault), AMOUNT);
-}
-
 // ==========================================================================
 // VerifiedCpi lifecycle paths (signed-quote swap through the shared engine)
 // ==========================================================================

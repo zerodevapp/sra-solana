@@ -114,8 +114,14 @@ pub mod sra_handler {
         ctx: Context<SetProtocolFee>,
         default_fee_bps: u16,
         allow_override: bool,
+        allow_sponsored: bool,
     ) -> Result<()> {
-        instructions::shared::fees::set_protocol_fee_handler(ctx, default_fee_bps, allow_override)
+        instructions::shared::fees::set_protocol_fee_handler(
+            ctx,
+            default_fee_bps,
+            allow_override,
+            allow_sponsored,
+        )
     }
 
     pub fn remove_protocol_fee(ctx: Context<RemoveProtocolFee>) -> Result<()> {

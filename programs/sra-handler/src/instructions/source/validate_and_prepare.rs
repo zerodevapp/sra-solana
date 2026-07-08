@@ -288,7 +288,9 @@ pub(crate) fn handler(
         )
     };
 
-    // Recompute protocol fee from live admin state and require attested `protocol_fee_amount`.
+    // Recompute protocol fee from live admin state and require attested
+    // `protocol_fee_amount`. A self-declared `is_sponsor` is admin-gated inside
+    // the fee layer (`SponsoredNotAllowed` unless `allow_sponsored` is set).
     let protocol_fee_config = read_optional_program_account::<ProtocolFeeConfig>(
         ctx.accounts.protocol_fee_config.to_account_info(),
     )?;

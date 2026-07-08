@@ -60,8 +60,9 @@ pub(crate) fn handler(
     params: CreateRouteParams,
 ) -> Result<()> {
     // Fail-fast validation before any hashing or adapter I/O: action-config
-    // bounds + per-variant checks (length, Σ SplTransfer bps, non-zero keys,
-    // VerifiedCpi template pinning), then the adapter-list bound.
+    // bounds + per-variant checks (length; combined SplTransfer + VerifiedCpi
+    // bps summing to exactly 100%; non-zero keys; VerifiedCpi template pinning;
+    // oracle min-out refused), then the adapter-list bound.
     validate_action_config(&params.action_config)?;
     require!(
         params.allowed_adapters.len() <= MAX_ADAPTERS,

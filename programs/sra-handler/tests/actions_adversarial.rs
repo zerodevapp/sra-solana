@@ -198,7 +198,7 @@ fn action_drain_at_full_bps_drains_vault_without_overflow() {
     );
 }
 
-/// The Σ amount_bps ≤ 10_000 invariant is enforced at the commitment point
+/// The Σ bps == 10_000 invariant is enforced at the commitment point
 /// (`create_route`), and there is no way to reintroduce an over-100% drain at
 /// execution: the committed digest pins the exact action list, so a tampered
 /// >100% config is rejected before any balance is read.
@@ -235,7 +235,7 @@ fn bps_sum_over_10000_rejected_at_create_and_uninjectable_at_execution() {
         &[&owner],
         "Σbps > 10000",
     );
-    assert_eq!(err, custom_error(SraError::ActionBpsSumExceeded));
+    assert_eq!(err, custom_error(SraError::InvalidActionBpsSum));
 
     // 2. A legitimate route (Σbps == 100%) commits its exact action list on-chain
     // (`route.action_config`), so a relayer cannot smuggle a differently-shaped
@@ -680,7 +680,7 @@ fn verified_cpi(
 /// `(input_mint, output_mint, quoter)` by `make_actions`, with the execution vault
 /// funded with `VAULT`, the mock-swap pool funded, scratch + destination created, and
 /// a `Finalized` receipt planted. (The single-VerifiedCpi tests pass a one-action
-/// closure; the mixed-variant test prepends an `SplTransfer`.)
+/// closure; the input-bps bound test appends an `SplTransfer`.)
 fn stage_verified(
     svm: &mut litesvm::LiteSVM,
     quoter: &Keypair,
@@ -933,14 +933,17 @@ fn verified_cpi_signing_authority_substitution_rejected() {
 /// greedy the inner program or how the relayer routes the Free slots: only the
 /// scratch is exposed to the CPI, and the scratch holds at most `input_bps` of the
 /// snapshot. Here `input_bps == 50%` and the swap tries to pull the entire scratch —
-/// the vault still retains exactly the other 50%.
+/// the SplTransfer that runs AFTER the hostile CPI still pays its 50% in full,
+/// proving the other half of the vault was never reachable from inside the CPI.
 #[test]
 fn verified_cpi_hostile_account_set_bounded_by_input_bps() {
     let mut svm = setup_svm();
     let quoter = Keypair::new();
+    let sink = Keypair::new();
     let s = stage_verified(&mut svm, &quoter, |i, o, q| {
-        vec![verified_cpi(i, o, 5_000, q)]
+        vec![verified_cpi(i, o, 5_000, q), spl(sink.pubkey(), 5_000)]
     });
+    let sink_ata = create_ata(&mut svm, &s.payer, &sink.pubkey(), &s.input_mint);
     let input_amount = VAULT / 2; // 50% of the snapshot is moved into scratch.
 
     let expiry = now(&svm) + 3_600;
@@ -948,6 +951,8 @@ fn verified_cpi_hostile_account_set_bounded_by_input_bps() {
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(input_amount, out_amount, expiry));
     // The inner swap is told to pull the full scratch balance — the maximum a
     // hostile account set could attempt.
+    let mut remaining = s.honest_metas();
+    remaining.push(AccountMeta::new(sink_ata, false));
     let exec = execute_actions_ix_full(
         &s.payer.pubkey(),
         &s.route,
@@ -958,15 +963,16 @@ fn verified_cpi_hostile_account_set_bounded_by_input_bps() {
             expiry,
         )],
         &s.input_mint,
-        s.honest_metas(),
+        remaining,
     );
 
     send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]).expect("bounded swap succeeds");
     assert_eq!(
-        fetch_token_balance(&svm, &s.execution_vault),
+        fetch_token_balance(&svm, &sink_ata),
         VAULT - input_amount,
-        "at most input_bps of the vault is ever exposed"
+        "at most input_bps of the vault is ever exposed to the CPI"
     );
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), 0);
     assert_eq!(
         fetch_token_balance(&svm, &s.scratch),
         0,
@@ -1036,48 +1042,46 @@ fn verified_cpi_prefunded_scratch_swept_to_vault() {
 }
 
 /// A combined over-commitment that spans action variants — `SplTransfer{100%}` plus
-/// `VerifiedCpi{input_bps:100%}`, each a fraction of the same snapshot — is not summed
-/// at `create_route` (only `SplTransfer` bps are summed there), so the route is
-/// creatable. It is fail-closed at execution instead: the two-pass executor validates
-/// and plans both, then in pass 2 the `SplTransfer` drains the vault and the
-/// `VerifiedCpi`'s vault->scratch move runs short and reverts the whole instruction
-/// atomically. No partial transfer persists; funds stay staged, receipt `Finalized`.
+/// `VerifiedCpi{input_bps:100%}`, each a fraction of the same snapshot — could never
+/// execute (200% of the vault). The bps sum at `create_route` covers BOTH variants,
+/// so the config is refused at the commitment point and no funds can ever stage
+/// behind an un-executable route.
 #[test]
-fn mixed_variant_combined_draw_over_100pct_reverts_funds_safe() {
+fn mixed_variant_combined_draw_over_100pct_rejected_at_create() {
     let mut svm = setup_svm();
-    let quoter = Keypair::new();
+    let payer = funded_keypair(&mut svm, 100 * SOL);
+    let owner = funded_keypair(&mut svm, 100 * SOL);
+    let input_mint = create_mint(&mut svm, &payer, &payer.pubkey(), DECIMALS);
+    let output_mint = create_mint(&mut svm, &payer, &payer.pubkey(), DECIMALS);
     let recipient = Keypair::new();
-    // [ SplTransfer 100%, VerifiedCpi input 100% ] = 200% of the snapshot committed.
-    let s = stage_verified(&mut svm, &quoter, |i, o, q| {
-        vec![
-            spl(recipient.pubkey(), 10_000),
-            verified_cpi(i, o, 10_000, q),
-        ]
-    });
-    let recipient_ata = create_ata(&mut svm, &s.payer, &recipient.pubkey(), &s.input_mint);
+    let quoter = Keypair::new();
 
-    // The VerifiedCpi is action index 1; its quote must verify in pass 1 so the run
-    // reaches the pass-2 revert (not a quote-failure revert).
-    let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message_at(1, VAULT, 1, expiry));
-    let mut remaining = vec![AccountMeta::new(recipient_ata, false)];
-    remaining.extend(s.honest_metas());
-    let exec = execute_actions_ix_full(
-        &s.payer.pubkey(),
-        &s.route,
-        s.fill_id,
-        vec![runtime(swap_data(VAULT, 1), 1, expiry)],
-        &s.input_mint,
-        remaining,
+    // [ SplTransfer 100%, VerifiedCpi input 100% ] = 200% of the snapshot.
+    let over = vec![
+        spl(recipient.pubkey(), 10_000),
+        verified_cpi(input_mint, output_mint, 10_000, quoter.pubkey()),
+    ];
+    let params = CreateRouteParams {
+        source_chain_id: SOURCE_CHAIN_ID,
+        expected_mint: input_mint,
+        action_config: over,
+        salt: [4u8; 32],
+        allowed_adapters: vec![ADAPTER_PROGRAM_ID],
+        allowed_executors: vec![payer.pubkey()],
+    };
+    let hash = route_config_hash_for(&owner.pubkey(), &params);
+    let err = send_ix_expect_err(
+        &mut svm,
+        create_route_ix_with_hash(
+            &payer.pubkey(),
+            &owner.pubkey(),
+            hash,
+            params,
+            &[ADAPTER_PROGRAM_ID],
+        ),
+        &payer,
+        &[&owner],
+        "combined Σbps > 10000 must be rejected at create",
     );
-
-    let res = send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]);
-    assert!(
-        res.is_err(),
-        "a combined >100% draw must revert at execution"
-    );
-    // Atomic rollback: no SplTransfer leg persisted; funds fully staged + retryable.
-    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
-    assert_eq!(fetch_token_balance(&svm, &recipient_ata), 0);
-    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+    assert_eq!(err, custom_error(SraError::InvalidActionBpsSum));
 }

@@ -628,6 +628,7 @@ pub fn set_protocol_fee_ix(
     admin: &Pubkey,
     default_fee_bps: u16,
     allow_override: bool,
+    allow_sponsored: bool,
 ) -> Instruction {
     let (fee_config, _) = derive_fee_config_pda();
     let (protocol_fee_config, _) = derive_protocol_fee_pda();
@@ -644,6 +645,7 @@ pub fn set_protocol_fee_ix(
         data: sra_handler::instruction::SetProtocolFee {
             default_fee_bps,
             allow_override,
+            allow_sponsored,
         }
         .data(),
     }
@@ -1755,6 +1757,43 @@ pub fn derive_fill_receipt_pda(route: &Pubkey, fill_id: &[u8; 32]) -> (Pubkey, u
 /// states no instruction produces yet. Not a layout-exact replica of a
 /// `finalize_fill` receipt — `finalized_at` is 0 and `expected_amount == amount`.
 /// Mirrors `seed_mint_nonce_account`.
+/// Raw-seed a route account, bypassing `create_route`'s validation — models a
+/// route committed before a create-time rule existed (the account layout is
+/// identical; only the validation era differs). `execute_actions` does not
+/// seed-bind the route, so an arbitrary program-owned address suffices.
+pub fn seed_route_with_config(
+    svm: &mut LiteSVM,
+    owner: &Pubkey,
+    executor: &Pubkey,
+    expected_mint: Pubkey,
+    action_config: Vec<SolanaAction>,
+) -> Pubkey {
+    let route = SolanaSraRoute {
+        owner: *owner,
+        source_chain_id: 42_161,
+        expected_mint,
+        action_config,
+        salt: [0u8; 32],
+        allowed_adapters: vec![ADAPTER_PROGRAM_ID],
+        allowed_executors: vec![*executor],
+        paused: false,
+        bump: 255,
+    };
+    let mut data = <SolanaSraRoute as Discriminator>::DISCRIMINATOR.to_vec();
+    route.serialize(&mut data).unwrap();
+
+    let address = Pubkey::new_unique();
+    let account = solana_sdk::account::Account {
+        lamports: svm.minimum_balance_for_rent_exemption(data.len()),
+        data,
+        owner: PROGRAM_ID,
+        executable: false,
+        rent_epoch: 0,
+    };
+    svm.set_account(address, account).unwrap();
+    address
+}
+
 pub fn seed_fill_receipt_with_status(
     svm: &mut LiteSVM,
     route: &Pubkey,

@@ -38,6 +38,13 @@ pub fn resolve_protocol_fee_bps(
 /// before any bps resolution (so an out-of-bounds override cannot error on
 /// them); otherwise `fee = floor(amount * bps / 10_000)`.
 ///
+/// A sponsored deposit is honored only when the admin enabled it (EVM
+/// `protocolFeeConfig.allowSponsored`; an absent config disallows, like EVM's
+/// unset storage) — otherwise the deposit errors rather than paying: the party
+/// asserting `is_sponsor` is the party that benefits, so the skip cannot be
+/// self-granted. The gate lives here, with the other admin-flag policy, so no
+/// caller can forget it.
+///
 /// Takes the recipient itself so the "`Pubkey::default()` = fees disabled
 /// globally" sentinel stays owned by the fee layer, not re-derived at call
 /// sites.
@@ -49,7 +56,14 @@ pub fn compute_protocol_fee(
     amount: u64,
     bps_override: u16,
 ) -> Result<u64> {
-    if is_sponsor || *fee_recipient == Pubkey::default() {
+    if is_sponsor {
+        require!(
+            config.is_some_and(|config| config.allow_sponsored),
+            SraError::SponsoredNotAllowed
+        );
+        return Ok(0);
+    }
+    if *fee_recipient == Pubkey::default() {
         return Ok(0);
     }
     let Some(config) = config else {
@@ -74,6 +88,7 @@ mod tests {
         ProtocolFeeConfig {
             default_fee_bps,
             allow_override,
+            allow_sponsored: true,
             bump: 254,
         }
     }
@@ -113,6 +128,43 @@ mod tests {
         )
         .expect("sponsor path must not validate the override");
         assert_eq!(fee, 0);
+    }
+
+    #[test]
+    fn sponsor_rejected_when_not_admin_allowed() {
+        // EVM `require(!isSponsor || allowSponsored, SponsoredNotAllowed)` — a
+        // self-declared sponsor cannot zero the fee without the admin flag.
+        let mut config = cfg(false, 30);
+        config.allow_sponsored = false;
+        assert_fee_err(
+            compute_protocol_fee(
+                true,
+                &Pubkey::new_unique(),
+                Some(&config),
+                None,
+                1_000_000,
+                NO_FEE_BPS_OVERRIDE,
+            ),
+            "SponsoredNotAllowed",
+        );
+    }
+
+    #[test]
+    fn sponsor_rejected_when_config_absent() {
+        // An absent config PDA disallows sponsorship — EVM's unset storage
+        // defaults allowSponsored to false — even though the recipient-unset /
+        // config-absent paths would charge zero anyway.
+        assert_fee_err(
+            compute_protocol_fee(
+                true,
+                &Pubkey::default(),
+                None,
+                None,
+                1_000_000,
+                NO_FEE_BPS_OVERRIDE,
+            ),
+            "SponsoredNotAllowed",
+        );
     }
 
     #[test]

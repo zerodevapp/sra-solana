@@ -14,7 +14,9 @@ pub struct PrepareParams {
     pub recipient: [u8; 32],
     pub target_token: [u8; 32],
     pub protocol_fee_amount: u64,
-    /// Owner-signed assertion that skips the protocol fee.
+    /// Owner-signed assertion that skips the protocol fee. Honored only when
+    /// the fee admin enabled `allow_sponsored` (EVM `allowSponsored`);
+    /// otherwise the deposit rejects with `SponsoredNotAllowed`.
     pub is_sponsor: bool,
     /// `NO_FEE_BPS_OVERRIDE` (u16::MAX) = no override.
     pub protocol_fee_bps_override: u16,
