@@ -19,6 +19,8 @@ idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build", "sra-common/idl-bu
 anchor-debug = []
 custom-heap = []
 custom-panic = []
+# Build for Solana devnet: selects devnet network constants in sra-common.
+devnet = ["sra-common/devnet"]
 
 
 [dependencies]
