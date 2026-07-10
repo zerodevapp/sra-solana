@@ -101,10 +101,10 @@ pub enum SraError {
     #[msg("Supplied route_config_hash does not match the recomputed route config")]
     InvalidRouteConfig,
 
-    #[msg("SplTransfer amount_bps sum exceeds 100% of the vault")]
-    ActionBpsSumExceeded,
+    #[msg("Committed action bps (SplTransfer amounts + VerifiedCpi inputs) must sum to exactly 100% of the vault")]
+    InvalidActionBpsSum,
 
-    #[msg("Action config field is invalid (zero key, bps over 100%, or template missing a required fixed slot)")]
+    #[msg("Action config field is invalid (zero key or template missing a required fixed slot)")]
     InvalidActionConfig,
 
     #[msg("VerifiedCpi account template exceeds the maximum slot count")]
@@ -165,4 +165,8 @@ pub enum SraError {
 
     #[msg("Executor already present in the allowlist")]
     DuplicateExecutor,
+
+    // -- Source: sponsored-deposit admin gate --
+    #[msg("Sponsored deposits are not enabled by the fee admin")]
+    SponsoredNotAllowed,
 }

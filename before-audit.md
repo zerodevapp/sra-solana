@@ -26,8 +26,8 @@ This repo is the Solana counterpart to the EVM SRA contracts in the sibling `sra
 | Unit | Kind | In audit scope? | Responsibility |
 | --- | --- | --- | --- |
 | `programs/sra-handler` | On-chain program | **Yes — primary** | Bridge- and target-agnostic. Source validation + fee + custody handoff + routing event; destination fill settlement, action execution, recovery; fee administration. |
-| `programs/sra-across-adapter` | On-chain program | **Yes — primary** | Across-specific. Source: build the canonical EVM ABI message and CPI into Across `deposit_now`. Destination: read the Across fill-status account and mint a `VerifiedFill` attestation. |
-| `crates/sra-common` | Shared library crate | **Yes** | PDA seeds, shared account types, constants, errors, the manual ABI encoder, fee math, and the signed-quote message layout. Compiled into both programs. |
+| `programs/sra-across-adapter` | On-chain program | **Yes — primary** | Across-specific. Source: build the Across `deposit_now` call (empty message envelope) and CPI into Across. Destination: read the Across fill-status account and mint a `VerifiedFill` attestation. |
+| `crates/sra-common` | Shared library crate | **Yes** | PDA seeds, shared account types, constants, errors, the `u256_from_u64` EVM wire-word helper, fee math, and the signed-quote message layout. Compiled into both programs. |
 | `programs/mock-spoke-pool` | Test-only program | **No — out of scope** | Minimal Across SVM SpokePool stand-in used by LiteSVM/Surfpool tests. |
 | `programs/mock-swap` | Test-only program | **No — out of scope** | Generic swap target used to exercise the verified-CPI engine in tests. |
 
@@ -61,7 +61,7 @@ One atomic transaction, two paired instructions (an Address Lookup Table is **ma
 
 2. **`execute_deposit_across` (adapter)**
    - **Pin the previous instruction** back to `validate_and_prepare` (same mutual attestation).
-   - Narrow the bytes32 EVM routing fields to 20-byte EVM addresses, build the canonical ABI message, derive the Across delegate PDA, approve custody, and CPI Across `deposit_now`.
+   - Build the Across `deposit_now` args — the bytes32 routing fields pass through unchanged (the EVM side narrows them to addresses on fill) and the bridged `message` is **empty** — then derive the Across delegate PDA, approve custody, and CPI Across `deposit_now`.
    - Enforce Across timing floors (`fill_deadline_offset ≥ 300s`; `exclusivity_period ≤ fill_deadline_offset`).
 
 Result: tokens enter Across; a relayer fills on the EVM target; the EVM handler executes. Nothing further happens on Solana for a source deposit.
@@ -117,7 +117,7 @@ The authorization column is the single most important thing to verify against th
 
 | Instruction | Who may call | Enforced checks |
 | --- | --- | --- |
-| `create_route` | Owner (signs) | `route_config_hash` recomputed and matched; action config validated (bounds, SplTransfer bps sum, VerifiedCpi structure); adapter/executor lists distinct and bounded. |
+| `create_route` | Owner (signs) | `route_config_hash` recomputed and matched; action config validated (bounds; combined SplTransfer + VerifiedCpi bps must sum to exactly 100%; VerifiedCpi structure; oracle min-out refused); adapter/executor lists distinct and bounded. |
 | `manage_route` | Owner (signs, `has_one`) | Mutates only `paused` / adapters / executors. |
 | `finalize_fill` | **Permissionless** (caller pays rent) | `!paused`; `verified_fill` owner ∈ `allowed_adapters`; PDA pin `["verified_fill", adapter, fill_id]`; full field re-validation; `FillReceipt` `init` (replay-once). |
 | `execute_actions` | **Permissionless**, but executor must be in `allowed_executors` | `!paused`; receipt status `Finalized`; per-action account/ATA pinning; VerifiedCpi program loader-owned + executable + pinned; signed-quote verification. |
@@ -132,7 +132,7 @@ All gated by the `FeeConfig` **admin** (single key, transferable via a two-step 
 | --- | --- |
 | `initialize_fee_config` | One-time create of the global `FeeConfig` PDA with a fee recipient. `Pubkey::default()` recipient disables all fees. |
 | `set_fee_recipient` | Change recipient (default = fees off globally). |
-| `set_protocol_fee` / `remove_protocol_fee` | Create/close the single global `ProtocolFeeConfig` (`default_fee_bps ≤ 1000`, `allow_override` flag). |
+| `set_protocol_fee` / `remove_protocol_fee` | Create/close the single global `ProtocolFeeConfig` (`default_fee_bps ≤ 1000`, `allow_override` + `allow_sponsored` flags). |
 | `set_asset_fee_tier` / `remove_asset_fee_tier` | Create/close a per-mint tier `(threshold, below_bps, above_or_equal_bps)`, each ≤ 1000 bps. |
 | `set_pending_admin` / `accept_admin` | Two-step admin handoff. |
 
@@ -209,14 +209,14 @@ These are the properties the security of the destination side rests on. Each is 
 6. **Redirect resistance.** Static transfers must exact-match `ATA(recipient, expected_mint)`. Verified-CPI outputs are pinned to the owner's ATA.
 7. **CPI containment.** Verified-CPI input is bounded to the scratch account (`input_bps` of the vault), the inner CPI is signed only by the scratch authority (never the execution authority), the output is pinned to the owner's ATA, `min_out` is enforced by post-fee balance diff, and the scratch is swept empty afterward.
 8. **Quote integrity.** `min_out` is quoter-signed over a context hash (route ‖ fill_id ‖ action_index), the chain ID, and an expiry — no cross- fill, cross-action, or cross-chain replay.
-9. **No-strand guarantee.** Every non-terminal state has an exit path; funds are never permanently locked by a failed action.
+9. **No-strand guarantee.** Every non-terminal state has an exit path, and a committed action config must consume exactly 100% of the staged snapshot, so terminal success leaves at most floor-division dust (swept by any later fill's execution or a sibling receipt's recovery). Funds are never permanently locked by a failed action.
 
 ---
 
 ## 8. Cross-chain encoding
 
 - **Chain ID.** `SOLANA_CHAIN_ID = 34_268_394_551_451` (Across's SVM chain identifier). It is bound into every relay hash and every signed quote. It must match the Across SVM SpokePool's configured chain ID. (An earlier incorrect value was fixed; confirm the constant, not any external doc.)
-- **ABI encoder** (`sra-common/src/abi.rs`). A minimal, hand-rolled encoder that produces big-endian 32-byte EVM words. On the source side the adapter uses it to build the canonical message the EVM handler expects; the Across deposit itself carries an **empty message envelope** (the destination executes via its own instructions, not an EVM callback).
+- **EVM wire words** (`sra-common/src/abi.rs`). Exposes a single helper, `u256_from_u64`, which produces the big-endian 32-byte word for the Across `output_amount` wire field. There is **no SRA message encoder**: the Across deposit carries an **empty message envelope** (the destination executes via its own instructions, not an EVM callback), and `recipient` / `target_handler` are identity-committed in the SRA config hash but never transmitted — the EVM side is address-committed symmetrically.
 - **Across SpokePool** is pinned by `ACROSS_SPOKE_POOL_ID` (`DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru`).
 
 ---
@@ -224,8 +224,9 @@ These are the properties the security of the destination side rests on. Each is 
 ## 9. Fees and slippage
 
 - **Where:** the protocol fee is taken **once, on the source side** in `validate_and_prepare`. The destination forwards the full verified amount — there is no destination fee.
+- **Sponsorship is admin-gated (EVM `allowSponsored` parity):** a deposit with `is_sponsor = true` is rejected (`SponsoredNotAllowed`) unless the admin set `allow_sponsored` on the `ProtocolFeeConfig`; an absent config disallows it. The gate runs before fee resolution, so a depositor cannot self-declare sponsorship to zero the fee.
 - **Resolution order (short-circuits in this order):**
-  1. sponsor flag → fee 0 (returns before any bounds check);
+  1. sponsor flag (admin-authorized per the gate above) → fee 0 (returns before any bounds check);
   2. fee recipient == `Pubkey::default()` → fee 0 (globally disabled);
   3. no `ProtocolFeeConfig` present → fee 0;
   4. otherwise: per-call override (if `allow_override`) → per-mint asset tier → default bps.
@@ -276,9 +277,8 @@ Flagged proactively so they are not mistaken for findings. Some are deliberate S
 
 **Tracked gaps / trust assumptions (worth an auditor's eye):**
 
-- **Sponsor gating.** Solana honors the `is_sponsor` flag unconditionally; the EVM side gates sponsorship on an `allowSponsored` policy. This is a known, un-reconciled divergence — confirm the intended behavior before relying on it.
 - **No Across integrator/referral ID** on the source deposit (EVM appends one).
-- **No oracle fallback** for `min_out` (signed quote is the only path).
+- **No oracle fallback** for `min_out` (signed quote is the only path; oracle configs are refused at `create_route`).
 - **Shared execution vault per route.** Concurrent in-flight fills of the same route share one execution vault; recovery always drains the full balance safely, but per-fill accounting can be ambiguous if two fills overlap. The design assumes single-tenant routes (owner == route controller); a pooled/ multi-tenant vault would make the generic verified-CPI action unsafe.
 - **Permissioned Token-2022 output** (permanent-delegate / pausable / default-frozen) can be frozen or clawed back by its issuer; routes must opt in explicitly to accept such mints.
 - **CPI depth.** Solana's ~4–5 level CPI stack is a hard ceiling; deep swap routes plus token-hook accounts can exhaust it.

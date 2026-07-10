@@ -375,7 +375,56 @@ fn create_route_action_bps_sum_over_10000_rejected() {
     let err = send_ix(&mut svm, ix, &payer, &[&owner])
         .expect_err("Σ amount_bps > 100% must be rejected")
         .err;
-    assert_eq!(err, custom_error(SraError::ActionBpsSumExceeded));
+    assert_eq!(err, custom_error(SraError::InvalidActionBpsSum));
+}
+
+#[test]
+fn create_route_action_bps_sum_under_10000_rejected() {
+    // Under-consumption would strand a residual past terminal success.
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+
+    let mut params = sample_create_route_params(mint, [21u8; 32]);
+    params.action_config = vec![SolanaAction::SplTransfer {
+        recipient: Pubkey::new_unique(),
+        amount_bps: 9_999,
+    }];
+
+    let ix = create_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    let err = send_ix(&mut svm, ix, &payer, &[&owner])
+        .expect_err("Σ amount_bps < 100% must be rejected")
+        .err;
+    assert_eq!(err, custom_error(SraError::InvalidActionBpsSum));
+}
+
+#[test]
+fn create_route_empty_action_config_rejected() {
+    // An empty commitment would strand the whole fill past terminal success.
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+
+    let mut params = sample_create_route_params(mint, [22u8; 32]);
+    params.action_config = vec![];
+
+    let ix = create_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    let err = send_ix(&mut svm, ix, &payer, &[&owner])
+        .expect_err("empty action_config must be rejected")
+        .err;
+    assert_eq!(err, custom_error(SraError::InvalidActionBpsSum));
 }
 
 #[test]
@@ -535,6 +584,42 @@ fn verified_cpi_action(slots: Vec<SlotRole>) -> SolanaAction {
         },
         allow_permissioned_output: false,
     }
+}
+
+#[test]
+fn create_route_oracle_min_out_rejected() {
+    // A committed oracle min-out could never execute; refuse before funds stage.
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+
+    let mut action = verified_cpi_action(vec![
+        SlotRole::Fixed(FixedRole::SigningAuthority),
+        SlotRole::Fixed(FixedRole::Source),
+        SlotRole::Fixed(FixedRole::Destination),
+        SlotRole::Fixed(FixedRole::OutputMint),
+        SlotRole::Free,
+    ]);
+    if let SolanaAction::VerifiedCpi { min_out, .. } = &mut action {
+        *min_out = MinOut::Oracle {
+            feed: Pubkey::new_unique(),
+            max_slippage_bps: 50,
+        };
+    }
+    let mut params = sample_create_route_params(mint, [23u8; 32]);
+    params.action_config = vec![action];
+
+    let ix = create_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    let err = send_ix(&mut svm, ix, &payer, &[&owner])
+        .expect_err("oracle min_out must be rejected at create")
+        .err;
+    assert_eq!(err, custom_error(SraError::UnsupportedAction));
 }
 
 #[test]
