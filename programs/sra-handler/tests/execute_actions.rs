@@ -3,9 +3,9 @@
 //! Runs a finalized route's committed `action_config` against the funds staged
 //! in its execution vault. This is the Solana analog of the EVM
 //! `_resolveAndExecuteActions` — the action-running half of `onFill` (the
-//! settlement half is `finalize_fill`). v1 executes the static `SplTransfer`
-//! variant; the dynamic `VerifiedCpi` variant fails closed until its engine
-//! ships.
+//! settlement half is `finalize_fill`). This file covers the static
+//! `SplTransfer` variant and the shared gates; the dynamic `VerifiedCpi`
+//! engine paths live in `verified_cpi_actions.rs`.
 //!
 //! Failure model (EVM `try/catch` + atomicity parity): a bad recipient-ATA
 //! runtime state (missing / frozen) sets `ActionsFailed` and persists it with no
@@ -22,40 +22,14 @@ use solana_sdk::{
 use sra_common::{
     errors::SraError,
     types::{
-        AccountTemplate, CreateRouteParams, ExecutionStatus, FixedRole, ManageRouteParams, MinOut,
-        SlotRole, SolanaAction,
+        AccountTemplate, CreateRouteParams, ExecutionStatus, ManageRouteParams, MinOut,
+        SolanaAction,
     },
 };
 
 const AMOUNT: u64 = 4_000_000;
 const SOURCE_CHAIN_ID: u64 = 42_161;
 const FILL_ID: [u8; 32] = [7u8; 32];
-
-/// A valid `VerifiedCpi` action (pins all four required slots, non-zero keys) —
-/// creatable at `create_route`, not executable in this build.
-fn verified_cpi() -> SolanaAction {
-    SolanaAction::VerifiedCpi {
-        program_id: Pubkey::new_unique(),
-        input_mint: Pubkey::new_unique(),
-        input_bps: 10_000,
-        account_template: AccountTemplate {
-            slots: vec![
-                SlotRole::Fixed(FixedRole::TokenProgram),
-                SlotRole::Fixed(FixedRole::SigningAuthority),
-                SlotRole::Fixed(FixedRole::Source),
-                SlotRole::Fixed(FixedRole::Destination),
-                SlotRole::Fixed(FixedRole::OutputMint),
-                SlotRole::Free,
-            ],
-        },
-        output_mint: Pubkey::new_unique(),
-        min_out: MinOut::Oracle {
-            feed: Pubkey::new_unique(),
-            max_slippage_bps: 50,
-        },
-        allow_permissioned_output: false,
-    }
-}
 
 struct Staged {
     payer: solana_sdk::signature::Keypair,
@@ -164,15 +138,26 @@ fn execute_actions_multiple_all_succeed() {
 }
 
 #[test]
-fn execute_actions_empty_action_config_immediately_succeeds() {
+fn execute_actions_full_bps_sum_floor_dust_stays_staged() {
     let mut svm = setup_svm();
-    let s = stage(&mut svm, vec![], AMOUNT);
+    let r1 = Pubkey::new_unique();
+    let r2 = Pubkey::new_unique();
+    // A 100%-summing split that floors on both legs: the dust unit stays
+    // staged past terminal success, swept by any later fill or sibling recovery.
+    let s = stage(&mut svm, vec![spl(r1, 6_000), spl(r2, 4_000)], AMOUNT + 1);
+    let a1 = create_ata(&mut svm, &s.payer, &r1, &s.mint);
+    let a2 = create_ata(&mut svm, &s.payer, &r2, &s.mint);
 
-    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[]);
-    send_ix(&mut svm, ix, &s.payer, &[]).expect("empty action_config is a no-op success");
+    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[a1, a2]);
+    send_ix(&mut svm, ix, &s.payer, &[]).expect("full-consumption drain succeeds");
 
-    // No actions, no transfers — funds stay staged, status is terminal-success.
-    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
+    assert_eq!(fetch_token_balance(&svm, &a1), 2_400_000);
+    assert_eq!(fetch_token_balance(&svm, &a2), 1_600_000);
+    assert_eq!(
+        fetch_token_balance(&svm, &s.execution_vault),
+        1,
+        "only floor dust may remain after terminal success",
+    );
     assert_eq!(
         status(&svm, &s.fill_receipt),
         ExecutionStatus::ActionsSucceeded
@@ -180,26 +165,106 @@ fn execute_actions_empty_action_config_immediately_succeeds() {
 }
 
 #[test]
-fn execute_actions_partial_bps_sum_leaves_dust_and_succeeds() {
+fn execute_actions_legacy_under_consuming_config_hard_rejects_recoverable() {
+    // A route committed before the full-consumption rule must hard-reject at
+    // execution (receipt stays Finalized, recoverable), not go terminal.
     let mut svm = setup_svm();
-    let r1 = Pubkey::new_unique();
-    let r2 = Pubkey::new_unique();
-    // 60% + 30% = 90% of the vault; the remaining 10% is left staged (recoverable
-    // later). Σ amount_bps < BPS_DENOMINATOR is a valid config, not a failure.
-    let s = stage(&mut svm, vec![spl(r1, 6_000), spl(r2, 3_000)], AMOUNT);
-    let a1 = create_ata(&mut svm, &s.payer, &r1, &s.mint);
-    let a2 = create_ata(&mut svm, &s.payer, &r2, &s.mint);
-
-    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[a1, a2]);
-    send_ix(&mut svm, ix, &s.payer, &[]).expect("under-100% drain succeeds");
-
-    assert_eq!(fetch_token_balance(&svm, &a1), 2_400_000);
-    assert_eq!(fetch_token_balance(&svm, &a2), 1_200_000);
-    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), 400_000);
-    assert_eq!(
-        status(&svm, &s.fill_receipt),
-        ExecutionStatus::ActionsSucceeded
+    let payer = funded_keypair(&mut svm, 100 * SOL);
+    let owner = funded_keypair(&mut svm, 100 * SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+    let recipient = Pubkey::new_unique();
+    let route = seed_route_with_config(
+        &mut svm,
+        &owner.pubkey(),
+        &payer.pubkey(),
+        mint,
+        vec![spl(recipient, 5_000)],
     );
+    let (execution_authority, _) = derive_execution_authority_pda(&route);
+    let execution_vault = create_ata(&mut svm, &payer, &execution_authority, &mint);
+    mint_to(&mut svm, &payer, &payer, &mint, &execution_vault, AMOUNT);
+    let fill_receipt = seed_fill_receipt_with_status(
+        &mut svm,
+        &route,
+        FILL_ID,
+        AMOUNT,
+        ExecutionStatus::Finalized,
+    );
+    let recipient_ata = create_ata(&mut svm, &payer, &recipient, &mint);
+
+    let ix = execute_actions_ix(&payer.pubkey(), &route, FILL_ID, &mint, &[recipient_ata]);
+    let err = send_ix_expect_err(
+        &mut svm,
+        ix,
+        &payer,
+        &[],
+        "an under-consuming committed config must hard-reject",
+    );
+    assert_eq!(err, custom_error(SraError::InvalidActionBpsSum));
+    assert_eq!(fetch_token_balance(&svm, &execution_vault), AMOUNT);
+    assert_eq!(status(&svm, &fill_receipt), ExecutionStatus::Finalized);
+
+    // The receipt never went terminal, so the owner's exit stays open.
+    let owner_ata = create_ata(&mut svm, &payer, &owner.pubkey(), &mint);
+    send_ix(
+        &mut svm,
+        recover_funds_ix(&owner.pubkey(), &route, &FILL_ID, &mint, &owner_ata),
+        &owner,
+        &[],
+    )
+    .expect("legacy route funds stay recoverable");
+    assert_eq!(fetch_token_balance(&svm, &owner_ata), AMOUNT);
+}
+
+#[test]
+fn execute_actions_legacy_oracle_min_out_hard_rejects_recoverable() {
+    // A route committed with an oracle min-out before the create-gate must
+    // still fail closed at execution (receipt Finalized, recoverable).
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 100 * SOL);
+    let owner = funded_keypair(&mut svm, 100 * SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+    let action = SolanaAction::VerifiedCpi {
+        program_id: Pubkey::new_unique(),
+        input_mint: mint,
+        input_bps: 10_000,
+        account_template: AccountTemplate { slots: vec![] },
+        output_mint: Pubkey::new_unique(),
+        min_out: MinOut::Oracle {
+            feed: Pubkey::new_unique(),
+            max_slippage_bps: 50,
+        },
+        allow_permissioned_output: false,
+    };
+    let route = seed_route_with_config(
+        &mut svm,
+        &owner.pubkey(),
+        &payer.pubkey(),
+        mint,
+        vec![action],
+    );
+    let (execution_authority, _) = derive_execution_authority_pda(&route);
+    let execution_vault = create_ata(&mut svm, &payer, &execution_authority, &mint);
+    mint_to(&mut svm, &payer, &payer, &mint, &execution_vault, AMOUNT);
+    let fill_receipt = seed_fill_receipt_with_status(
+        &mut svm,
+        &route,
+        FILL_ID,
+        AMOUNT,
+        ExecutionStatus::Finalized,
+    );
+
+    let ix = execute_actions_ix(&payer.pubkey(), &route, FILL_ID, &mint, &[]);
+    let err = send_ix_expect_err(
+        &mut svm,
+        ix,
+        &payer,
+        &[],
+        "a committed oracle min-out must fail closed at execution",
+    );
+    assert_eq!(err, custom_error(SraError::UnsupportedAction));
+    assert_eq!(fetch_token_balance(&svm, &execution_vault), AMOUNT);
+    assert_eq!(status(&svm, &fill_receipt), ExecutionStatus::Finalized);
 }
 
 #[test]
@@ -441,27 +506,6 @@ fn execute_actions_spl_transfer_non_writable_recipient_rejected() {
     );
     assert_eq!(err, custom_error(SraError::ActionAccountMismatch));
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
-}
-
-#[test]
-fn execute_actions_verified_cpi_action_unsupported() {
-    let mut svm = setup_svm();
-    let s = stage(&mut svm, vec![verified_cpi()], AMOUNT);
-
-    let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[]);
-    let err = send_ix_expect_err(
-        &mut svm,
-        ix,
-        &s.payer,
-        &[],
-        "VerifiedCpi not executable yet",
-    );
-    assert_eq!(err, custom_error(SraError::UnsupportedAction));
-
-    // Fail-closed: funds stay, receipt stays Finalized (re-executable once the
-    // VerifiedCpi engine ships — not a terminal ActionsFailed).
-    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
-    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
 }
 
 #[test]

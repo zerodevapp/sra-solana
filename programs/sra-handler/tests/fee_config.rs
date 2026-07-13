@@ -22,7 +22,13 @@ fn setup_fee_config(svm: &mut LiteSVM, payer: &Keypair) -> Keypair {
 /// Fee config + the global protocol fee entry.
 fn setup_with_protocol_fee(svm: &mut LiteSVM, payer: &Keypair) -> Keypair {
     let admin = setup_fee_config(svm, payer);
-    let ix = set_protocol_fee_ix(&payer.pubkey(), &admin.pubkey(), DEFAULT_FEE_BPS, false);
+    let ix = set_protocol_fee_ix(
+        &payer.pubkey(),
+        &admin.pubkey(),
+        DEFAULT_FEE_BPS,
+        false,
+        false,
+    );
     send_ix(svm, ix, payer, &[&admin]).expect("set_protocol_fee should succeed");
     admin
 }
@@ -164,19 +170,27 @@ fn set_protocol_fee_happy_path() {
     let admin = setup_fee_config(&mut svm, &payer);
     let (protocol_fee_config, bump) = derive_protocol_fee_pda();
 
-    let ix = set_protocol_fee_ix(&payer.pubkey(), &admin.pubkey(), DEFAULT_FEE_BPS, true);
+    let ix = set_protocol_fee_ix(
+        &payer.pubkey(),
+        &admin.pubkey(),
+        DEFAULT_FEE_BPS,
+        true,
+        true,
+    );
     let meta = send_ix_with_meta(&mut svm, ix, &payer, &[&admin])
         .expect("set_protocol_fee should succeed");
 
     let stored = fetch_protocol_fee_config(&svm, &protocol_fee_config);
     assert_eq!(stored.default_fee_bps, DEFAULT_FEE_BPS);
     assert!(stored.allow_override);
+    assert!(stored.allow_sponsored);
     assert_eq!(stored.bump, bump);
 
     let ev = extract_anchor_event::<sra_handler::events::ProtocolFeeUpdated>(&meta.logs)
         .expect("ProtocolFeeUpdated event must be emitted");
     assert_eq!(ev.default_fee_bps, DEFAULT_FEE_BPS);
     assert!(ev.allow_override);
+    assert!(ev.allow_sponsored);
 }
 
 #[test]
@@ -185,7 +199,13 @@ fn set_protocol_fee_over_max_rejected() {
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let admin = setup_fee_config(&mut svm, &payer);
 
-    let ix = set_protocol_fee_ix(&payer.pubkey(), &admin.pubkey(), MAX_FEE_BPS + 1, false);
+    let ix = set_protocol_fee_ix(
+        &payer.pubkey(),
+        &admin.pubkey(),
+        MAX_FEE_BPS + 1,
+        false,
+        false,
+    );
     let err = send_ix_expect_err(
         &mut svm,
         ix,
@@ -203,12 +223,19 @@ fn set_protocol_fee_upsert_updates() {
     let admin = setup_with_protocol_fee(&mut svm, &payer);
     let (protocol_fee_config, _) = derive_protocol_fee_pda();
 
-    let ix = set_protocol_fee_ix(&payer.pubkey(), &admin.pubkey(), DEFAULT_FEE_BPS + 5, true);
+    let ix = set_protocol_fee_ix(
+        &payer.pubkey(),
+        &admin.pubkey(),
+        DEFAULT_FEE_BPS + 5,
+        true,
+        true,
+    );
     send_ix(&mut svm, ix, &payer, &[&admin]).expect("re-setting an existing app must update");
 
     let stored = fetch_protocol_fee_config(&svm, &protocol_fee_config);
     assert_eq!(stored.default_fee_bps, DEFAULT_FEE_BPS + 5);
     assert!(stored.allow_override);
+    assert!(stored.allow_sponsored);
 }
 
 #[test]
@@ -218,7 +245,13 @@ fn set_protocol_fee_non_admin_rejected() {
     let _admin = setup_fee_config(&mut svm, &payer);
     let attacker = funded_keypair(&mut svm, SOL);
 
-    let ix = set_protocol_fee_ix(&payer.pubkey(), &attacker.pubkey(), DEFAULT_FEE_BPS, false);
+    let ix = set_protocol_fee_ix(
+        &payer.pubkey(),
+        &attacker.pubkey(),
+        DEFAULT_FEE_BPS,
+        false,
+        false,
+    );
     let err = send_ix_expect_err(
         &mut svm,
         ix,
@@ -574,7 +607,13 @@ fn old_admin_loses_rights_after_transfer() {
     let ix = accept_admin_ix(&new_admin.pubkey());
     send_ix(&mut svm, ix, &payer, &[&new_admin]).expect("accept_admin should succeed");
 
-    let ix = set_protocol_fee_ix(&payer.pubkey(), &admin.pubkey(), DEFAULT_FEE_BPS, false);
+    let ix = set_protocol_fee_ix(
+        &payer.pubkey(),
+        &admin.pubkey(),
+        DEFAULT_FEE_BPS,
+        false,
+        false,
+    );
     let err = send_ix_expect_err(
         &mut svm,
         ix,
@@ -597,7 +636,7 @@ fn fee_bps_max_boundary_succeeds() {
     let admin = setup_fee_config(&mut svm, &payer);
     let mint = Pubkey::new_unique();
 
-    let ix = set_protocol_fee_ix(&payer.pubkey(), &admin.pubkey(), MAX_FEE_BPS, false);
+    let ix = set_protocol_fee_ix(&payer.pubkey(), &admin.pubkey(), MAX_FEE_BPS, false, false);
     send_ix(&mut svm, ix, &payer, &[&admin]).expect("default_fee_bps == MAX must be accepted");
 
     let ix = set_asset_fee_tier_ix(
@@ -628,12 +667,19 @@ fn protocol_fee_remove_then_set_round_trips() {
     let ix = remove_protocol_fee_ix(&admin.pubkey());
     send_ix(&mut svm, ix, &payer, &[&admin]).expect("remove should succeed");
 
-    let ix = set_protocol_fee_ix(&payer.pubkey(), &admin.pubkey(), DEFAULT_FEE_BPS + 1, true);
+    let ix = set_protocol_fee_ix(
+        &payer.pubkey(),
+        &admin.pubkey(),
+        DEFAULT_FEE_BPS + 1,
+        true,
+        true,
+    );
     send_ix(&mut svm, ix, &payer, &[&admin]).expect("re-create after close must succeed");
 
     let stored = fetch_protocol_fee_config(&svm, &protocol_fee_config);
     assert_eq!(stored.default_fee_bps, DEFAULT_FEE_BPS + 1);
     assert!(stored.allow_override);
+    assert!(stored.allow_sponsored);
     assert_eq!(stored.bump, bump);
 }
 
@@ -694,7 +740,13 @@ fn asset_fee_tier_survives_and_revives_across_protocol_fee_removal() {
         "tier must survive the config removal (dangling, inert)"
     );
 
-    let ix = set_protocol_fee_ix(&payer.pubkey(), &admin.pubkey(), DEFAULT_FEE_BPS, false);
+    let ix = set_protocol_fee_ix(
+        &payer.pubkey(),
+        &admin.pubkey(),
+        DEFAULT_FEE_BPS,
+        false,
+        false,
+    );
     send_ix(&mut svm, ix, &payer, &[&admin]).expect("re-register should succeed");
 
     let revived = fetch_asset_fee_tier(&svm, &asset_fee_tier);

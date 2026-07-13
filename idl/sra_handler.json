@@ -2107,6 +2107,10 @@
         {
           "name": "allow_override",
           "type": "bool"
+        },
+        {
+          "name": "allow_sponsored",
+          "type": "bool"
         }
       ]
     },
@@ -4023,7 +4027,8 @@
           {
             "name": "is_sponsor",
             "docs": [
-              "Owner-signed assertion that skips the protocol fee."
+              "Owner-signed assertion that skips the protocol fee; honored only when",
+              "the fee admin enabled `allow_sponsored`, else `SponsoredNotAllowed`."
             ],
             "type": "bool"
           },
@@ -4062,6 +4067,13 @@
             "type": "bool"
           },
           {
+            "name": "allow_sponsored",
+            "docs": [
+              "Honor a per-deposit `is_sponsor` fee skip (EVM `allowSponsored`)."
+            ],
+            "type": "bool"
+          },
+          {
             "name": "bump",
             "type": "u8"
           }
@@ -4086,6 +4098,10 @@
           },
           {
             "name": "allow_override",
+            "type": "bool"
+          },
+          {
+            "name": "allow_sponsored",
             "type": "bool"
           }
         ]

@@ -51,7 +51,9 @@ pub enum FixedRole {
 pub enum MinOut {
     /// Primary: an ed25519-signed quote bound to the fill/action context.
     SignedQuote { quoter: Pubkey },
-    /// Fallback: an on-chain price feed with a slippage tolerance.
+    /// Reserved: an on-chain price feed with a slippage tolerance. Not yet
+    /// executable — refused at `create_route` until the oracle path is wired
+    /// (restore feed/slippage validation when lifting the gate).
     Oracle { feed: Pubkey, max_slippage_bps: u16 },
 }
 
@@ -63,13 +65,18 @@ impl AccountTemplate {
 
 /// Validates a route's committed action list — the single fail-fast gate before
 /// the list is folded into the route's identity hash at `create_route`.
+///
+/// The committed bps (SplTransfer amounts + VerifiedCpi inputs, fractions of
+/// one vault snapshot) must sum to exactly 100%: under strands funds past
+/// terminal success, over can never execute; only floor dust may remain.
 pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
     require!(
         actions.len() <= MAX_ACTION_IDXS,
         SraError::TooManyActionIdxs
     );
 
-    let mut spl_transfer_bps: u32 = 0;
+    // u32 sum of ≤ MAX_ACTION_IDXS u16 values cannot overflow.
+    let mut total_bps: u32 = 0;
     for action in actions {
         match action {
             SolanaAction::SplTransfer {
@@ -80,8 +87,7 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
                     *recipient != Pubkey::default(),
                     SraError::InvalidActionConfig
                 );
-                // u32 sum of ≤ MAX_ACTION_IDXS u16 values cannot overflow.
-                spl_transfer_bps += *amount_bps as u32;
+                total_bps += *amount_bps as u32;
             }
             SolanaAction::VerifiedCpi {
                 program_id,
@@ -98,8 +104,6 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
                         && *output_mint != Pubkey::default(),
                     SraError::InvalidActionConfig
                 );
-                // input_bps is a fraction of the vault; > 100% is a dead route.
-                require!(*input_bps <= BPS_DENOMINATOR, SraError::InvalidActionConfig);
                 // Bound the committed template so create/fill hashing + slot
                 // resolution stay cheap (#[max_len] only sizes InitSpace).
                 require!(
@@ -116,29 +120,25 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
                         && account_template.pins(FixedRole::OutputMint),
                     SraError::InvalidActionConfig
                 );
-                // The min-out reference must name a real signer/feed.
                 match min_out {
+                    // The min-out reference must name a real signer.
                     MinOut::SignedQuote { quoter } => {
                         require!(*quoter != Pubkey::default(), SraError::InvalidActionConfig);
                     }
-                    MinOut::Oracle {
-                        feed,
-                        max_slippage_bps,
-                    } => {
-                        require!(*feed != Pubkey::default(), SraError::InvalidActionConfig);
-                        require!(
-                            *max_slippage_bps <= BPS_DENOMINATOR,
-                            SraError::InvalidActionConfig
-                        );
+                    // Not executable by the engine — refuse at commit time,
+                    // not after funds land.
+                    MinOut::Oracle { .. } => {
+                        return Err(SraError::UnsupportedAction.into());
                     }
                 }
+                total_bps += *input_bps as u32;
             }
         }
     }
 
     require!(
-        spl_transfer_bps <= BPS_DENOMINATOR as u32,
-        SraError::ActionBpsSumExceeded
+        total_bps == BPS_DENOMINATOR as u32,
+        SraError::InvalidActionBpsSum
     );
 
     Ok(())
@@ -218,15 +218,27 @@ mod tests {
         assert_eq!(MinOut::try_from_slice(&bytes).unwrap(), m);
     }
 
+    fn verified_cpi_with_bps(input_bps: u16) -> SolanaAction {
+        let mut action = valid_verified_cpi();
+        if let SolanaAction::VerifiedCpi { input_bps: bps, .. } = &mut action {
+            *bps = input_bps;
+        }
+        action
+    }
+
     #[test]
-    fn validate_action_config_accepts_mixed_valid_config() {
-        let actions = vec![valid_spl_transfer(4_000), valid_verified_cpi()];
+    fn validate_action_config_accepts_mixed_full_consumption_config() {
+        let actions = vec![valid_spl_transfer(4_000), verified_cpi_with_bps(6_000)];
         assert!(validate_action_config(&actions).is_ok());
     }
 
     #[test]
-    fn validate_action_config_empty_accepted() {
-        assert!(validate_action_config(&[]).is_ok());
+    fn validate_action_config_empty_rejected() {
+        // An empty commitment would strand the whole fill past terminal success.
+        assert_eq!(
+            validate_action_config(&[]).unwrap_err(),
+            SraError::InvalidActionBpsSum.into()
+        );
     }
 
     #[test]
@@ -243,7 +255,16 @@ mod tests {
         let actions = vec![valid_spl_transfer(6_000), valid_spl_transfer(4_001)];
         assert_eq!(
             validate_action_config(&actions).unwrap_err(),
-            SraError::ActionBpsSumExceeded.into()
+            SraError::InvalidActionBpsSum.into()
+        );
+    }
+
+    #[test]
+    fn validate_action_config_spl_bps_sum_under_10000_rejected() {
+        let actions = vec![valid_spl_transfer(6_000), valid_spl_transfer(3_999)];
+        assert_eq!(
+            validate_action_config(&actions).unwrap_err(),
+            SraError::InvalidActionBpsSum.into()
         );
     }
 
@@ -251,6 +272,25 @@ mod tests {
     fn validate_action_config_spl_bps_sum_exactly_10000_accepted() {
         let actions = vec![valid_spl_transfer(6_000), valid_spl_transfer(4_000)];
         assert!(validate_action_config(&actions).is_ok());
+    }
+
+    #[test]
+    fn validate_action_config_mixed_bps_sum_over_10000_rejected() {
+        // Both variants draw from the same snapshot: combined > 100% can never execute.
+        let actions = vec![valid_spl_transfer(4_000), valid_verified_cpi()];
+        assert_eq!(
+            validate_action_config(&actions).unwrap_err(),
+            SraError::InvalidActionBpsSum.into()
+        );
+    }
+
+    #[test]
+    fn validate_action_config_lone_verified_cpi_under_10000_rejected() {
+        let actions = vec![verified_cpi_with_bps(5_000)];
+        assert_eq!(
+            validate_action_config(&actions).unwrap_err(),
+            SraError::InvalidActionBpsSum.into()
+        );
     }
 
     #[test]
@@ -343,23 +383,15 @@ mod tests {
 
     #[test]
     fn validate_action_config_verified_cpi_input_bps_over_10000_rejected() {
-        let mut action = valid_verified_cpi();
-        if let SolanaAction::VerifiedCpi { input_bps, .. } = &mut action {
-            *input_bps = 10_001;
-        }
         assert_eq!(
-            validate_action_config(&[action]).unwrap_err(),
-            SraError::InvalidActionConfig.into()
+            validate_action_config(&[verified_cpi_with_bps(10_001)]).unwrap_err(),
+            SraError::InvalidActionBpsSum.into()
         );
     }
 
     #[test]
     fn validate_action_config_verified_cpi_input_bps_max_boundary_accepted() {
-        let mut action = valid_verified_cpi();
-        if let SolanaAction::VerifiedCpi { input_bps, .. } = &mut action {
-            *input_bps = 10_000;
-        }
-        assert!(validate_action_config(&[action]).is_ok());
+        assert!(validate_action_config(&[verified_cpi_with_bps(10_000)]).is_ok());
     }
 
     fn pinned_slots_plus_free(free: usize) -> Vec<SlotRole> {
@@ -415,32 +447,18 @@ mod tests {
     }
 
     #[test]
-    fn validate_action_config_verified_cpi_zero_oracle_feed_rejected() {
+    fn validate_action_config_oracle_min_out_rejected_at_create() {
+        // Even a well-formed oracle reference is refused at create.
         let mut action = valid_verified_cpi();
         if let SolanaAction::VerifiedCpi { min_out, .. } = &mut action {
             *min_out = MinOut::Oracle {
-                feed: Pubkey::default(),
+                feed: Pubkey::new_unique(),
                 max_slippage_bps: 50,
             };
         }
         assert_eq!(
             validate_action_config(&[action]).unwrap_err(),
-            SraError::InvalidActionConfig.into()
-        );
-    }
-
-    #[test]
-    fn validate_action_config_verified_cpi_oracle_slippage_over_10000_rejected() {
-        let mut action = valid_verified_cpi();
-        if let SolanaAction::VerifiedCpi { min_out, .. } = &mut action {
-            *min_out = MinOut::Oracle {
-                feed: Pubkey::new_unique(),
-                max_slippage_bps: 10_001,
-            };
-        }
-        assert_eq!(
-            validate_action_config(&[action]).unwrap_err(),
-            SraError::InvalidActionConfig.into()
+            SraError::UnsupportedAction.into()
         );
     }
 
@@ -453,9 +471,8 @@ mod tests {
                 slots: slots.to_vec(),
             },
             output_mint: Pubkey::new_unique(),
-            min_out: MinOut::Oracle {
-                feed: Pubkey::new_unique(),
-                max_slippage_bps: 50,
+            min_out: MinOut::SignedQuote {
+                quoter: Pubkey::new_unique(),
             },
             allow_permissioned_output: false,
         };

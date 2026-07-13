@@ -22,6 +22,8 @@ pub struct ProtocolFeeConfig {
     pub default_fee_bps: u16,
     /// Honor a per-deposit bps override (EVM `allowOverride`).
     pub allow_override: bool,
+    /// Honor a per-deposit `is_sponsor` fee skip (EVM `allowSponsored`).
+    pub allow_sponsored: bool,
     pub bump: u8,
 }
 
@@ -52,8 +54,8 @@ mod tests {
 
     #[test]
     fn protocol_fee_config_init_space() {
-        // 2 default_fee_bps + 1 allow_override + 1 bump = 4
-        assert_eq!(ProtocolFeeConfig::INIT_SPACE, 4);
+        // 2 default_fee_bps + 1 allow_override + 1 allow_sponsored + 1 bump = 5
+        assert_eq!(ProtocolFeeConfig::INIT_SPACE, 5);
     }
 
     #[test]

@@ -109,17 +109,20 @@ pub(crate) fn set_protocol_fee_handler(
     ctx: Context<SetProtocolFee>,
     default_fee_bps: u16,
     allow_override: bool,
+    allow_sponsored: bool,
 ) -> Result<()> {
     require!(default_fee_bps <= MAX_FEE_BPS, SraError::FeeTooHigh);
 
     let protocol_fee_config = &mut ctx.accounts.protocol_fee_config;
     protocol_fee_config.default_fee_bps = default_fee_bps;
     protocol_fee_config.allow_override = allow_override;
+    protocol_fee_config.allow_sponsored = allow_sponsored;
     protocol_fee_config.bump = ctx.bumps.protocol_fee_config;
 
     emit!(ProtocolFeeUpdated {
         default_fee_bps: protocol_fee_config.default_fee_bps,
         allow_override: protocol_fee_config.allow_override,
+        allow_sponsored: protocol_fee_config.allow_sponsored,
     });
 
     Ok(())

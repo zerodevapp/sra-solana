@@ -27,15 +27,17 @@ pub const MAX_TEMPLATE_SLOTS: usize = 32;
 /// Matches EVM `BPS_DENOMINATOR` in Constants.sol.
 pub const BPS_DENOMINATOR: u16 = 10_000;
 
-/// Max fee in basis points (10%). Applies to both protocol and app fees.
-/// Matches EVM `require(_feeBps <= 1000)` in BaseHandler.sol:267,275.
+/// Max fee in basis points (10%). Bounds the default fee, the per-deposit
+/// override, and per-mint tier brackets. Matches the EVM `MAX_FEE_BPS` bound
+/// enforced in BaseHandler.sol `setProtocolFee` / `setAssetFeeConfigs`.
 pub const MAX_FEE_BPS: u16 = 1_000;
 
 /// Sentinel for "no per-deposit fee override".
 pub const NO_FEE_BPS_OVERRIDE: u16 = u16::MAX;
 
 /// Max slippage in basis points (100%).
-/// Matches EVM `require(slippageBps <= BPS_DENOMINATOR)` in SRAHandler.sol:78.
+/// Matches the EVM `slippageBps <= BPS_DENOMINATOR` bound enforced in
+/// SRAHandler.sol `_onInstall` / `setSlippagePolicy`.
 pub const MAX_SLIPPAGE_BPS: u16 = BPS_DENOMINATOR;
 
 /// Solana chain ID as registered in the Across protocol — MUST equal the

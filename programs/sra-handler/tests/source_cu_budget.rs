@@ -99,6 +99,7 @@ fn enable_protocol_fee(svm: &mut LiteSVM, fx: &ValidatePrepareFixture) -> Pubkey
                 &fx.fee_admin.pubkey(),
                 DEFAULT_FEE_BPS,
                 false,
+                false,
             ),
         ],
         &fx.payer,

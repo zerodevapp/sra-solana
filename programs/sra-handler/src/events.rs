@@ -41,6 +41,7 @@ pub struct FeeRecipientUpdated {
 pub struct ProtocolFeeUpdated {
     pub default_fee_bps: u16,
     pub allow_override: bool,
+    pub allow_sponsored: bool,
 }
 
 #[event]

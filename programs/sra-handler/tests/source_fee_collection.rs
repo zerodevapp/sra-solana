@@ -43,6 +43,7 @@ fn enable_protocol_fee(
     fx: &ValidatePrepareFixture,
     default_fee_bps: u16,
     allow_override: bool,
+    allow_sponsored: bool,
 ) -> Pubkey {
     let recipient = Pubkey::new_unique();
     send_instructions(
@@ -54,6 +55,7 @@ fn enable_protocol_fee(
                 &fx.fee_admin.pubkey(),
                 default_fee_bps,
                 allow_override,
+                allow_sponsored,
             ),
         ],
         &fx.payer,
@@ -108,7 +110,7 @@ fn assert_deposit_state_untouched(svm: &LiteSVM, fx: &ValidatePrepareFixture, fe
 fn fee_collected_happy_path() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false);
+    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     let params = fee_params(&fx, DEFAULT_FEE);
     let meta = fx
@@ -155,7 +157,7 @@ fn fee_collected_happy_path() {
 fn fee_mismatch_rejected_preserves_state() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false);
+    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     let result = fx.invoke_with_fee_ata(&mut svm, fee_params(&fx, DEFAULT_FEE - 1), Some(fee_ata));
 
@@ -174,7 +176,7 @@ fn fee_mismatch_rejected_preserves_state() {
 fn stale_fee_after_admin_update_fails_closed() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false);
+    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     // Client computes against 30 bps...
     let params = fee_params(&fx, DEFAULT_FEE);
@@ -186,6 +188,7 @@ fn stale_fee_after_admin_update_fails_closed() {
             &fx.payer.pubkey(),
             &fx.fee_admin.pubkey(),
             50,
+            false,
             false,
         )],
         &fx.payer,
@@ -201,10 +204,10 @@ fn stale_fee_after_admin_update_fails_closed() {
 }
 
 #[test]
-fn sponsor_skips_fee() {
+fn sponsor_skips_fee_when_admin_allows() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false);
+    enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, true);
 
     let mut params = fee_params(&fx, 0);
     params.is_sponsor = true;
@@ -220,10 +223,45 @@ fn sponsor_skips_fee() {
 }
 
 #[test]
+fn sponsor_rejected_when_not_admin_allowed() {
+    // A depositor cannot self-declare sponsorship without the admin flag.
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
+
+    let mut params = fee_params(&fx, 0);
+    params.is_sponsor = true;
+
+    expect_custom_error(
+        fx.invoke_with_fee_ata(&mut svm, params, Some(fee_ata)),
+        SraError::SponsoredNotAllowed.into(),
+        "self-declared sponsorship without the admin flag must fail closed",
+    );
+    assert_deposit_state_untouched(&svm, &fx, &fee_ata);
+}
+
+#[test]
+fn sponsor_rejected_when_protocol_fee_config_absent() {
+    // No ProtocolFeeConfig PDA = sponsorship disallowed (EVM unset storage),
+    // even though a non-sponsored deposit would pay zero here anyway.
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+
+    let mut params = fee_params(&fx, 0);
+    params.is_sponsor = true;
+
+    expect_custom_error(
+        fx.invoke_with_fee_ata(&mut svm, params, None),
+        SraError::SponsoredNotAllowed.into(),
+        "sponsorship with no protocol fee config must fail closed",
+    );
+}
+
+#[test]
 fn override_honored_when_allowed() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, true);
+    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, true, false);
 
     let mut params = fee_params(&fx, 5_000); // 1_000_000 * 50 / 10_000
     params.protocol_fee_bps_override = 50;
@@ -239,7 +277,7 @@ fn override_honored_when_allowed() {
 fn override_without_flag_silently_ignored() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false);
+    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     // EVM parity: with allowOverride=false the override is ignored, not
     // refused — the deposit succeeds charging the DEFAULT rate.
@@ -260,7 +298,7 @@ fn override_without_flag_silently_ignored() {
 fn override_above_max_rejected_when_allowed() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, true);
+    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, true, false);
 
     let mut params = fee_params(&fx, 0);
     params.protocol_fee_bps_override = 1_001; // MAX_FEE_BPS + 1
@@ -276,7 +314,7 @@ fn override_above_max_rejected_when_allowed() {
 fn asset_tier_applied_over_default() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false);
+    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
     send_instructions(
         &mut svm,
         &[set_asset_fee_tier_ix(
@@ -307,7 +345,7 @@ fn asset_tier_applied_over_default() {
 fn removed_protocol_fee_charges_zero() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false);
+    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
     send_instructions(
         &mut svm,
         &[remove_protocol_fee_ix(&fx.fee_admin.pubkey())],
@@ -338,6 +376,7 @@ fn recipient_unset_charges_zero() {
             &fx.fee_admin.pubkey(),
             DEFAULT_FEE_BPS,
             false,
+            false,
         )],
         &fx.payer,
         &[&fx.fee_admin],
@@ -354,7 +393,7 @@ fn recipient_unset_charges_zero() {
 fn fee_ata_missing_when_fee_positive_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false);
+    enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     expect_custom_error(
         fx.invoke_with_fee_ata(&mut svm, fee_params(&fx, DEFAULT_FEE), None),
@@ -367,7 +406,7 @@ fn fee_ata_missing_when_fee_positive_rejected() {
 fn fee_ata_substitution_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false);
+    enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     // Wrong authority: the owner's own ATA (exists, right mint) — the
     // associated_token::authority binding to the COMMITTED fee recipient
@@ -395,7 +434,7 @@ fn fee_ata_substitution_rejected() {
 fn fee_config_pda_substitution_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false);
+    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     // The three fee accounts are bound to committed state — substitution
     // (and therefore claimed absence) is structurally impossible. This pins
@@ -436,7 +475,7 @@ fn fee_config_pda_substitution_rejected() {
 fn slippage_floors_on_gross_with_fee() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false);
+    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     // Gross floor at 50 bps slippage = 995_000. Net (997_000) would floor at
     // 992_015 — an output of 994_000 discriminates: it clears the net-derived
