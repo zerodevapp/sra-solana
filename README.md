@@ -34,8 +34,8 @@ A source-side deposit currently ships as a 2-IX versioned transaction (`validate
 Local program IDs (see `Anchor.toml`):
 
 ```
-sra_handler         Gte7LViTnE2UixBF59Xfu2sSqcmHhMNANj42yUkYpkdo
-sra_across_adapter  9xsKH8vdhYbNy9hYEp4e9svbMRjGWpBo2Zbt8NWFnj2D
+sra_handler         2U8tvBcQjZx8r6RG4r1pnxdG9LfJF4Ya4hZsNGRmhqt9
+sra_across_adapter  CunqmNJVjTxR8f7bxEXsnX7LCtN4bpPgVqzKq9Tw1eqp
 ```
 
 ## Project layout

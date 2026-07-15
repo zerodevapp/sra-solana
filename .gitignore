@@ -9,3 +9,4 @@ test-ledger
 .worktrees/
 docs/
 deploy/keys/*.json
+.env
