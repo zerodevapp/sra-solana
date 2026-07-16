@@ -129,18 +129,17 @@ jobs:
           cat /tmp/surfpool.log
           exit 1
 
-      - name: Wait for local program auto-deploy
+      - name: Install branch programs
         run: |
-          for i in $(seq 1 60); do
-            echo "[surfpool-ci] Waiting for local program auto-deploy (attempt ${i}/60) for 2U8tvBcQjZx8r6RG4r1pnxdG9LfJF4Ya4hZsNGRmhqt9 and CunqmNJVjTxR8f7bxEXsnX7LCtN4bpPgVqzKq9Tw1eqp"
-            solana account --url http://127.0.0.1:8899 2U8tvBcQjZx8r6RG4r1pnxdG9LfJF4Ya4hZsNGRmhqt9 >/dev/null 2>&1 && \
-            solana account --url http://127.0.0.1:8899 CunqmNJVjTxR8f7bxEXsnX7LCtN4bpPgVqzKq9Tw1eqp >/dev/null 2>&1 && \
-            echo "[surfpool-ci] Local programs auto-deployed on attempt ${i}/60" && exit 0
-            sleep 2
+          authority=$(solana address)
+          for program_id in 2U8tvBcQjZx8r6RG4r1pnxdG9LfJF4Ya4hZsNGRmhqt9 CunqmNJVjTxR8f7bxEXsnX7LCtN4bpPgVqzKq9Tw1eqp; do
+            curl -sf http://127.0.0.1:8899 \
+              -H 'content-type: application/json' \
+              -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"surfnet_setProgramAuthority\",\"params\":[\"${program_id}\",\"${authority}\"]}" \
+              | jq -e 'has("result")' >/dev/null
           done
-          echo "[surfpool-ci] Timed out waiting for local program auto-deploy; dumping /tmp/surfpool.log"
-          cat /tmp/surfpool.log
-          exit 1
+          NO_DNA=1 solana program deploy --use-rpc --url http://127.0.0.1:8899 --program-id 2U8tvBcQjZx8r6RG4r1pnxdG9LfJF4Ya4hZsNGRmhqt9 --upgrade-authority ~/.config/solana/id.json target/deploy/sra_handler.so
+          NO_DNA=1 solana program deploy --use-rpc --url http://127.0.0.1:8899 --program-id CunqmNJVjTxR8f7bxEXsnX7LCtN4bpPgVqzKq9Tw1eqp --upgrade-authority ~/.config/solana/id.json target/deploy/sra_across_adapter.so
 
       - name: Run source Surfpool E2E
         run: NO_DNA=1 cargo test -p sra-handler --test source_e2e_surfpool -- --ignored --nocapture

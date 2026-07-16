@@ -100,8 +100,6 @@ fn validate_and_prepare_happy_path() {
     assert_eq!(ev.input_amount, INPUT);
     assert_eq!(ev.output_amount, u256_from_u64(OUTPUT_WITHIN_SLIPPAGE));
     assert_eq!(ev.target_chain_id, params.target_chain_id);
-    assert_eq!(ev.target_handler, params.target_handler);
-    assert_eq!(ev.target_adapter, params.target_adapter);
     assert_eq!(ev.recipient, params.recipient);
     assert_eq!(ev.target_token, params.target_token);
 }
@@ -1149,14 +1147,8 @@ fn validate_and_prepare_route_mismatch_rejected() {
     // compromised tx-builder must not be able to redirect a deposit the way it
     // could on a Solana port that left routing as free per-deposit input.
     type RouteMutator = fn(&mut PrepareParams);
-    let cases: [(&str, RouteMutator); 5] = [
+    let cases: [(&str, RouteMutator); 3] = [
         ("target_chain_id", |params| params.target_chain_id = 10),
-        ("target_handler", |params| {
-            params.target_handler = evm_bytes32(0x12)
-        }),
-        ("target_adapter", |params| {
-            params.target_adapter = evm_bytes32(0x23)
-        }),
         ("recipient", |params| params.recipient = evm_bytes32(0x34)),
         ("target_token", |params| {
             params.target_token = evm_bytes32(0xBC)

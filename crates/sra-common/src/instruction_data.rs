@@ -43,8 +43,6 @@ mod tests {
             input_amount: 1,
             output_amount: crate::abi::u256_from_u64(2),
             target_chain_id: 42_161,
-            target_handler: [4u8; 32],
-            target_adapter: [5u8; 32],
             recipient: [6u8; 32],
             target_token: [3u8; 32],
             protocol_fee_amount: 0,

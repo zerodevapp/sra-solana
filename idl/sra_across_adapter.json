@@ -1065,24 +1065,6 @@
             "type": "u64"
           },
           {
-            "name": "target_handler",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "target_adapter",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
             "name": "recipient",
             "type": {
               "array": [

@@ -216,7 +216,7 @@ These are the properties the security of the destination side rests on. Each is 
 ## 8. Cross-chain encoding
 
 - **Chain ID.** `SOLANA_CHAIN_ID = 34_268_394_551_451` (Across's SVM chain identifier). It is bound into every relay hash and every signed quote. It must match the Across SVM SpokePool's configured chain ID. (An earlier incorrect value was fixed; confirm the constant, not any external doc.)
-- **EVM wire words** (`sra-common/src/abi.rs`). Exposes a single helper, `u256_from_u64`, which produces the big-endian 32-byte word for the Across `output_amount` wire field. There is **no SRA message encoder**: the Across deposit carries an **empty message envelope** (the destination executes via its own instructions, not an EVM callback), and `recipient` / `target_handler` are identity-committed in the SRA config hash but never transmitted — the EVM side is address-committed symmetrically.
+- **EVM wire words** (`sra-common/src/abi.rs`). Exposes a single helper, `u256_from_u64`, which produces the big-endian 32-byte word for the Across `output_amount` wire field. There is **no SRA message encoder**: the Across deposit carries an **empty message envelope** (the destination executes via its own instructions, not an EVM callback), while `recipient` is identity-committed in the SRA config hash and transmitted directly as the Across destination recipient.
 - **Across SpokePool** is pinned by `ACROSS_SPOKE_POOL_ID` (`DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru`).
 
 ---

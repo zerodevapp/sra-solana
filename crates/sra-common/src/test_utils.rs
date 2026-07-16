@@ -67,8 +67,6 @@ pub fn sample_prepare_params() -> PrepareParams {
         123,
         crate::abi::u256_from_u64(456),
         42_161,
-        evm_bytes32(0x11),
-        evm_bytes32(0x22),
         evm_bytes32(0x33),
         evm_bytes32(0xAB),
         0,

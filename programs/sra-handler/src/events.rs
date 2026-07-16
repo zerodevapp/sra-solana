@@ -172,12 +172,6 @@ pub struct DepositPrepared {
     pub output_amount: [u8; 32],
     /// Runtime target chain id from `PrepareParams`.
     pub target_chain_id: u64,
-    /// Opaque 32-byte target handler identifier. EVM handlers are left-padded
-    /// addresses; non-EVM targets may use all 32 bytes.
-    pub target_handler: [u8; 32],
-    /// Opaque 32-byte target adapter identifier. EVM adapters are left-padded
-    /// addresses; non-EVM targets may use all 32 bytes.
-    pub target_adapter: [u8; 32],
     /// Destination account / recipient identifier.
     pub recipient: [u8; 32],
     /// Per-deposit target token identifier. Stored as raw bytes32 so Solana

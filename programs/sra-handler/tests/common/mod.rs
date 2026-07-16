@@ -206,8 +206,6 @@ pub fn sample_handler_data(address_book_root: Pubkey) -> SourceHandlerData {
     SourceHandlerData {
         address_book_root,
         target_chain_id: 42_161,
-        target_handler: evm_bytes32(0x11),
-        target_adapter: evm_bytes32(0x22),
         recipient: evm_bytes32(0x33),
         target_token: sample_target_token(),
         allowed_slippage_bps: 50,
@@ -220,8 +218,6 @@ pub fn sample_prepare_params(target_token: [u8; 32]) -> PrepareParams {
         1_000_000,
         u256_from_u64(999_500),
         42_161,
-        evm_bytes32(0x11),
-        evm_bytes32(0x22),
         evm_bytes32(0x33),
         target_token,
         0,
@@ -1203,8 +1199,6 @@ impl ValidatePrepareFixture {
         let handler_data = SourceHandlerData {
             address_book_root,
             target_chain_id,
-            target_handler: evm_bytes32(0x11),
-            target_adapter: evm_bytes32(0x22),
             recipient: evm_bytes32(0x33),
             target_token,
             allowed_slippage_bps,

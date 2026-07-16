@@ -8,8 +8,8 @@ use crate::{
 /// Owner-installed source policy. Committed at SRA install via
 /// `handler_data_hash` (folded into the SRA's PDA identity) and re-supplied,
 /// then re-authenticated, on every deposit. The routing tuple
-/// (`target_chain_id` / `target_handler` / `target_adapter` / `recipient` /
-/// `target_token`) is part of the immutable identity, mirroring the
+/// (`target_chain_id` / `recipient` / `target_token`) is part of the immutable
+/// identity, mirroring the
 /// EVM `RouteConfig` that `trigger()` reads from storage and a caller cannot
 /// redirect (see `sra-stx/src/handler/SRAHandler.sol`). Every deposit must echo
 /// this exact routing in `PrepareParams`; `validate_and_prepare` rejects any
@@ -19,8 +19,6 @@ use crate::{
 pub struct SourceHandlerData {
     pub address_book_root: Pubkey,
     pub target_chain_id: u64,
-    pub target_handler: [u8; 32],
-    pub target_adapter: [u8; 32],
     pub recipient: [u8; 32],
     pub target_token: [u8; 32],
     pub allowed_slippage_bps: u16,
@@ -39,9 +37,7 @@ impl SourceHandlerData {
             SraError::InvalidSlippage
         );
         require!(
-            self.target_handler != [0u8; 32]
-                && self.target_adapter != [0u8; 32]
-                && self.recipient != [0u8; 32]
+            self.recipient != [0u8; 32]
                 && self.target_token != [0u8; 32]
                 && self.target_chain_id != 0
                 && self.target_chain_id != SOLANA_CHAIN_ID,
@@ -124,10 +120,9 @@ mod tests {
 
     #[test]
     fn source_handler_data_init_space() {
-        // 32 address_book_root + 8 target_chain_id + 32 target_handler
-        // + 32 target_adapter + 32 recipient + 32 target_token
-        // + 2 allowed_slippage_bps + 4 + (32 * 8) allowed_adapters = 430
-        assert_eq!(SourceHandlerData::INIT_SPACE, 430);
+        // 32 address_book_root + 8 target_chain_id + 32 recipient + 32 target_token
+        // + 2 allowed_slippage_bps + 4 + (32 * 8) allowed_adapters = 366
+        assert_eq!(SourceHandlerData::INIT_SPACE, 366);
     }
 
     #[test]
