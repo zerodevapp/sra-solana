@@ -40,7 +40,7 @@ async function main() {
 
   const signature = await request.rpc({
     commitment: "finalized",
-    skipPreflight: false,
+    preflightCommitment: "confirmed",
   });
   console.log(`Signature: ${signature}`);
 }
