@@ -30,7 +30,7 @@ pub fn build_deposit_now_bundle(
 
     let params = DepositNowParams {
         depositor: *adapter_authority,
-        recipient: Pubkey::new_from_array(prepare.target_adapter),
+        recipient: Pubkey::new_from_array(prepare.recipient),
         input_token: *input_mint,
         output_token: Pubkey::new_from_array(prepare.target_token),
         input_amount: bridged_amount,
@@ -145,7 +145,7 @@ mod tests {
         assert_eq!(build.params.destination_chain_id, prepare.target_chain_id);
         assert_eq!(
             build.params.recipient,
-            Pubkey::new_from_array(prepare.target_adapter)
+            Pubkey::new_from_array(prepare.recipient)
         );
         assert_eq!(build.params.exclusive_relayer, deposit.exclusive_relayer);
         assert_eq!(
