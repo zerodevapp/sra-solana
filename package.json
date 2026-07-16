@@ -2,6 +2,7 @@
   "license": "ISC",
   "scripts": {
     "fee-config:initialize": "ts-node scripts/initialize-fee-config.ts",
+    "mainnet-e2e": "ts-node --transpile-only scripts/mainnet-e2e.ts",
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check"
   },
