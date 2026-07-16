@@ -130,7 +130,7 @@ All gated by the `FeeConfig` **admin** (single key, transferable via a two-step 
 
 | Instruction | Effect |
 | --- | --- |
-| `initialize_fee_config` | One-time create of the global `FeeConfig` PDA with a fee recipient. `Pubkey::default()` recipient disables all fees. |
+| `initialize_fee_config` | One-time create of the global `FeeConfig` PDA with a fee recipient. `Pubkey::default()` recipient disables all fees. **First caller becomes admin — see §12.** |
 | `set_fee_recipient` | Change recipient (default = fees off globally). |
 | `set_protocol_fee` / `remove_protocol_fee` | Create/close the single global `ProtocolFeeConfig` (`default_fee_bps ≤ 1000`, `allow_override` + `allow_sponsored` flags). |
 | `set_asset_fee_tier` / `remove_asset_fee_tier` | Create/close a per-mint tier `(threshold, below_bps, above_or_equal_bps)`, each ≤ 1000 bps. |
@@ -276,6 +276,8 @@ Flagged proactively so they are not mistaken for findings. Some are deliberate S
 - **Fail-closed vault shortfall.** If the route vault is short of the verified amount, `finalize_fill` aborts and the fill stays recoverable.
 
 **Tracked gaps / trust assumptions (worth an auditor's eye):**
+
+- **`initialize_fee_config` is first-caller-wins.** The singleton `FeeConfig` PDA records whatever `admin` signs the first (and only possible) initialization — there is no compiled-in governance key or upgrade-authority check. An attacker who front-runs deployment claims global fee governance permanently: fee recipient, fees up to 10%, sponsorship policy. They cannot alter already-signed deposits (the exact fee is recomputed and matched), but the role is captured. Mitigation is operational: `scripts/initialize-fee-config.ts` must be run immediately after (ideally atomically with) program deployment, and the deployer must verify the resulting `FeeConfig.admin` before any announcement or use. Deployment ordering — not on-chain logic — is the security boundary here.
 
 - **No Across integrator/referral ID** on the source deposit (EVM appends one).
 - **No oracle fallback** for `min_out` (signed quote is the only path; oracle configs are refused at `create_route`).
