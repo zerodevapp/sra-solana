@@ -178,14 +178,14 @@ fn initialize_sra_rejects_mismatched_sra_pda() {
 }
 
 #[test]
-fn initialize_sra_zero_target_handler_rejected() {
+fn initialize_sra_zero_recipient_rejected() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);
     let address_book_root = init_address_book_root(&mut svm, &payer, &owner);
 
     let mut handler_data = sample_handler_data(address_book_root);
-    handler_data.target_handler = [0u8; 32];
+    handler_data.recipient = [0u8; 32];
     let salt = [0xF0u8; 32];
     let (pda, _) = derive_sra_pda(&owner.pubkey(), &handler_data, &salt);
 
@@ -202,7 +202,7 @@ fn initialize_sra_zero_target_handler_rejected() {
         ix,
         &payer,
         &[&owner],
-        "initialize_sra must reject a zero target_handler route",
+        "initialize_sra must reject a zero recipient route",
     );
 
     assert_eq!(

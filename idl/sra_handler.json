@@ -3532,32 +3532,6 @@
             "type": "u64"
           },
           {
-            "name": "target_handler",
-            "docs": [
-              "Opaque 32-byte target handler identifier. EVM handlers are left-padded",
-              "addresses; non-EVM targets may use all 32 bytes."
-            ],
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "target_adapter",
-            "docs": [
-              "Opaque 32-byte target adapter identifier. EVM adapters are left-padded",
-              "addresses; non-EVM targets may use all 32 bytes."
-            ],
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
             "name": "recipient",
             "docs": [
               "Destination account / recipient identifier."
@@ -3985,24 +3959,6 @@
             "type": "u64"
           },
           {
-            "name": "target_handler",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "target_adapter",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
             "name": "recipient",
             "type": {
               "array": [
@@ -4380,8 +4336,8 @@
         "Owner-installed source policy. Committed at SRA install via",
         "`handler_data_hash` (folded into the SRA's PDA identity) and re-supplied,",
         "then re-authenticated, on every deposit. The routing tuple",
-        "(`target_chain_id` / `target_handler` / `target_adapter` / `recipient` /",
-        "`target_token`) is part of the immutable identity, mirroring the",
+        "(`target_chain_id` / `recipient` / `target_token`) is part of the immutable",
+        "identity, mirroring the",
         "EVM `RouteConfig` that `trigger()` reads from storage and a caller cannot",
         "redirect (see `sra-stx/src/handler/SRAHandler.sol`). Every deposit must echo",
         "this exact routing in `PrepareParams`; `validate_and_prepare` rejects any",
@@ -4398,24 +4354,6 @@
           {
             "name": "target_chain_id",
             "type": "u64"
-          },
-          {
-            "name": "target_handler",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "target_adapter",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
           },
           {
             "name": "recipient",
