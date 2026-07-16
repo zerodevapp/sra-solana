@@ -293,13 +293,16 @@ fn verified_cpi_swap_succeeds() {
     );
 }
 
+/// A callee that consumes only part of the staged input while still clearing
+/// `min_out` must revert: sweeping the residue to the vault under a terminal
+/// `ActionsSucceeded` receipt would leave it unrecoverable.
 #[test]
-fn verified_cpi_sweeps_unspent_input() {
+fn verified_cpi_partial_input_consumption_reverts_funds_safe() {
     let mut svm = setup_svm();
     let quoter = Keypair::new();
     let s = staged_single(&mut svm, &quoter);
 
-    // Pull only 3/4 of the moved input; the rest must sweep back to the vault.
+    // Pull only 3/4 of the moved input; the output still clears min_out.
     let pulled = 3_000_000;
     let out_amount = 1_000_000;
     let expiry = now(&svm) + 3_600;
@@ -313,22 +316,11 @@ fn verified_cpi_sweeps_unspent_input() {
         s.verified_metas(s.destination),
     );
 
-    send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[]).expect("partial-pull swap succeeds");
-
-    assert_eq!(fetch_token_balance(&svm, &s.destination), out_amount);
-    assert_eq!(
-        fetch_token_balance(&svm, &s.scratch),
-        0,
-        "scratch swept empty"
-    );
-    assert_eq!(
-        fetch_token_balance(&svm, &s.execution_vault),
-        VAULT - pulled
-    );
-    assert_eq!(
-        status(&svm, &s.fill_receipt),
-        ExecutionStatus::ActionsSucceeded
-    );
+    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    assert_eq!(err, exec_error(SraError::InputNotConsumed));
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
+    assert_eq!(fetch_token_balance(&svm, &s.destination), 0);
+    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
 }
 
 #[test]
