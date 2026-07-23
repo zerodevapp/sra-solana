@@ -209,8 +209,6 @@ pub(crate) fn handler(
 
     require!(
         handler_data.target_chain_id == params.target_chain_id
-            && handler_data.target_handler == params.target_handler
-            && handler_data.target_adapter == params.target_adapter
             && handler_data.recipient == params.recipient
             && handler_data.target_token == params.target_token,
         SraError::RouteMismatch
@@ -357,8 +355,6 @@ pub(crate) fn handler(
         protocol_fee_amount: expected_fee,
         output_amount: params.output_amount,
         target_chain_id: params.target_chain_id,
-        target_handler: params.target_handler,
-        target_adapter: params.target_adapter,
         recipient: params.recipient,
         target_token: params.target_token,
     });

@@ -512,8 +512,9 @@ fn double_finalize_rejected_and_execute_after_success_rejected() {
 ///   `actions_lifecycle::lifecycle_empty_action_config_actions_succeeded_immediately`,
 ///   not a protocol strand.)
 /// * **scratch** (VerifiedCpi input bound): never holds funds across instructions —
-///   `execute_verified` sweeps it to zero or the tx reverts (`ScratchNotEmpty`),
-///   pinned by `verified_cpi_prefunded_scratch_swept_to_vault` below.
+///   `execute_verified` sweeps it to zero or the tx reverts (`InputNotConsumed` on
+///   unconsumed staged input, `ScratchNotEmpty` on a failed sweep), pinned by
+///   `verified_cpi_prefunded_scratch_swept_to_vault` below.
 #[test]
 fn stranded_funds_inventory_holds() {
     let mut svm = setup_svm();

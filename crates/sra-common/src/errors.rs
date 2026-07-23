@@ -169,4 +169,8 @@ pub enum SraError {
     // -- Source: sponsored-deposit admin gate --
     #[msg("Sponsored deposits are not enabled by the fee admin")]
     SponsoredNotAllowed,
+
+    // -- Destination: verified-CPI (appended to keep existing error codes stable) --
+    #[msg("Verified-CPI callee did not consume the full staged input")]
+    InputNotConsumed,
 }

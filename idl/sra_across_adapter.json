@@ -1,5 +1,5 @@
 {
-  "address": "CunqmNJVjTxR8f7bxEXsnX7LCtN4bpPgVqzKq9Tw1eqp",
+  "address": "8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU",
   "metadata": {
     "name": "sra_across_adapter",
     "version": "0.1.0",
@@ -1063,24 +1063,6 @@
           {
             "name": "target_chain_id",
             "type": "u64"
-          },
-          {
-            "name": "target_handler",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "target_adapter",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
           },
           {
             "name": "recipient",

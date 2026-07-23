@@ -130,7 +130,7 @@ All gated by the `FeeConfig` **admin** (single key, transferable via a two-step 
 
 | Instruction | Effect |
 | --- | --- |
-| `initialize_fee_config` | One-time create of the global `FeeConfig` PDA with a fee recipient. `Pubkey::default()` recipient disables all fees. |
+| `initialize_fee_config` | One-time create of the global `FeeConfig` PDA with a fee recipient. `Pubkey::default()` recipient disables all fees. **First caller becomes admin — see §12.** |
 | `set_fee_recipient` | Change recipient (default = fees off globally). |
 | `set_protocol_fee` / `remove_protocol_fee` | Create/close the single global `ProtocolFeeConfig` (`default_fee_bps ≤ 1000`, `allow_override` + `allow_sponsored` flags). |
 | `set_asset_fee_tier` / `remove_asset_fee_tier` | Create/close a per-mint tier `(threshold, below_bps, above_or_equal_bps)`, each ≤ 1000 bps. |
@@ -216,7 +216,7 @@ These are the properties the security of the destination side rests on. Each is 
 ## 8. Cross-chain encoding
 
 - **Chain ID.** `SOLANA_CHAIN_ID = 34_268_394_551_451` (Across's SVM chain identifier). It is bound into every relay hash and every signed quote. It must match the Across SVM SpokePool's configured chain ID. (An earlier incorrect value was fixed; confirm the constant, not any external doc.)
-- **EVM wire words** (`sra-common/src/abi.rs`). Exposes a single helper, `u256_from_u64`, which produces the big-endian 32-byte word for the Across `output_amount` wire field. There is **no SRA message encoder**: the Across deposit carries an **empty message envelope** (the destination executes via its own instructions, not an EVM callback), and `recipient` / `target_handler` are identity-committed in the SRA config hash but never transmitted — the EVM side is address-committed symmetrically.
+- **EVM wire words** (`sra-common/src/abi.rs`). Exposes a single helper, `u256_from_u64`, which produces the big-endian 32-byte word for the Across `output_amount` wire field. There is **no SRA message encoder**: the Across deposit carries an **empty message envelope** (the destination executes via its own instructions, not an EVM callback), while `recipient` is identity-committed in the SRA config hash and transmitted directly as the Across destination recipient.
 - **Across SpokePool** is pinned by `ACROSS_SPOKE_POOL_ID` (`DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru`).
 
 ---
@@ -276,6 +276,8 @@ Flagged proactively so they are not mistaken for findings. Some are deliberate S
 - **Fail-closed vault shortfall.** If the route vault is short of the verified amount, `finalize_fill` aborts and the fill stays recoverable.
 
 **Tracked gaps / trust assumptions (worth an auditor's eye):**
+
+- **`initialize_fee_config` is first-caller-wins.** The singleton `FeeConfig` PDA records whatever `admin` signs the first (and only possible) initialization — there is no compiled-in governance key or upgrade-authority check. An attacker who front-runs deployment claims global fee governance permanently: fee recipient, fees up to 10%, sponsorship policy. They cannot alter already-signed deposits (the exact fee is recomputed and matched), but the role is captured. Mitigation is operational: `scripts/initialize-fee-config.ts` must be run immediately after (ideally atomically with) program deployment, and the deployer must verify the resulting `FeeConfig.admin` before any announcement or use. Deployment ordering — not on-chain logic — is the security boundary here.
 
 - **No Across integrator/referral ID** on the source deposit (EVM appends one).
 - **No oracle fallback** for `min_out` (signed quote is the only path; oracle configs are refused at `create_route`).

@@ -92,8 +92,6 @@ mod tests {
         SourceHandlerData {
             address_book_root: Pubkey::new_unique(),
             target_chain_id: 42_161,
-            target_handler: [0x11; 32],
-            target_adapter: [0x22; 32],
             recipient: [0x33; 32],
             target_token: [0xAB; 32],
             allowed_slippage_bps: 50,

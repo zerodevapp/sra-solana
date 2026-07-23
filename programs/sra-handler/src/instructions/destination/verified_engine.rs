@@ -8,7 +8,10 @@
 //! 3. Pin the source/destination/signing-authority slots; the relayer fills only
 //!    routing (`Free`) slots, so the output lands in the owner's account.
 //! 4. Require `post − pre ≥ min_out` on the pinned output, fail-closed.
-//! 5. Sweep the scratch back to the vault; it must end empty.
+//! 5. Require the callee consumed the staged input in full — unconsumed input
+//!    swept to the vault under a success would strand behind a terminal receipt.
+//!    Then sweep any pre-existing scratch balance (out-of-band donations) back
+//!    to the vault; the scratch must end empty.
 //!
 //! `min_out` comes from an ed25519 signed quote bound to a per-fill/per-action
 //! context hash (a port of the EVM signed-pair resolver; ed25519, not secp256k1).
@@ -122,6 +125,10 @@ pub(crate) fn execute_verified<'info>(
     let scratch = fixed_slot(call.slots, call.template, FixedRole::Source)?;
     let scratch_auth = fixed_slot(call.slots, call.template, FixedRole::SigningAuthority)?;
 
+    // Balance already in the scratch (an out-of-band donation) is not
+    // receipt-attributed input; only balance above it counts as unconsumed input.
+    let pre_stage = token_amount(scratch, call.token_program.key)?;
+
     // Bound the input: move exactly `input_amount` vault → scratch.
     if call.input_amount > 0 {
         transfer_checked(
@@ -159,8 +166,14 @@ pub(crate) fn execute_verified<'info>(
     let post_v = post.observe()?;
     post.assert(pre, post_v)?;
 
-    // Sweep any unspent input back to the vault; scratch must end empty.
+    // The callee must consume the staged input in full: sweeping unconsumed
+    // input to the vault under a success would strand it behind a terminal
+    // ActionsSucceeded receipt (recovery refuses terminal states). Reverting
+    // keeps the receipt Finalized — retryable and owner-recoverable.
     let residue = token_amount(scratch, call.token_program.key)?;
+    require!(residue <= pre_stage, SraError::InputNotConsumed);
+
+    // Sweep the (donation-only) residue back to the vault; scratch must end empty.
     if residue > 0 {
         transfer_checked(
             CpiContext::new_with_signer(
