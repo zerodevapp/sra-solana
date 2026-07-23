@@ -36,8 +36,8 @@ This repo is the Solana counterpart to the EVM SRA contracts in the sibling `sra
 **Program IDs (current dev/devnet values — will rotate before any audited or mainnet deployment; do not treat as final):**
 
 ```
-sra_handler         2U8tvBcQjZx8r6RG4r1pnxdG9LfJF4Ya4hZsNGRmhqt9
-sra_across_adapter  CunqmNJVjTxR8f7bxEXsnX7LCtN4bpPgVqzKq9Tw1eqp
+sra_handler         7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5
+sra_across_adapter  8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU
 ```
 
 **The deployed handler program is intended to be immutable (upgrade authority burned) at launch.** This is why source and destination instructions live in a single binary — no new instructions can be added after freeze. Review with the assumption that nothing here is patchable post-deploy.
