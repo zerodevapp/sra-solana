@@ -133,6 +133,14 @@ jobs:
         run: |
           authority=$(solana address)
           for program_id in 7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5 8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU; do
+            # The rotated program IDs may not exist on mainnet (yet), so the fork
+            # has nothing to take over. Seed each ID by cloning the Across
+            # SpokePool program as a placeholder — the branch deploy below
+            # overwrites its bytes either way.
+            curl -sf http://127.0.0.1:8899 \
+              -H 'content-type: application/json' \
+              -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"surfnet_cloneProgramAccount\",\"params\":[\"DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru\",\"${program_id}\"]}" \
+              | jq -e 'has("result")' >/dev/null
             curl -sf http://127.0.0.1:8899 \
               -H 'content-type: application/json' \
               -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"surfnet_setProgramAuthority\",\"params\":[\"${program_id}\",\"${authority}\"]}" \
