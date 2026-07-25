@@ -95,6 +95,40 @@ impl AcrossDepositParams {
     }
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct CctpDepositParams {
+    /// Net of protocol fee (`PrepareParams::net_input_amount`).
+    pub input_amount: u64,
+    pub output_amount: [u8; 32],
+    pub target_chain_id: u64,
+    pub recipient: [u8; 32],
+    pub target_token: [u8; 32],
+    /// CCTP fee cap; the destination-side `fee_executed` is bounded by this.
+    pub max_fee: u64,
+    /// CCTP v2 finality; canonical values are `FINALITY_THRESHOLD_FAST`
+    /// (1000) and `FINALITY_THRESHOLD_FINALIZED` (2000), and the adapter
+    /// accepts `1..=2000`.
+    pub min_finality_threshold: u32,
+}
+
+impl CctpDepositParams {
+    pub fn from_prepare(
+        prepare: &PrepareParams,
+        max_fee: u64,
+        min_finality_threshold: u32,
+    ) -> Result<Self> {
+        Ok(Self {
+            input_amount: prepare.net_input_amount()?,
+            output_amount: prepare.output_amount,
+            target_chain_id: prepare.target_chain_id,
+            recipient: prepare.recipient,
+            target_token: prepare.target_token,
+            max_fee,
+            min_finality_threshold,
+        })
+    }
+}
+
 pub fn decode_output_amount(output_amount: [u8; 32]) -> Result<u128> {
     require!(
         output_amount[..16] == [0u8; 16],
@@ -211,6 +245,52 @@ mod tests {
         let prepare = fee_prepare(100, 101);
         AcrossDepositParams::from_prepare(&prepare, Pubkey::new_unique(), 600, 120)
             .expect_err("fee above input must fail closed");
+    }
+
+    #[test]
+    fn cctp_from_prepare_bridges_net_of_protocol_fee() {
+        let prepare = fee_prepare(100, 3);
+        let deposit =
+            CctpDepositParams::from_prepare(&prepare, 2, 1000).expect("valid fee must convert");
+        assert_eq!(deposit.input_amount, 97);
+    }
+
+    #[test]
+    fn cctp_from_prepare_propagates_fee_underflow() {
+        let prepare = fee_prepare(100, 101);
+        CctpDepositParams::from_prepare(&prepare, 2, 1000)
+            .expect_err("fee above input must fail closed");
+    }
+
+    #[test]
+    fn cctp_deposit_params_wire_layout_is_pinned() {
+        // The Borsh layout is the cross-program attestation contract: the
+        // handler hashes the adapter's ix data and the adapter re-encodes this
+        // struct to compare. Pin every field's offset and endianness.
+        let deposit = CctpDepositParams {
+            input_amount: 0x0102030405060708,
+            output_amount: [0xAA; 32],
+            target_chain_id: 0x1112131415161718,
+            recipient: [0xBB; 32],
+            target_token: [0xCC; 32],
+            max_fee: 0x2122232425262728,
+            min_finality_threshold: 0x3132_3334,
+        };
+        let bytes = anchor_lang::AnchorSerialize::try_to_vec(&deposit).unwrap();
+        assert_eq!(bytes.len(), 124);
+        assert_eq!(bytes[..8], [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]); // input u64 LE
+        assert_eq!(bytes[8..40], [0xAA; 32]); // output_amount
+        assert_eq!(
+            bytes[40..48],
+            [0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11] // chain id u64 LE
+        );
+        assert_eq!(bytes[48..80], [0xBB; 32]); // recipient
+        assert_eq!(bytes[80..112], [0xCC; 32]); // target_token
+        assert_eq!(
+            bytes[112..120],
+            [0x28, 0x27, 0x26, 0x25, 0x24, 0x23, 0x22, 0x21] // max_fee u64 LE
+        );
+        assert_eq!(bytes[120..], [0x34, 0x33, 0x32, 0x31]); // threshold u32 LE
     }
 
     #[test]

@@ -12,7 +12,7 @@ use anchor_lang::{
     },
 };
 
-use crate::source_deposit::{AcrossDepositParams, PrepareParams};
+use crate::source_deposit::{AcrossDepositParams, CctpDepositParams, PrepareParams};
 
 fn evm_bytes32(byte: u8) -> [u8; 32] {
     let mut out = [0u8; 32];
@@ -77,6 +77,11 @@ pub fn sample_prepare_params() -> PrepareParams {
 
 pub fn sample_across_deposit(prepare: &PrepareParams) -> AcrossDepositParams {
     AcrossDepositParams::from_prepare(prepare, Pubkey::new_unique(), 600, 30)
+        .expect("sample prepare params must produce a valid net amount")
+}
+
+pub fn sample_cctp_deposit(prepare: &PrepareParams) -> CctpDepositParams {
+    CctpDepositParams::from_prepare(prepare, 2, crate::constants::FINALITY_THRESHOLD_FAST)
         .expect("sample prepare params must produce a valid net amount")
 }
 
