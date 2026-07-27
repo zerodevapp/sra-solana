@@ -6595,6 +6595,7 @@ dependencies = [
  "solana-sdk-ids",
  "solana-system-interface",
  "sra-across-adapter",
+ "sra-cctp-adapter",
  "sra-common",
 ]
 

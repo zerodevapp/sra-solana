@@ -49,6 +49,7 @@ use std::{fs, path::PathBuf};
 
 pub const PROGRAM_ID: Pubkey = sra_handler::ID;
 pub const ADAPTER_PROGRAM_ID: Pubkey = sra_across_adapter::ID;
+pub const CCTP_ADAPTER_PROGRAM_ID: Pubkey = sra_cctp_adapter::ID;
 pub const SOL: u64 = 1_000_000_000;
 
 // --- Shared test assertions & action builders ---
@@ -125,6 +126,10 @@ fn adapter_program_so_path() -> PathBuf {
     deploy_artifact_path("sra_across_adapter.so")
 }
 
+fn cctp_adapter_program_so_path() -> PathBuf {
+    deploy_artifact_path("sra_cctp_adapter.so")
+}
+
 fn mock_spoke_pool_so_path() -> PathBuf {
     deploy_artifact_path("mock_spoke_pool.so")
 }
@@ -162,6 +167,16 @@ pub fn setup_svm() -> LiteSVM {
         )
     });
     svm.add_program(ADAPTER_PROGRAM_ID, adapter_so.as_slice())
+        .unwrap();
+
+    let cctp_adapter_so_path = cctp_adapter_program_so_path();
+    let cctp_adapter_so = fs::read(&cctp_adapter_so_path).unwrap_or_else(|err| {
+        panic!(
+            "failed to read program binary at {}: {err}. Run `anchor build` first.",
+            cctp_adapter_so_path.display()
+        )
+    });
+    svm.add_program(CCTP_ADAPTER_PROGRAM_ID, cctp_adapter_so.as_slice())
         .unwrap();
 
     let mock_spoke_so_path = mock_spoke_pool_so_path();
@@ -1471,6 +1486,35 @@ pub fn recover_stuck_custody_ix(
         }
         .to_account_metas(None),
         data: sra_across_adapter::instruction::RecoverStuckCustody {}.data(),
+    }
+}
+
+/// Same instruction against the CCTP adapter — both expand
+/// `sra_common::adapter_custody_recovery!`, but each program carries its own
+/// accounts/error types, so the builder is duplicated per crate.
+pub fn cctp_recover_stuck_custody_ix(
+    fee_payer: &Pubkey,
+    owner: &Pubkey,
+    sra_config: &Pubkey,
+    adapter_authority: &Pubkey,
+    mint: &Pubkey,
+    adapter_custody: &Pubkey,
+    owner_token_account: &Pubkey,
+) -> Instruction {
+    Instruction {
+        program_id: CCTP_ADAPTER_PROGRAM_ID,
+        accounts: sra_cctp_adapter::accounts::RecoverStuckCustody {
+            fee_payer: *fee_payer,
+            owner: *owner,
+            sra_config: *sra_config,
+            adapter_authority: *adapter_authority,
+            mint: *mint,
+            adapter_custody: *adapter_custody,
+            owner_token_account: *owner_token_account,
+            token_program: TOKEN_PROGRAM_ID,
+        }
+        .to_account_metas(None),
+        data: sra_cctp_adapter::instruction::RecoverStuckCustody {}.data(),
     }
 }
 

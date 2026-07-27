@@ -7,6 +7,9 @@
 /// own `crate::events::CustodyRecovered` event (the stamped `emit!` binds its
 /// fields). The caller passes its own empty-custody error, keeping deployed
 /// error codes intact.
+///
+/// Legacy SPL Token only: the stamped accounts use `anchor_spl::token::Token`,
+/// so Token-2022 custody balances are not recoverable through this path.
 // `crate::events::CustodyRecovered` resolves at the call site by design.
 #[allow(clippy::crate_in_macro_def)]
 #[macro_export]
