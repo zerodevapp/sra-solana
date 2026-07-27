@@ -40,11 +40,12 @@ pub const NO_FEE_BPS_OVERRIDE: u16 = u16::MAX;
 /// SRAHandler.sol `_onInstall` / `setSlippagePolicy`.
 pub const MAX_SLIPPAGE_BPS: u16 = BPS_DENOMINATOR;
 
-/// Solana chain ID as registered in the Across protocol — MUST equal the
-/// deployed SVM Spoke Pool's `state.chain_id` (it is bound into every relay
-/// hash) and Across's published `CHAIN_IDs.SOLANA`. Pinned by the destination
-/// Surfpool E2E, where the real program rejects fills whose relay hash was
-/// derived from any other value.
+/// Protocol-internal Solana identity: the self-route guard in
+/// `SourceHandlerData::validate` and the signed-quote domain separator. The
+/// value is Across's registered Solana chain id, retained for zero-migration
+/// continuity; CCTP corridors are keyed by [`cctp_domain_for_chain`] instead.
+/// Until the Across adapter is deleted it must still equal the SVM Spoke
+/// Pool's `state.chain_id` (pinned by the destination Surfpool E2E).
 ///
 /// Network-selected: mainnet by default, devnet under `--features devnet`.
 #[cfg(not(feature = "devnet"))]
@@ -73,6 +74,65 @@ pub const ACROSS_SPOKE_POOL_ID: Pubkey = pubkey!("JAZWcGrpSWNPTBj8QtJ9UyQqhJCDhG
 /// and strands the refund in `adapter_custody`.
 pub const MIN_FILL_DEADLINE_OFFSET: u32 = 300;
 
+/// Circle CCTP v2 program IDs — identical on devnet and mainnet, so not
+/// network-selected. Enforced on-chain via `#[account(address = ...)]` in the
+/// CCTP adapter.
+pub const CCTP_TOKEN_MESSENGER_MINTER_V2_ID: Pubkey =
+    pubkey!("CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe");
+pub const CCTP_MESSAGE_TRANSMITTER_V2_ID: Pubkey =
+    pubkey!("CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC");
+
+/// Solana's own CCTP domain — never a destination in the chain ↔ domain table.
+pub const SOLANA_CCTP_DOMAIN: u32 = 5;
+
+/// CCTP v2 `min_finality_threshold` bounds: 1000 = fast transfer (soft
+/// finality, fee ≥ 1bp), 2000 = standard transfer (hard finality).
+pub const FINALITY_THRESHOLD_FAST: u32 = 1000;
+pub const FINALITY_THRESHOLD_FINALIZED: u32 = 2000;
+
+/// EVM chain id ↔ CCTP domain rows for the active network. Mainnet rows mirror
+/// sra-stx `CCTPAdapter.getDomainForChain` exactly, including its deliberate
+/// BNB (56) omission — CCTP v2 on BNB is USYC-only and SRA is USDC-only.
+/// One table backs both lookup directions, so the inverse cannot drift.
+#[cfg(not(feature = "devnet"))]
+const CCTP_CHAIN_DOMAINS: &[(u64, u32)] = &[
+    (1, 0),       // Ethereum
+    (43_114, 1),  // Avalanche
+    (10, 2),      // OP Mainnet
+    (42_161, 3),  // Arbitrum One
+    (8_453, 6),   // Base
+    (137, 7),     // Polygon PoS
+    (130, 10),    // Unichain
+    (59_144, 11), // Linea
+    (146, 13),    // Sonic
+    (480, 14),    // World Chain
+    (999, 19),    // HyperEVM
+    (57_073, 21), // Ink
+];
+#[cfg(feature = "devnet")]
+const CCTP_CHAIN_DOMAINS: &[(u64, u32)] = &[
+    (11_155_111, 0), // Ethereum Sepolia
+    (43_113, 1),     // Avalanche Fuji
+    (11_155_420, 2), // OP Sepolia
+    (421_614, 3),    // Arbitrum Sepolia
+    (84_532, 6),     // Base Sepolia
+    (80_002, 7),     // Polygon Amoy
+];
+
+/// CCTP destination domain for an EVM chain id; `None` = unsupported corridor.
+pub fn cctp_domain_for_chain(chain_id: u64) -> Option<u32> {
+    CCTP_CHAIN_DOMAINS
+        .iter()
+        .find_map(|&(chain, domain)| (chain == chain_id).then_some(domain))
+}
+
+/// Exact inverse of [`cctp_domain_for_chain`] (same table, keyed by domain).
+pub fn chain_id_for_cctp_domain(domain: u32) -> Option<u64> {
+    CCTP_CHAIN_DOMAINS
+        .iter()
+        .find_map(|&(chain, d)| (d == domain).then_some(chain))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,6 +149,8 @@ mod tests {
                 pubkey!("JAZWcGrpSWNPTBj8QtJ9UyQqhJCDhG9GJkDeMf5NQBiq")
             );
             assert_eq!(SOLANA_CHAIN_ID, 133_268_194_659_241);
+            assert_eq!(cctp_domain_for_chain(421_614), Some(3)); // Arb Sepolia
+            assert_eq!(cctp_domain_for_chain(42_161), None); // mainnet row absent
         }
         #[cfg(not(feature = "devnet"))]
         {
@@ -97,6 +159,40 @@ mod tests {
                 pubkey!("DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru")
             );
             assert_eq!(SOLANA_CHAIN_ID, 34_268_394_551_451);
+            assert_eq!(cctp_domain_for_chain(42_161), Some(3)); // Arbitrum One
+            assert_eq!(cctp_domain_for_chain(421_614), None); // devnet row absent
         }
+    }
+
+    #[test]
+    fn cctp_domain_table_round_trips() {
+        for &(chain, domain) in CCTP_CHAIN_DOMAINS {
+            assert_eq!(cctp_domain_for_chain(chain), Some(domain));
+            assert_eq!(chain_id_for_cctp_domain(domain), Some(chain));
+        }
+    }
+
+    /// Find-first lookups are only an exact inverse if both columns are unique.
+    #[test]
+    fn cctp_domain_table_columns_are_unique() {
+        for (i, &(chain, domain)) in CCTP_CHAIN_DOMAINS.iter().enumerate() {
+            for &(other_chain, other_domain) in &CCTP_CHAIN_DOMAINS[i + 1..] {
+                assert_ne!(chain, other_chain);
+                assert_ne!(domain, other_domain);
+            }
+        }
+    }
+
+    #[test]
+    fn cctp_domain_rejects_unmapped_chains() {
+        // BNB is the deliberate omission (CCTP v2 there is USYC-only).
+        assert_eq!(cctp_domain_for_chain(56), None);
+        assert_eq!(cctp_domain_for_chain(0), None);
+        assert_eq!(cctp_domain_for_chain(SOLANA_CHAIN_ID), None);
+    }
+
+    #[test]
+    fn solana_domain_never_maps_to_an_evm_chain() {
+        assert_eq!(chain_id_for_cctp_domain(SOLANA_CCTP_DOMAIN), None);
     }
 }
