@@ -6554,10 +6554,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sra-cctp-adapter"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "sra-common",
+]
+
+[[package]]
 name = "sra-common"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "anchor-spl",
  "hex",
  "serde_json",
  "solana-keccak-hasher",
@@ -6585,6 +6595,7 @@ dependencies = [
  "solana-sdk-ids",
  "solana-system-interface",
  "sra-across-adapter",
+ "sra-cctp-adapter",
  "sra-common",
 ]
 

@@ -144,3 +144,89 @@ fn recover_stuck_custody_non_owner_rejected() {
         "custody balance unchanged after rejected recovery",
     );
 }
+
+/// The CCTP adapter expands the same `adapter_custody_recovery!` macro; the
+/// happy path proves the expansion is wired end-to-end in the new crate.
+#[test]
+fn cctp_recover_stuck_custody_returns_funds_to_owner() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new_with_adapter_policy(
+        &mut svm,
+        CCTP_ADAPTER_PROGRAM_ID,
+        50,
+        vec![CCTP_ADAPTER_PROGRAM_ID],
+    );
+
+    create_ata(
+        &mut svm,
+        &fx.payer,
+        &fx.accounts.adapter_authority,
+        &fx.source_mint,
+    );
+    mint_to(
+        &mut svm,
+        &fx.payer,
+        &fx.payer,
+        &fx.source_mint,
+        &fx.accounts.adapter_custody,
+        STRANDED_AMOUNT,
+    );
+
+    let before = fetch_token_balance(&svm, &fx.owner_ata);
+    let ix = cctp_recover_stuck_custody_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.sra_config,
+        &fx.accounts.adapter_authority,
+        &fx.source_mint,
+        &fx.accounts.adapter_custody,
+        &fx.owner_ata,
+    );
+    send_ix(&mut svm, ix, &fx.payer, &[&fx.owner]).expect("cctp recover should succeed");
+
+    assert_eq!(fetch_token_balance(&svm, &fx.accounts.adapter_custody), 0);
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.owner_ata),
+        before + STRANDED_AMOUNT,
+    );
+}
+
+/// Empty custody rejects with the CCTP crate's own NothingToRecover code —
+/// covers the macro's per-crate `$nothing_to_recover` error wiring.
+#[test]
+fn cctp_recover_stuck_custody_nothing_to_recover_rejected() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new_with_adapter_policy(
+        &mut svm,
+        CCTP_ADAPTER_PROGRAM_ID,
+        50,
+        vec![CCTP_ADAPTER_PROGRAM_ID],
+    );
+
+    create_ata(
+        &mut svm,
+        &fx.payer,
+        &fx.accounts.adapter_authority,
+        &fx.source_mint,
+    );
+
+    let ix = cctp_recover_stuck_custody_ix(
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
+        &fx.sra_config,
+        &fx.accounts.adapter_authority,
+        &fx.source_mint,
+        &fx.accounts.adapter_custody,
+        &fx.owner_ata,
+    );
+    let err = send_ix(&mut svm, ix, &fx.payer, &[&fx.owner])
+        .expect_err("empty custody must reject")
+        .err
+        .clone();
+
+    let expected_code: u32 = sra_cctp_adapter::CctpAdapterError::NothingToRecover.into();
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(0, InstructionError::Custom(expected_code)),
+    );
+}
