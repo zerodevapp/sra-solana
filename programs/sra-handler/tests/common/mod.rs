@@ -1185,9 +1185,10 @@ pub struct ValidatePrepareFixture {
     pub adapter_program: Pubkey,
     pub accounts: ValidatePrepareAccounts,
     pub owner_ata: Pubkey,
-    /// Across-leg fields consumed only by the Surfpool E2E fixture (which
-    /// still drives the deployed Across program); the LiteSVM source flow is
-    /// CCTP-based and never touches them. Deleted with the Across adapter.
+    /// Across-leg fields consumed by the Surfpool E2E fixture (which drives
+    /// the deployed Across program); the LiteSVM source flow currently runs
+    /// against the CCTP adapter. Both adapters ship and stay — Across
+    /// LiteSVM source coverage is restored by the dual-adapter suites.
     pub across_state: Pubkey,
     pub across_vault: Pubkey,
 }
