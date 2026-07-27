@@ -136,7 +136,7 @@ jobs:
         run: |
           set -e
           fail=0
-          for program in sra_handler sra_across_adapter; do
+          for program in sra_handler sra_across_adapter sra_cctp_adapter; do
             committed="idl/${program}.json"
             fresh="target/idl/${program}.json"
             if [ ! -f "$committed" ]; then

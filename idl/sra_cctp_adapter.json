@@ -1,0 +1,472 @@
+{
+  "address": "2bXAvxF3U4FtWAnJtcL9LDnwM7qnErf3y3m6USLRKpRw",
+  "metadata": {
+    "name": "sra_cctp_adapter",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "SRA CCTP Adapter — Circle CCTP v2 source deposit + destination mint verification"
+  },
+  "instructions": [
+    {
+      "name": "recover_stuck_custody",
+      "discriminator": [
+        9,
+        146,
+        145,
+        23,
+        72,
+        69,
+        228,
+        247
+      ],
+      "accounts": [
+        {
+          "name": "fee_payer",
+          "docs": [
+            "Pays the tx fee (gas-sponsorship parity with the deposit flow)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "docs": [
+            "SRA owner = authority; must sign and match `sra_config.owner`."
+          ],
+          "signer": true,
+          "relations": [
+            "sra_config"
+          ]
+        },
+        {
+          "name": "sra_config"
+        },
+        {
+          "name": "adapter_authority",
+          "docs": [
+            "out of `adapter_custody`. Address constrained via seeds + bump."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  97,
+                  112,
+                  116,
+                  101,
+                  114,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "sra_config"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "adapter_custody",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "adapter_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "owner_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "SraConfig",
+      "discriminator": [
+        218,
+        163,
+        165,
+        102,
+        168,
+        101,
+        23,
+        222
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "CctpDepositExecuted",
+      "discriminator": [
+        223,
+        215,
+        183,
+        79,
+        53,
+        113,
+        35,
+        187
+      ]
+    },
+    {
+      "name": "CustodyRecovered",
+      "discriminator": [
+        149,
+        141,
+        219,
+        191,
+        72,
+        229,
+        234,
+        18
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "PreparedNonceUnavailable",
+      "msg": "Mint nonce does not contain a prepared deposit"
+    },
+    {
+      "code": 6001,
+      "name": "NothingToRecover",
+      "msg": "No tokens in adapter custody to recover"
+    },
+    {
+      "code": 6002,
+      "name": "UnsupportedChain",
+      "msg": "Target chain has no CCTP domain mapping"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidFinalityThreshold",
+      "msg": "CCTP finality threshold must be within 1..=2000"
+    },
+    {
+      "code": 6004,
+      "name": "QuoteExceedsNetAfterFee",
+      "msg": "Committed output exceeds the net input after the CCTP max fee"
+    }
+  ],
+  "types": [
+    {
+      "name": "CctpDepositExecuted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sra_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "input_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "message_sent_event_data",
+            "docs": [
+              "Ephemeral account holding the CCTP `MessageSent` payload; the off-chain",
+              "key for this deposit (Iris assigns the nonce after the fact)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "destination_domain",
+            "type": "u32"
+          },
+          {
+            "name": "input_amount",
+            "type": "u64"
+          },
+          {
+            "name": "output_amount",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_token",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "max_fee",
+            "type": "u64"
+          },
+          {
+            "name": "min_finality_threshold",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CustodyRecovered",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sra_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SraConfig",
+      "docs": [
+        "One source-side SRA per `(owner, final_handler, handler_data_hash, salt)`.",
+        "PDA seeds: [\"sra\", owner, config_hash, salt]",
+        "config_hash = keccak256(owner ‖ final_handler ‖ handler_data_hash)"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "final_handler",
+            "type": "pubkey"
+          },
+          {
+            "name": "handler_data_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "salt",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ]
+}

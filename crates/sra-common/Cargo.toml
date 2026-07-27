@@ -5,13 +5,15 @@ description = "Shared types, constants, and ABI encoding for SRA Solana programs
 edition = "2021"
 
 [features]
-idl-build = ["anchor-lang/idl-build"]
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
 # Selects devnet network constants (Across SpokePool ID, Solana chain ID).
 # Default (feature off) = mainnet, matching the Surfpool mainnet-fork test suite.
 devnet = []
 
 [dependencies]
 anchor-lang = "0.32.1"
+anchor-spl = "0.32.1"
 solana-keccak-hasher = "2.2.1"
 solana-sha256-hasher = "2.3.0"
 

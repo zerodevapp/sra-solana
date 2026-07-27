@@ -7,6 +7,7 @@ declare_id!("7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5");
 
 pub mod abi;
 pub mod constants;
+pub mod custody;
 pub mod errors;
 pub mod fees;
 pub mod instruction_data;
