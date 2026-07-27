@@ -84,7 +84,7 @@ pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) 
         params.exclusivity_period,
     )?;
 
-    let prepare = crate::utils::ix_attestation::verify_previous_handler_ix(
+    let prepare = sra_common::ix_attestation::verify_previous_handler_ix(
         &ctx.accounts.instructions_sysvar.to_account_info(),
         &ctx.accounts.sra_config.key(),
         &ctx.accounts.input_mint.key(),
