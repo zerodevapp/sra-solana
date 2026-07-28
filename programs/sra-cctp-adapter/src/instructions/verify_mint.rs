@@ -160,18 +160,19 @@ pub fn handler(
         CctpAdapterError::FeeExceedsMaxFee
     );
 
-    // 6. Record the verification artifact. Delivered = `amount − fee_executed`
-    //    is what actually minted; `amount − max_fee` is the source-committed
-    //    minimum the handler's `finalize_fill` enforces (`amount ≥
-    //    expected_amount` holds because `fee_executed ≤ max_fee`). Both
-    //    subtractions are safe under the fee bounds above.
+    // 6. Record the verification artifact. Both subtractions are safe under
+    //    the fee bounds above, and `delivered ≥ committed_minimum` (the
+    //    handler's `finalize_fill` invariant) holds because
+    //    `fee_executed ≤ max_fee`.
+    let delivered = amount - fee_executed;
+    let committed_minimum = amount - max_fee;
     ctx.accounts.verified_fill.set_inner(VerifiedFill {
         adapter: crate::ID,
         route: route_key,
         fill_id: nonce,
         mint: expected_mint,
-        amount: amount - fee_executed,
-        expected_amount: amount - max_fee,
+        amount: delivered,
+        expected_amount: committed_minimum,
         source_chain_id,
         created_at: Clock::get()?.unix_timestamp,
         bump: ctx.bumps.verified_fill,
@@ -182,8 +183,8 @@ pub fn handler(
         route: route_key,
         mint: expected_mint,
         fill_id: nonce,
-        amount: amount - fee_executed,
-        expected_amount: amount - max_fee,
+        amount: delivered,
+        expected_amount: committed_minimum,
         source_chain_id,
     });
 
