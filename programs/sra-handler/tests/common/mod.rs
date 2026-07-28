@@ -29,7 +29,10 @@ use solana_system_interface::program as system_program;
 use sra_across_adapter::utils::svm_spoke::types::RelayData;
 use sra_common::{
     abi::u256_from_u64,
-    constants::{ACROSS_SPOKE_POOL_ID, SOLANA_CHAIN_ID},
+    constants::{
+        cctp_domain_for_chain, ACROSS_SPOKE_POOL_ID, CCTP_MESSAGE_TRANSMITTER_V2_ID,
+        CCTP_TOKEN_MESSENGER_MINTER_V2_ID, FINALITY_THRESHOLD_FINALIZED, SOLANA_CHAIN_ID,
+    },
     errors::SraError,
     instruction_data::encode_anchor_instruction_data,
     seeds::{
@@ -37,7 +40,7 @@ use sra_common::{
         SEED_EXECUTION, SEED_FEE_CONFIG, SEED_FILL_RECEIPT, SEED_MINT_NONCE, SEED_PROTOCOL_FEE,
         SEED_SRA, SEED_SRA_ROUTE, SEED_VERIFIED_FILL,
     },
-    source_deposit::{AcrossDepositParams, PrepareParams},
+    source_deposit::{AcrossDepositParams, CctpDepositParams, PrepareParams},
     types::{
         AccountTemplate, AddressBookEntry, AddressBookRoot, AssetFeeTier, CreateRouteParams,
         ExecutionStatus, FeeConfig, FillReceipt, FixedRole, ManageRouteParams, MintNonce,
@@ -134,6 +137,10 @@ fn mock_spoke_pool_so_path() -> PathBuf {
     deploy_artifact_path("mock_spoke_pool.so")
 }
 
+fn mock_cctp_so_path() -> PathBuf {
+    deploy_artifact_path("mock_cctp.so")
+}
+
 fn mock_swap_so_path() -> PathBuf {
     deploy_artifact_path("mock_swap.so")
 }
@@ -187,6 +194,16 @@ pub fn setup_svm() -> LiteSVM {
         )
     });
     svm.add_program(ACROSS_SPOKE_POOL_ID, mock_spoke_so.as_slice())
+        .unwrap();
+
+    let mock_cctp_so_path = mock_cctp_so_path();
+    let mock_cctp_so = fs::read(&mock_cctp_so_path).unwrap_or_else(|err| {
+        panic!(
+            "failed to read program binary at {}: {err}. Run `anchor build` first.",
+            mock_cctp_so_path.display()
+        )
+    });
+    svm.add_program(CCTP_TOKEN_MESSENGER_MINTER_V2_ID, mock_cctp_so.as_slice())
         .unwrap();
 
     let mock_swap_so_path = mock_swap_so_path();
@@ -767,6 +784,35 @@ pub fn fetch_asset_fee_tier(svm: &LiteSVM, pda: &Pubkey) -> AssetFeeTier {
     AssetFeeTier::try_deserialize(&mut acct.data.as_slice()).expect("valid AssetFeeTier")
 }
 
+/// Configures live fee state (recipient + the single global protocol fee) and
+/// returns the canonical recipient fee ATA.
+pub fn enable_protocol_fee(
+    svm: &mut LiteSVM,
+    fx: &ValidatePrepareFixture,
+    default_fee_bps: u16,
+    allow_override: bool,
+    allow_sponsored: bool,
+) -> Pubkey {
+    let recipient = Pubkey::new_unique();
+    send_instructions(
+        svm,
+        &[
+            set_fee_recipient_ix(&fx.fee_admin.pubkey(), recipient),
+            set_protocol_fee_ix(
+                &fx.payer.pubkey(),
+                &fx.fee_admin.pubkey(),
+                default_fee_bps,
+                allow_override,
+                allow_sponsored,
+            ),
+        ],
+        &fx.payer,
+        &[&fx.fee_admin],
+    )
+    .expect("fee state setup must succeed");
+    create_ata(svm, &fx.payer, &recipient, &fx.source_mint)
+}
+
 pub fn seed_mint_nonce_account(svm: &mut LiteSVM, pda: &Pubkey, nonce: u64, bump: u8) {
     let mut data = <MintNonce as Discriminator>::DISCRIMINATOR.to_vec();
     MintNonce { nonce, bump }.serialize(&mut data).unwrap();
@@ -839,6 +885,35 @@ pub fn mint_to(
         .owner(mint_authority)
         .send()
         .expect("mint_to should succeed");
+}
+
+/// Current supply of `mint` — the CCTP burn leg is asserted as a supply
+/// decrease (no destination vault exists on the source chain).
+pub fn fetch_mint_supply(svm: &LiteSVM, mint: &Pubkey) -> u64 {
+    use solana_sdk::program_pack::Pack;
+    let account = svm.get_account(mint).expect("mint account exists");
+    litesvm_token::spl_token::state::Mint::unpack(&account.data)
+        .expect("initialized mint")
+        .supply
+}
+
+/// The `MessageSent` payload the mock CCTP program wrote for a deposit — the
+/// Borsh-encoded `DepositForBurnParams` the adapter CPI'd with.
+pub fn fetch_sent_deposit_for_burn(
+    svm: &LiteSVM,
+    message_sent_event_data: &Pubkey,
+) -> mock_cctp::DepositForBurnParams {
+    let acct = svm
+        .get_account(message_sent_event_data)
+        .expect("message_sent_event_data account exists");
+    assert_eq!(
+        acct.owner,
+        sra_common::constants::CCTP_TOKEN_MESSENGER_MINTER_V2_ID
+    );
+    let message_sent = mock_cctp::MessageSent::try_deserialize(&mut acct.data.as_slice())
+        .expect("valid MessageSent");
+    anchor_lang::AnchorDeserialize::try_from_slice(&message_sent.message)
+        .expect("message decodes as DepositForBurnParams")
 }
 
 pub fn fetch_token_balance(svm: &LiteSVM, ata: &Pubkey) -> u64 {
@@ -1139,6 +1214,10 @@ pub struct ValidatePrepareFixture {
     pub adapter_program: Pubkey,
     pub accounts: ValidatePrepareAccounts,
     pub owner_ata: Pubkey,
+    /// Across-leg fields consumed by the Surfpool E2E fixture (which drives
+    /// the deployed Across program); the LiteSVM source flow currently runs
+    /// against the CCTP adapter. Both adapters ship and stay — Across
+    /// LiteSVM source coverage is restored by the dual-adapter suites.
     pub across_state: Pubkey,
     pub across_vault: Pubkey,
 }
@@ -1149,9 +1228,9 @@ impl ValidatePrepareFixture {
             svm,
             6,
             6,
-            ADAPTER_PROGRAM_ID,
+            CCTP_ADAPTER_PROGRAM_ID,
             50,
-            vec![ADAPTER_PROGRAM_ID],
+            vec![CCTP_ADAPTER_PROGRAM_ID],
         )
     }
 
@@ -1160,9 +1239,23 @@ impl ValidatePrepareFixture {
             svm,
             6,
             6,
-            ADAPTER_PROGRAM_ID,
+            CCTP_ADAPTER_PROGRAM_ID,
             allowed_slippage_bps,
-            vec![ADAPTER_PROGRAM_ID],
+            vec![CCTP_ADAPTER_PROGRAM_ID],
+        )
+    }
+
+    /// Default CCTP fixture whose SRA commits to `target_chain_id` — e.g. a
+    /// chain with no CCTP domain mapping, to exercise `UnsupportedChain`.
+    pub fn new_with_target_chain(svm: &mut LiteSVM, target_chain_id: u64) -> Self {
+        Self::build(
+            svm,
+            6,
+            6,
+            CCTP_ADAPTER_PROGRAM_ID,
+            50,
+            vec![CCTP_ADAPTER_PROGRAM_ID],
+            target_chain_id,
         )
     }
 
@@ -1190,6 +1283,26 @@ impl ValidatePrepareFixture {
         allowed_slippage_bps: u16,
         allowed_adapters: Vec<Pubkey>,
     ) -> Self {
+        Self::build(
+            svm,
+            source_decimals,
+            target_decimals,
+            adapter_program,
+            allowed_slippage_bps,
+            allowed_adapters,
+            42_161,
+        )
+    }
+
+    fn build(
+        svm: &mut LiteSVM,
+        source_decimals: u8,
+        target_decimals: u8,
+        adapter_program: Pubkey,
+        allowed_slippage_bps: u16,
+        allowed_adapters: Vec<Pubkey>,
+        target_chain_id: u64,
+    ) -> Self {
         let payer = funded_keypair(svm, 100 * SOL);
         let owner = funded_keypair(svm, SOL);
 
@@ -1209,7 +1322,6 @@ impl ValidatePrepareFixture {
         }
 
         let address_book_root = init_address_book_root(svm, &payer, &owner);
-        let target_chain_id = 42_161;
         let target_token = sample_target_token();
         let handler_data = SourceHandlerData {
             address_book_root,
@@ -1379,13 +1491,8 @@ impl ValidatePrepareFixture {
         validate_meta_substitution: Option<(Pubkey, Pubkey)>,
     ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
     {
-        let execute_ix = execute_deposit_across_ix(
-            &self.payer.pubkey(),
-            self,
-            &fetch_sra_config(svm, &self.sra_config),
-            &params,
-            across_params_for(self, &params),
-        );
+        let (execute_ix, event_data) =
+            execute_deposit_cctp_ix(&self.payer.pubkey(), self, &cctp_params_for(&params));
         let address_book_entry =
             self.address_book_entry(params.target_chain_id, &params.target_token);
         let mut validate_ix = validate_and_prepare_ix(
@@ -1412,16 +1519,80 @@ impl ValidatePrepareFixture {
         let mut ixs = vec![validate_ix];
         ixs.extend(between_ixs);
         ixs.push(execute_ix);
-        send_instructions(svm, &ixs, &self.payer, &[&self.owner])
+        send_instructions(svm, &ixs, &self.payer, &[&self.owner, &event_data])
     }
 }
 
-pub fn across_params_for(
-    fx: &ValidatePrepareFixture,
-    params: &PrepareParams,
-) -> AcrossDepositParams {
-    AcrossDepositParams::from_prepare(params, fx.payer.pubkey(), 3_600, 900)
+/// Default CCTP execution params: a standard transfer (hard finality, no
+/// bridge-fee headroom), so the quote invariant is simply `output ≤ net`.
+/// Fast-transfer and max-fee cases build their own `CctpDepositParams`.
+pub fn cctp_params_for(params: &PrepareParams) -> CctpDepositParams {
+    CctpDepositParams::from_prepare(params, 0, FINALITY_THRESHOLD_FINALIZED)
         .expect("prepare params must produce a valid net amount")
+}
+
+/// Build the CCTP-adapter leg of a paired source deposit against the real
+/// CCTP v2 PDA addresses (the keeper-reference account list; the mock ignores
+/// all but the three the adapter pins by seeds). Returns the instruction plus
+/// the fresh ephemeral `message_sent_event_data` keypair, which must co-sign
+/// the transaction.
+pub fn execute_deposit_cctp_ix(
+    fee_payer: &Pubkey,
+    fx: &ValidatePrepareFixture,
+    params: &CctpDepositParams,
+) -> (Instruction, Keypair) {
+    let event_data = Keypair::new();
+    let tmm = CCTP_TOKEN_MESSENGER_MINTER_V2_ID;
+    // Unmapped chains keep a well-formed (if meaningless) PDA so the adapter's
+    // own UnsupportedChain check is what fires, not a builder panic.
+    let domain = cctp_domain_for_chain(params.target_chain_id).unwrap_or_default();
+    let ix = Instruction {
+        program_id: CCTP_ADAPTER_PROGRAM_ID,
+        accounts: sra_cctp_adapter::accounts::ExecuteDepositCctp {
+            fee_payer: *fee_payer,
+            instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
+            sra_config: fx.sra_config,
+            mint_nonce: fx.accounts.mint_nonce,
+            adapter_authority: fx.accounts.adapter_authority,
+            adapter_custody: fx.accounts.adapter_custody,
+            input_mint: fx.source_mint,
+            sender_authority: Pubkey::find_program_address(&[b"sender_authority"], &tmm).0,
+            message_transmitter: Pubkey::find_program_address(
+                &[b"message_transmitter"],
+                &CCTP_MESSAGE_TRANSMITTER_V2_ID,
+            )
+            .0,
+            token_messenger: Pubkey::find_program_address(&[b"token_messenger"], &tmm).0,
+            remote_token_messenger: Pubkey::find_program_address(
+                &[b"remote_token_messenger", domain.to_string().as_bytes()],
+                &tmm,
+            )
+            .0,
+            token_minter: Pubkey::find_program_address(&[b"token_minter"], &tmm).0,
+            local_token: Pubkey::find_program_address(
+                &[b"local_token", fx.source_mint.as_ref()],
+                &tmm,
+            )
+            .0,
+            denylist_account: Pubkey::find_program_address(
+                &[b"denylist_account", fx.accounts.adapter_authority.as_ref()],
+                &tmm,
+            )
+            .0,
+            message_sent_event_data: event_data.pubkey(),
+            message_transmitter_program: CCTP_MESSAGE_TRANSMITTER_V2_ID,
+            cctp_program: tmm,
+            cctp_event_authority: Pubkey::find_program_address(&[b"__event_authority"], &tmm).0,
+            token_program: TOKEN_PROGRAM_ID,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: sra_cctp_adapter::instruction::ExecuteDepositCctp {
+            params: params.clone(),
+        }
+        .data(),
+    };
+    (ix, event_data)
 }
 
 pub fn execute_deposit_across_ix(
@@ -1463,7 +1634,11 @@ pub fn execute_deposit_across_ix(
     }
 }
 
+/// One builder serves both adapters: they expand the same
+/// `sra_common::adapter_custody_recovery!`, so the account order and the
+/// name-derived discriminator are identical — only the program id differs.
 pub fn recover_stuck_custody_ix(
+    adapter_program: &Pubkey,
     fee_payer: &Pubkey,
     owner: &Pubkey,
     sra_config: &Pubkey,
@@ -1473,36 +1648,7 @@ pub fn recover_stuck_custody_ix(
     owner_token_account: &Pubkey,
 ) -> Instruction {
     Instruction {
-        program_id: ADAPTER_PROGRAM_ID,
-        accounts: sra_across_adapter::accounts::RecoverStuckCustody {
-            fee_payer: *fee_payer,
-            owner: *owner,
-            sra_config: *sra_config,
-            adapter_authority: *adapter_authority,
-            mint: *mint,
-            adapter_custody: *adapter_custody,
-            owner_token_account: *owner_token_account,
-            token_program: TOKEN_PROGRAM_ID,
-        }
-        .to_account_metas(None),
-        data: sra_across_adapter::instruction::RecoverStuckCustody {}.data(),
-    }
-}
-
-/// Same instruction against the CCTP adapter — both expand
-/// `sra_common::adapter_custody_recovery!`, but each program carries its own
-/// accounts/error types, so the builder is duplicated per crate.
-pub fn cctp_recover_stuck_custody_ix(
-    fee_payer: &Pubkey,
-    owner: &Pubkey,
-    sra_config: &Pubkey,
-    adapter_authority: &Pubkey,
-    mint: &Pubkey,
-    adapter_custody: &Pubkey,
-    owner_token_account: &Pubkey,
-) -> Instruction {
-    Instruction {
-        program_id: CCTP_ADAPTER_PROGRAM_ID,
+        program_id: *adapter_program,
         accounts: sra_cctp_adapter::accounts::RecoverStuckCustody {
             fee_payer: *fee_payer,
             owner: *owner,
@@ -1534,17 +1680,10 @@ pub fn compute_budget_ix() -> Instruction {
 pub fn invoke_execute_only(
     fx: &ValidatePrepareFixture,
     svm: &mut LiteSVM,
-    prepare: &PrepareParams,
-    params: AcrossDepositParams,
+    params: &CctpDepositParams,
 ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>> {
-    let ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        fx,
-        &fetch_sra_config(svm, &fx.sra_config),
-        prepare,
-        params,
-    );
-    send_instructions(svm, &[ix], &fx.payer, &[])
+    let (ix, event_data) = execute_deposit_cctp_ix(&fx.payer.pubkey(), fx, params);
+    send_instructions(svm, &[ix], &fx.payer, &[&event_data])
 }
 
 pub fn current_nonce(svm: &LiteSVM, mint_nonce: &Pubkey) -> u64 {

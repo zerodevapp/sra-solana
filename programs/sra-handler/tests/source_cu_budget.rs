@@ -1,9 +1,9 @@
 //! Source compute-unit regression assertions.
 //!
 //! The production source deposit is a single transaction shaped
-//! `[compute_budget, validate_and_prepare (IX 1), execute_deposit_across
+//! `[compute_budget, validate_and_prepare (IX 1), execute_deposit_cctp
 //! (IX 2)]` over an ALT, requesting a 400k CU limit. These tests execute the
-//! full 2-IX flow through the mock SpokePool, read the real consumption from
+//! full 2-IX flow through the mock CCTP program, read the real consumption from
 //! LiteSVM's `TransactionMetadata`, log it with headroom, and assert it stays
 //! under that production budget — so an Anchor/dependency upgrade (or our own
 //! code) that silently doubles the CU cost fails here instead of on mainnet.
@@ -22,7 +22,7 @@ mod common;
 use common::*;
 use litesvm::LiteSVM;
 use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey, signer::Signer};
-use sra_common::source_deposit::PrepareParams;
+use sra_common::{abi::u256_from_u64, source_deposit::PrepareParams};
 
 // `SOURCE_CU_BUDGET` (the production-requested 400k limit) is the shared
 // constant from `common` — the same value `compute_budget_ix` requests.
@@ -41,13 +41,8 @@ fn measure_source_2ix_cu(
     params: PrepareParams,
     fee_recipient_token_account: Option<Pubkey>,
 ) -> u64 {
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        fx,
-        &fetch_sra_config(svm, &fx.sra_config),
-        &params,
-        across_params_for(fx, &params),
-    );
+    let (execute_ix, event_data) =
+        execute_deposit_cctp_ix(&fx.payer.pubkey(), fx, &cctp_params_for(&params));
     let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
     let validate_ix = validate_and_prepare_ix(
         &fx.payer.pubkey(),
@@ -67,7 +62,7 @@ fn measure_source_2ix_cu(
         svm,
         &[cu_limit, validate_ix, execute_ix],
         &fx.payer,
-        &[&fx.owner],
+        &[&fx.owner, &event_data],
     )
     .expect("source 2-IX flow must execute")
     .compute_units_consumed
@@ -86,29 +81,6 @@ fn assert_under_budget(consumed: u64, label: &str) {
     );
 }
 
-/// Enables a global recipient + a default (global) protocol fee, and returns
-/// the canonical recipient fee ATA.
-fn enable_protocol_fee(svm: &mut LiteSVM, fx: &ValidatePrepareFixture) -> Pubkey {
-    let recipient = Pubkey::new_unique();
-    send_instructions(
-        svm,
-        &[
-            set_fee_recipient_ix(&fx.fee_admin.pubkey(), recipient),
-            set_protocol_fee_ix(
-                &fx.payer.pubkey(),
-                &fx.fee_admin.pubkey(),
-                DEFAULT_FEE_BPS,
-                false,
-                false,
-            ),
-        ],
-        &fx.payer,
-        &[&fx.fee_admin],
-    )
-    .expect("fee state setup must succeed");
-    create_ata(svm, &fx.payer, &recipient, &fx.source_mint)
-}
-
 #[test]
 fn source_2ix_flow_under_cu_budget() {
     let mut svm = setup_svm();
@@ -122,12 +94,14 @@ fn source_2ix_flow_under_cu_budget() {
 fn source_2ix_flow_with_fee_under_cu_budget() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    let fee_ata = enable_protocol_fee(&mut svm, &fx);
+    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     // Heaviest production path: protocol fee ON adds a second token CPI
-    // (vault -> fee-recipient `transfer_checked`).
+    // (vault -> fee-recipient `transfer_checked`). The quote drops to the
+    // gross slippage floor so it stays within the fee-reduced net.
     let mut params = sample_prepare_params(fx.target_token);
     params.protocol_fee_amount = DEFAULT_FEE;
+    params.output_amount = u256_from_u64(995_000);
 
     let consumed = measure_source_2ix_cu(&mut svm, &fx, params, Some(fee_ata));
     assert_under_budget(consumed, "fee on");

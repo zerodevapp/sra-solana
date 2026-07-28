@@ -42,10 +42,10 @@ pub const MAX_SLIPPAGE_BPS: u16 = BPS_DENOMINATOR;
 
 /// Protocol-internal Solana identity: the self-route guard in
 /// `SourceHandlerData::validate` and the signed-quote domain separator. The
-/// value is Across's registered Solana chain id, retained for zero-migration
-/// continuity; CCTP corridors are keyed by [`cctp_domain_for_chain`] instead.
-/// Until the Across adapter is deleted it must still equal the SVM Spoke
-/// Pool's `state.chain_id` (pinned by the destination Surfpool E2E).
+/// value is Across's registered Solana chain id — the Across adapter's relay
+/// hash depends on it, so it must equal the SVM Spoke Pool's `state.chain_id`
+/// (pinned by the destination Surfpool E2E). CCTP corridors are keyed by
+/// [`cctp_domain_for_chain`] instead; both adapters are in service.
 ///
 /// Network-selected: mainnet by default, devnet under `--features devnet`.
 #[cfg(not(feature = "devnet"))]

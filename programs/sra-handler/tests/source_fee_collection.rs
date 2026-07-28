@@ -4,8 +4,8 @@
 //! equality-checked against the attested
 //! `params.protocol_fee_amount` (`FeeMismatch`), collected from the SRA vault
 //! into the canonical recipient ATA, and the NET (input - fee) is forwarded
-//! into adapter custody and bridged. Slippage keeps flooring on the GROSS
-//! input (EVM parity).
+//! into adapter custody and burned by the CCTP leg. Slippage keeps flooring
+//! on the GROSS input (EVM parity).
 
 mod common;
 
@@ -21,9 +21,12 @@ use sra_common::errors::SraError;
 use sra_common::source_deposit::PrepareParams;
 
 const INPUT: u64 = 1_000_000;
-const OUTPUT_WITHIN_SLIPPAGE: u64 = 999_500;
 const DEFAULT_FEE_BPS: u16 = 30;
 const DEFAULT_FEE: u64 = 3_000; // 1_000_000 * 30 / 10_000
+/// Exactly the 50 bps gross slippage floor, and at or under the net for every
+/// fee level exercised here — a fee-bearing quote must also satisfy the CCTP
+/// adapter's `output ≤ net − max_fee` invariant (max_fee = 0 in the fixture).
+const FEE_TEST_OUTPUT: u64 = 995_000;
 
 /// Anchor framework error codes pinned by the substitution suites.
 const ANCHOR_CONSTRAINT_SEEDS: u32 = ErrorCode::ConstraintSeeds as u32;
@@ -33,36 +36,8 @@ const ANCHOR_ACCOUNT_NOT_INITIALIZED: u32 = ErrorCode::AccountNotInitialized as 
 fn fee_params(fx: &ValidatePrepareFixture, protocol_fee_amount: u64) -> PrepareParams {
     let mut params = sample_prepare_params(fx.target_token);
     params.protocol_fee_amount = protocol_fee_amount;
+    params.output_amount = u256_from_u64(FEE_TEST_OUTPUT);
     params
-}
-
-/// Configures live fee state: recipient set + the single global protocol fee.
-/// Returns the canonical recipient fee ATA.
-fn enable_protocol_fee(
-    svm: &mut LiteSVM,
-    fx: &ValidatePrepareFixture,
-    default_fee_bps: u16,
-    allow_override: bool,
-    allow_sponsored: bool,
-) -> Pubkey {
-    let recipient = Pubkey::new_unique();
-    send_instructions(
-        svm,
-        &[
-            set_fee_recipient_ix(&fx.fee_admin.pubkey(), recipient),
-            set_protocol_fee_ix(
-                &fx.payer.pubkey(),
-                &fx.fee_admin.pubkey(),
-                default_fee_bps,
-                allow_override,
-                allow_sponsored,
-            ),
-        ],
-        &fx.payer,
-        &[&fx.fee_admin],
-    )
-    .expect("fee state setup must succeed");
-    create_ata(svm, &fx.payer, &recipient, &fx.source_mint)
 }
 
 fn expect_custom_error(
@@ -95,9 +70,9 @@ fn assert_deposit_state_untouched(svm: &LiteSVM, fx: &ValidatePrepareFixture, fe
         "fee ATA untouched on rejection",
     );
     assert_eq!(
-        fetch_token_balance(svm, &fx.across_vault),
-        0,
-        "across vault untouched on rejection",
+        fetch_mint_supply(svm, &fx.source_mint),
+        OWNER_STARTING_BALANCE,
+        "nothing burned on rejection",
     );
     assert_eq!(
         current_nonce(svm, &fx.accounts.mint_nonce),
@@ -138,9 +113,9 @@ fn fee_collected_happy_path() {
         "adapter custody drained by IX 2",
     );
     assert_eq!(
-        fetch_token_balance(&svm, &fx.across_vault),
-        INPUT - DEFAULT_FEE,
-        "Across vault receives the NET of the protocol fee",
+        fetch_mint_supply(&svm, &fx.source_mint),
+        OWNER_STARTING_BALANCE - (INPUT - DEFAULT_FEE),
+        "the NET of the protocol fee is burned",
     );
     assert_eq!(current_nonce(&svm, &fx.accounts.mint_nonce), 1);
 
@@ -150,7 +125,7 @@ fn fee_collected_happy_path() {
         ev.protocol_fee_amount, DEFAULT_FEE,
         "event carries the collected protocol fee",
     );
-    assert_eq!(ev.output_amount, u256_from_u64(OUTPUT_WITHIN_SLIPPAGE));
+    assert_eq!(ev.output_amount, u256_from_u64(FEE_TEST_OUTPUT));
 }
 
 #[test]
@@ -216,9 +191,9 @@ fn sponsor_skips_fee_when_admin_allows() {
         .expect("sponsored deposit skips the fee without a fee ATA");
 
     assert_eq!(
-        fetch_token_balance(&svm, &fx.across_vault),
-        INPUT,
-        "sponsored deposit bridges the full gross input",
+        fetch_mint_supply(&svm, &fx.source_mint),
+        OWNER_STARTING_BALANCE - INPUT,
+        "sponsored deposit bridges (burns) the full gross input",
     );
 }
 
@@ -270,7 +245,10 @@ fn override_honored_when_allowed() {
         .expect("honored override must succeed");
 
     assert_eq!(fetch_token_balance(&svm, &fee_ata), 5_000);
-    assert_eq!(fetch_token_balance(&svm, &fx.across_vault), INPUT - 5_000);
+    assert_eq!(
+        fetch_mint_supply(&svm, &fx.source_mint),
+        OWNER_STARTING_BALANCE - (INPUT - 5_000)
+    );
 }
 
 #[test]
@@ -360,7 +338,10 @@ fn removed_protocol_fee_charges_zero() {
         .expect("deposit after fee removal charges zero");
 
     assert_eq!(fetch_token_balance(&svm, &fee_ata), 0);
-    assert_eq!(fetch_token_balance(&svm, &fx.across_vault), INPUT);
+    assert_eq!(
+        fetch_mint_supply(&svm, &fx.source_mint),
+        OWNER_STARTING_BALANCE - INPUT
+    );
 }
 
 #[test]
@@ -386,7 +367,10 @@ fn recipient_unset_charges_zero() {
     fx.invoke(&mut svm, fee_params(&fx, 0))
         .expect("recipient-unset deposit charges zero");
 
-    assert_eq!(fetch_token_balance(&svm, &fx.across_vault), INPUT);
+    assert_eq!(
+        fetch_mint_supply(&svm, &fx.source_mint),
+        OWNER_STARTING_BALANCE - INPUT
+    );
 }
 
 #[test]
@@ -518,5 +502,8 @@ fn legacy_zero_fee_params_unchanged() {
 
     fx.invoke(&mut svm, params)
         .expect("zero-fee deposit flows unchanged");
-    assert_eq!(fetch_token_balance(&svm, &fx.across_vault), INPUT);
+    assert_eq!(
+        fetch_mint_supply(&svm, &fx.source_mint),
+        OWNER_STARTING_BALANCE - INPUT
+    );
 }

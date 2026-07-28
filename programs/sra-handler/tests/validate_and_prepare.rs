@@ -1,12 +1,16 @@
 mod common;
 
 use common::*;
-use litesvm::LiteSVM;
 use solana_sdk::{
-    instruction::InstructionError, pubkey::Pubkey, signature::Keypair, signer::Signer,
-    transaction::TransactionError,
+    instruction::InstructionError, pubkey::Pubkey, signer::Signer, transaction::TransactionError,
 };
-use sra_common::{abi::u256_from_u64, errors::SraError, source_deposit::PrepareParams};
+use sra_cctp_adapter::CctpAdapterError;
+use sra_common::{
+    abi::u256_from_u64,
+    constants::{FINALITY_THRESHOLD_FAST, FINALITY_THRESHOLD_FINALIZED},
+    errors::SraError,
+    source_deposit::{CctpDepositParams, PrepareParams},
+};
 
 const INPUT: u64 = 1_000_000;
 // 50 bps slippage tolerance -> min acceptable = 995_000 for INPUT = 1_000_000.
@@ -16,43 +20,43 @@ fn default_prepare_params(fx: &ValidatePrepareFixture) -> PrepareParams {
     sample_prepare_params(fx.target_token)
 }
 
-fn invoke_source_flow(
-    svm: &mut LiteSVM,
-    payer: &Keypair,
-    owner: &Keypair,
+/// The paired 2-IX flow with caller-chosen CCTP execution params (the fixture
+/// default is a no-fee standard transfer); rejections land at IX 1 with the
+/// adapter's own error.
+fn invoke_with_cctp_params(
+    svm: &mut litesvm::LiteSVM,
     fx: &ValidatePrepareFixture,
-    owner_ata: &Pubkey,
-    params: PrepareParams,
+    prepare: PrepareParams,
+    cctp: CctpDepositParams,
 ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>> {
-    let address_book_entry = derive_address_book_pda(
-        &fx.address_book_root,
-        &fx.source_mint,
-        params.target_chain_id,
-        &params.target_token,
-    )
-    .0;
-    let mut across = across_params_for(fx, &params);
-    across.exclusive_relayer = payer.pubkey();
-    let execute_ix = execute_deposit_across_ix(
-        &payer.pubkey(),
-        fx,
-        &fetch_sra_config(svm, &fx.sra_config),
-        &params,
-        across,
-    );
+    let (execute_ix, event_data) = execute_deposit_cctp_ix(&fx.payer.pubkey(), fx, &cctp);
+    let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &prepare.target_token);
     let validate_ix = validate_and_prepare_ix(
-        &payer.pubkey(),
-        &owner.pubkey(),
+        &fx.payer.pubkey(),
+        &fx.owner.pubkey(),
         &fx.accounts,
-        owner_ata,
+        &fx.owner_ata,
         &fx.address_book_root,
         &address_book_entry,
         None,
         fx.handler_data.clone(),
-        params.clone(),
+        prepare,
         &execute_ix,
     );
-    send_instructions(svm, &[validate_ix, execute_ix], payer, &[owner])
+    send_instructions(
+        svm,
+        &[validate_ix, execute_ix],
+        &fx.payer,
+        &[&fx.owner, &event_data],
+    )
+}
+
+fn adapter_error_at_1(err: TransactionError, expected: CctpAdapterError, context: &str) {
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(1, InstructionError::Custom(expected.into())),
+        "{context}",
+    );
 }
 
 #[test]
@@ -60,12 +64,13 @@ fn validate_and_prepare_happy_path() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
 
+    let supply_before = fetch_mint_supply(&svm, &fx.source_mint);
     let params = default_prepare_params(&fx);
     let meta = fx
         .invoke(&mut svm, params.clone())
         .expect("validate_and_prepare should succeed");
 
-    // Tokens flowed owner -> SRA vault -> adapter custody -> Across vault in a single tx.
+    // Tokens flowed owner -> SRA vault -> adapter custody -> CCTP burn in a single tx.
     assert_eq!(
         fetch_token_balance(&svm, &fx.owner_ata),
         OWNER_STARTING_BALANCE - INPUT,
@@ -82,9 +87,9 @@ fn validate_and_prepare_happy_path() {
         "adapter custody is drained by IX 2 in the same tx",
     );
     assert_eq!(
-        fetch_token_balance(&svm, &fx.across_vault),
-        INPUT,
-        "Across vault receives the bridged tokens",
+        fetch_mint_supply(&svm, &fx.source_mint),
+        supply_before - INPUT,
+        "the bridged amount is burned, not vaulted",
     );
 
     // Nonce bumped 0 -> 1.
@@ -109,6 +114,7 @@ fn validate_and_prepare_succeeds_with_decimal_only_surface() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
 
+    let supply_before = fetch_mint_supply(&svm, &fx.source_mint);
     fx.invoke(&mut svm, default_prepare_params(&fx))
         .expect("deposits should still succeed with the decimal-only surface");
 
@@ -118,15 +124,15 @@ fn validate_and_prepare_succeeds_with_decimal_only_surface() {
         "owner ATA debited",
     );
     assert_eq!(
-        fetch_token_balance(&svm, &fx.across_vault),
-        INPUT,
-        "Across vault receives bridged funds",
+        fetch_mint_supply(&svm, &fx.source_mint),
+        supply_before - INPUT,
+        "bridged funds are burned",
     );
     assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 1);
 }
 
 #[test]
-fn execute_deposit_emits_across_deposit_executed() {
+fn execute_deposit_emits_cctp_deposit_executed() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
 
@@ -135,19 +141,30 @@ fn execute_deposit_emits_across_deposit_executed() {
         .invoke(&mut svm, params.clone())
         .expect("paired source flow should succeed");
 
-    let ev = extract_anchor_event::<sra_across_adapter::events::AcrossDepositExecuted>(&meta.logs)
-        .expect("AcrossDepositExecuted event must be emitted");
+    let ev = extract_anchor_event::<sra_cctp_adapter::events::CctpDepositExecuted>(&meta.logs)
+        .expect("CctpDepositExecuted event must be emitted");
     assert_eq!(ev.sra_config, fx.sra_config);
     assert_eq!(ev.input_mint, fx.source_mint);
     assert_eq!(ev.nonce, 0);
-    assert_eq!(ev.across_state, fx.across_state);
-    assert_eq!(ev.across_vault, fx.across_vault);
-    assert_eq!(ev.input_amount, params.input_amount);
+    assert_eq!(ev.destination_domain, 3, "42161 maps to CCTP domain 3");
+    assert_eq!(ev.input_amount, INPUT);
     assert_eq!(ev.output_amount, params.output_amount);
     assert_eq!(ev.target_token, params.target_token);
-    assert_eq!(ev.exclusive_relayer, fx.payer.pubkey());
-    assert_eq!(ev.fill_deadline_offset, 3_600);
-    assert_eq!(ev.exclusivity_period, 900);
+    assert_eq!(ev.max_fee, 0);
+    assert_eq!(ev.min_finality_threshold, FINALITY_THRESHOLD_FINALIZED);
+
+    // The mock recorded exactly what the adapter CPI'd: the burn of the net
+    // toward the attested recipient, permissionless receive.
+    let sent = fetch_sent_deposit_for_burn(&svm, &ev.message_sent_event_data);
+    assert_eq!(sent.amount, INPUT);
+    assert_eq!(sent.destination_domain, 3);
+    assert_eq!(
+        sent.mint_recipient,
+        Pubkey::new_from_array(params.recipient)
+    );
+    assert_eq!(sent.destination_caller, Pubkey::default());
+    assert_eq!(sent.max_fee, 0);
+    assert_eq!(sent.min_finality_threshold, FINALITY_THRESHOLD_FINALIZED);
 }
 
 #[test]
@@ -156,13 +173,8 @@ fn validate_and_prepare_standalone_rejected() {
     let fx = ValidatePrepareFixture::new(&mut svm);
 
     let prepare = default_prepare_params(&fx);
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        across_params_for(&fx, &prepare),
-    );
+    let (execute_ix, _event_data) =
+        execute_deposit_cctp_ix(&fx.payer.pubkey(), &fx, &cctp_params_for(&prepare));
     let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let ix = validate_and_prepare_ix(
         &fx.payer.pubkey(),
@@ -196,13 +208,8 @@ fn validate_and_prepare_wrong_next_ix_program_rejected() {
     let fx = ValidatePrepareFixture::new(&mut svm);
     let params = default_prepare_params(&fx);
 
-    let mut bad_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &params,
-        across_params_for(&fx, &params),
-    );
+    let (mut bad_ix, event_data) =
+        execute_deposit_cctp_ix(&fx.payer.pubkey(), &fx, &cctp_params_for(&params));
     bad_ix.program_id = PROGRAM_ID;
 
     let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
@@ -218,10 +225,15 @@ fn validate_and_prepare_wrong_next_ix_program_rejected() {
         params,
         &bad_ix,
     );
-    let err = send_instructions(&mut svm, &[validate_ix, bad_ix], &fx.payer, &[&fx.owner])
-        .expect_err("wrong next program must reject")
-        .err
-        .clone();
+    let err = send_instructions(
+        &mut svm,
+        &[validate_ix, bad_ix],
+        &fx.payer,
+        &[&fx.owner, &event_data],
+    )
+    .expect_err("wrong next program must reject")
+    .err
+    .clone();
 
     assert_eq!(
         err,
@@ -237,40 +249,15 @@ fn validate_and_prepare_wrong_next_ix_routing_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
     let prepare = default_prepare_params(&fx);
-    let mut across = across_params_for(&fx, &prepare);
     // Diverge a routing field the adapter re-derives from the attested prepare,
     // so the adapter's `expected_deposit == *deposit` check rejects it.
-    across.recipient = evm_bytes32(0x99);
+    let mut cctp = cctp_params_for(&prepare);
+    cctp.recipient = evm_bytes32(0x99);
 
-    let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        across,
-    );
-    let validate_ix = validate_and_prepare_ix(
-        &fx.payer.pubkey(),
-        &fx.owner.pubkey(),
-        &fx.accounts,
-        &fx.owner_ata,
-        &fx.address_book_root,
-        &address_book_entry,
-        None,
-        fx.handler_data.clone(),
-        prepare.clone(),
-        &execute_ix,
-    );
-    let err = send_instructions(
-        &mut svm,
-        &[validate_ix, execute_ix],
-        &fx.payer,
-        &[&fx.owner],
-    )
-    .expect_err("routing mismatch must reject")
-    .err
-    .clone();
+    let err = invoke_with_cctp_params(&mut svm, &fx, prepare, cctp)
+        .expect_err("routing mismatch must reject")
+        .err
+        .clone();
 
     assert_eq!(
         err,
@@ -286,16 +273,10 @@ fn validate_and_prepare_wrong_next_ix_sra_config_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
     let prepare = default_prepare_params(&fx);
-    let across = across_params_for(&fx, &prepare);
 
     let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
-    let mut execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        across,
-    );
+    let (mut execute_ix, event_data) =
+        execute_deposit_cctp_ix(&fx.payer.pubkey(), &fx, &cctp_params_for(&prepare));
     // ADAPTER_ACCT_SRA_CONFIG = 2 in the adapter ix layout.
     execute_ix.accounts[2].pubkey = solana_sdk::pubkey::Pubkey::new_unique();
     let validate_ix = validate_and_prepare_ix(
@@ -315,7 +296,7 @@ fn validate_and_prepare_wrong_next_ix_sra_config_rejected() {
         &mut svm,
         &[validate_ix, execute_ix],
         &fx.payer,
-        &[&fx.owner],
+        &[&fx.owner, &event_data],
     )
     .expect_err("wrong sra_config slot in IX 2 must reject")
     .err
@@ -335,16 +316,10 @@ fn validate_and_prepare_wrong_next_ix_source_mint_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
     let prepare = default_prepare_params(&fx);
-    let across = across_params_for(&fx, &prepare);
 
     let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
-    let mut execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        across,
-    );
+    let (mut execute_ix, event_data) =
+        execute_deposit_cctp_ix(&fx.payer.pubkey(), &fx, &cctp_params_for(&prepare));
     // ADAPTER_ACCT_INPUT_MINT = 6 in the adapter ix layout.
     execute_ix.accounts[6].pubkey = solana_sdk::pubkey::Pubkey::new_unique();
     let validate_ix = validate_and_prepare_ix(
@@ -364,7 +339,7 @@ fn validate_and_prepare_wrong_next_ix_source_mint_rejected() {
         &mut svm,
         &[validate_ix, execute_ix],
         &fx.payer,
-        &[&fx.owner],
+        &[&fx.owner, &event_data],
     )
     .expect_err("wrong input_mint slot in IX 2 must reject")
     .err
@@ -380,18 +355,13 @@ fn validate_and_prepare_wrong_next_ix_source_mint_rejected() {
 }
 
 #[test]
-fn validate_and_prepare_wrong_next_ix_exclusive_relayer_rejected() {
+fn validate_and_prepare_wrong_next_ix_max_fee_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
     let prepare = default_prepare_params(&fx);
-    let base_across = across_params_for(&fx, &prepare);
-    let paired_execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        base_across.clone(),
-    );
+    let base_cctp = cctp_params_for(&prepare);
+    let (paired_execute_ix, _paired_event_data) =
+        execute_deposit_cctp_ix(&fx.payer.pubkey(), &fx, &base_cctp);
 
     let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
     let validate_ix = validate_and_prepare_ix(
@@ -407,23 +377,18 @@ fn validate_and_prepare_wrong_next_ix_exclusive_relayer_rejected() {
         &paired_execute_ix,
     );
 
-    let mut mutated_across = base_across;
-    mutated_across.exclusive_relayer = Pubkey::new_unique();
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        mutated_across,
-    );
+    // The executed adapter leg claims a different max_fee than the attested one.
+    let mut mutated_cctp = base_cctp;
+    mutated_cctp.max_fee = 500;
+    let (execute_ix, event_data) = execute_deposit_cctp_ix(&fx.payer.pubkey(), &fx, &mutated_cctp);
 
     let err = send_instructions(
         &mut svm,
         &[validate_ix, execute_ix],
         &fx.payer,
-        &[&fx.owner],
+        &[&fx.owner, &event_data],
     )
-    .expect_err("exclusive_relayer mismatch must reject")
+    .expect_err("max_fee mismatch must reject")
     .err
     .clone();
 
@@ -441,16 +406,10 @@ fn validate_and_prepare_malformed_next_ix_data_rejected() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
     let prepare = default_prepare_params(&fx);
-    let across = across_params_for(&fx, &prepare);
 
     let address_book_entry = fx.address_book_entry(prepare.target_chain_id, &fx.target_token);
-    let mut execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        across,
-    );
+    let (mut execute_ix, event_data) =
+        execute_deposit_cctp_ix(&fx.payer.pubkey(), &fx, &cctp_params_for(&prepare));
     // Wrong discriminator: zero out the leading 8 bytes so decode rejects
     // before any field comparison.
     for byte in execute_ix.data.iter_mut().take(8) {
@@ -473,7 +432,7 @@ fn validate_and_prepare_malformed_next_ix_data_rejected() {
         &mut svm,
         &[validate_ix, execute_ix],
         &fx.payer,
-        &[&fx.owner],
+        &[&fx.owner, &event_data],
     )
     .expect_err("malformed IX 2 data must reject")
     .err
@@ -524,7 +483,7 @@ fn execute_deposit_standalone_rejected() {
     );
 
     let prepare = default_prepare_params(&fx);
-    let err = invoke_execute_only(&fx, &mut svm, &prepare, across_params_for(&fx, &prepare))
+    let err = invoke_execute_only(&fx, &mut svm, &cctp_params_for(&prepare))
         .expect_err("standalone ix2 must reject")
         .err
         .clone();
@@ -556,18 +515,18 @@ fn execute_deposit_wrong_prev_ix_program_rejected() {
     );
 
     let prepare = default_prepare_params(&fx);
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        across_params_for(&fx, &prepare),
-    );
+    let (execute_ix, event_data) =
+        execute_deposit_cctp_ix(&fx.payer.pubkey(), &fx, &cctp_params_for(&prepare));
 
-    let err = send_instructions(&mut svm, &[compute_budget_ix(), execute_ix], &fx.payer, &[])
-        .expect_err("non-handler prev ix must reject in adapter")
-        .err
-        .clone();
+    let err = send_instructions(
+        &mut svm,
+        &[compute_budget_ix(), execute_ix],
+        &fx.payer,
+        &[&event_data],
+    )
+    .expect_err("non-handler prev ix must reject in adapter")
+    .err
+    .clone();
 
     assert_eq!(
         err,
@@ -610,19 +569,14 @@ fn execute_deposit_wrong_prev_handler_call_rejected() {
         fx.target_token,
         6,
     );
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
-        &prepare,
-        across_params_for(&fx, &prepare),
-    );
+    let (execute_ix, event_data) =
+        execute_deposit_cctp_ix(&fx.payer.pubkey(), &fx, &cctp_params_for(&prepare));
 
     let err = send_instructions(
         &mut svm,
         &[other_handler_ix, execute_ix],
         &fx.payer,
-        &[&fx.owner],
+        &[&fx.owner, &event_data],
     )
     .expect_err("non-validate_and_prepare handler ix must reject in adapter")
     .err
@@ -634,6 +588,127 @@ fn execute_deposit_wrong_prev_handler_call_rejected() {
             1,
             InstructionError::Custom(SraError::InvalidPairedInstruction.into()),
         )
+    );
+}
+
+#[test]
+fn execute_deposit_cctp_quote_boundary() {
+    // The committed quote must survive the worst-case CCTP fee:
+    // net − max_fee ≥ output. INPUT = 1_000_000 (no protocol fee) with
+    // OUTPUT_WITHIN_SLIPPAGE = 999_500 leaves exactly 500 of fee headroom.
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    let prepare = default_prepare_params(&fx);
+
+    let mut cctp = cctp_params_for(&prepare);
+    cctp.max_fee = 500;
+    invoke_with_cctp_params(&mut svm, &fx, prepare.clone(), cctp)
+        .expect("net − max_fee == output must pass");
+
+    let mut cctp = cctp_params_for(&prepare);
+    cctp.max_fee = 501;
+    let err = invoke_with_cctp_params(&mut svm, &fx, prepare.clone(), cctp)
+        .expect_err("one above the fee headroom must reject")
+        .err
+        .clone();
+    adapter_error_at_1(
+        err,
+        CctpAdapterError::QuoteExceedsNetAfterFee,
+        "output above net − max_fee must reject",
+    );
+
+    let mut cctp = cctp_params_for(&prepare);
+    cctp.max_fee = INPUT + 1;
+    let err = invoke_with_cctp_params(&mut svm, &fx, prepare, cctp)
+        .expect_err("max_fee above the net must fail closed")
+        .err
+        .clone();
+    adapter_error_at_1(
+        err,
+        CctpAdapterError::QuoteExceedsNetAfterFee,
+        "max_fee above the net must fail closed",
+    );
+}
+
+#[test]
+fn execute_deposit_cctp_finality_threshold_bounds() {
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    let prepare = default_prepare_params(&fx);
+
+    for rejected in [0u32, FINALITY_THRESHOLD_FINALIZED + 1] {
+        let mut cctp = cctp_params_for(&prepare);
+        cctp.min_finality_threshold = rejected;
+        let err = invoke_with_cctp_params(&mut svm, &fx, prepare.clone(), cctp)
+            .expect_err("out-of-bounds threshold must reject")
+            .err
+            .clone();
+        adapter_error_at_1(
+            err,
+            CctpAdapterError::InvalidFinalityThreshold,
+            "threshold outside 1..=2000 must reject",
+        );
+    }
+
+    for accepted in [1u32, FINALITY_THRESHOLD_FINALIZED] {
+        let mut cctp = cctp_params_for(&prepare);
+        cctp.min_finality_threshold = accepted;
+        invoke_with_cctp_params(&mut svm, &fx, prepare.clone(), cctp)
+            .expect("bounds 1 and 2000 must be accepted");
+    }
+}
+
+#[test]
+fn execute_deposit_cctp_fast_transfer_happy_path() {
+    // Fast transfer: soft finality plus a positive fee cap, quoted inside the
+    // fee headroom. The mock records both execution fields verbatim.
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new(&mut svm);
+    let prepare = PrepareParams {
+        output_amount: u256_from_u64(999_000),
+        ..default_prepare_params(&fx)
+    };
+    let mut cctp = cctp_params_for(&prepare);
+    cctp.max_fee = 1_000;
+    cctp.min_finality_threshold = FINALITY_THRESHOLD_FAST;
+
+    let meta = invoke_with_cctp_params(&mut svm, &fx, prepare, cctp)
+        .expect("fast transfer within the fee headroom must pass");
+
+    let ev = extract_anchor_event::<sra_cctp_adapter::events::CctpDepositExecuted>(&meta.logs)
+        .expect("CctpDepositExecuted event must be emitted");
+    assert_eq!(ev.max_fee, 1_000);
+    assert_eq!(ev.min_finality_threshold, FINALITY_THRESHOLD_FAST);
+    let sent = fetch_sent_deposit_for_burn(&svm, &ev.message_sent_event_data);
+    assert_eq!(sent.max_fee, 1_000);
+    assert_eq!(sent.min_finality_threshold, FINALITY_THRESHOLD_FAST);
+}
+
+#[test]
+fn execute_deposit_cctp_unsupported_chain_rejected() {
+    // BNB (56) is the deliberate omission from the CCTP domain table. The
+    // handler is bridge-agnostic and passes it through; the adapter rejects.
+    let mut svm = setup_svm();
+    let fx = ValidatePrepareFixture::new_with_target_chain(&mut svm, 56);
+    let prepare = PrepareParams {
+        target_chain_id: 56,
+        ..sample_prepare_params(fx.target_token)
+    };
+
+    let err = invoke_with_cctp_params(&mut svm, &fx, prepare.clone(), cctp_params_for(&prepare))
+        .expect_err("unmapped chain must reject")
+        .err
+        .clone();
+
+    adapter_error_at_1(
+        err,
+        CctpAdapterError::UnsupportedChain,
+        "unmapped target chain must reject in the adapter",
+    );
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.owner_ata),
+        OWNER_STARTING_BALANCE,
+        "rejection reverts the whole paired tx",
     );
 }
 
@@ -675,8 +750,12 @@ fn validate_and_prepare_disabled_address_book_rejected() {
 #[test]
 fn validate_and_prepare_unregistered_adapter_rejected() {
     let mut svm = setup_svm();
-    let fx =
-        ValidatePrepareFixture::new_with_adapter_policy(&mut svm, ADAPTER_PROGRAM_ID, 50, vec![]);
+    let fx = ValidatePrepareFixture::new_with_adapter_policy(
+        &mut svm,
+        CCTP_ADAPTER_PROGRAM_ID,
+        50,
+        vec![],
+    );
 
     let err = fx
         .invoke(&mut svm, default_prepare_params(&fx))
@@ -820,7 +899,12 @@ fn validate_and_prepare_slippage_exceeded_rejected() {
 }
 
 #[test]
-fn validate_and_prepare_slippage_uses_decimal_normalized_amounts() {
+fn decimal_normalized_output_passes_handler_but_cctp_rejects_quote() {
+    // An 18-decimal target output within slippage clears the handler's
+    // decimal-normalized floor (IX 0 succeeds — the error index proves it),
+    // but the CCTP adapter's raw-unit quote invariant rejects it: CCTP is
+    // USDC-only and 1:1, so a corridor whose target token out-scales the net
+    // input cannot be quoted through this adapter.
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
     setup_address_book_entry(
@@ -834,7 +918,7 @@ fn validate_and_prepare_slippage_uses_decimal_normalized_amounts() {
         18,
     );
 
-    let meta = fx
+    let err = fx
         .invoke(
             &mut svm,
             PrepareParams {
@@ -843,11 +927,15 @@ fn validate_and_prepare_slippage_uses_decimal_normalized_amounts() {
                 ..default_prepare_params(&fx)
             },
         )
-        .expect("decimal-normalized slippage should succeed");
+        .expect_err("out-scaled output must reject in the adapter")
+        .err
+        .clone();
 
-    let ev = extract_deposit_prepared(&meta.logs).expect("DepositPrepared event must be emitted");
-    assert_eq!(ev.input_amount, 1_000_000);
-    assert_eq!(ev.output_amount, u256_from_u64(995_000_000_000_000_000));
+    adapter_error_at_1(
+        err,
+        CctpAdapterError::QuoteExceedsNetAfterFee,
+        "handler accepts the normalized output; the CCTP quote check rejects it",
+    );
 }
 
 #[test]
@@ -894,9 +982,9 @@ fn validate_and_prepare_handles_large_source_decimal_gap_without_overflow() {
         &mut svm,
         45,
         6,
-        ADAPTER_PROGRAM_ID,
+        CCTP_ADAPTER_PROGRAM_ID,
         50,
-        vec![ADAPTER_PROGRAM_ID],
+        vec![CCTP_ADAPTER_PROGRAM_ID],
     );
 
     fx.invoke(
@@ -917,9 +1005,9 @@ fn validate_and_prepare_large_target_decimal_gap_rejects_as_slippage() {
         &mut svm,
         6,
         45,
-        ADAPTER_PROGRAM_ID,
+        CCTP_ADAPTER_PROGRAM_ID,
         50,
-        vec![ADAPTER_PROGRAM_ID],
+        vec![CCTP_ADAPTER_PROGRAM_ID],
     );
 
     let err = fx
@@ -979,6 +1067,7 @@ fn validate_and_prepare_sequential_nonce_increments() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
 
+    let supply_before = fetch_mint_supply(&svm, &fx.source_mint);
     let mut params = default_prepare_params(&fx);
     params.input_amount = 100_000;
     params.output_amount = u256_from_u64(99_500);
@@ -1003,8 +1092,11 @@ fn validate_and_prepare_sequential_nonce_increments() {
         );
     }
 
-    // After 3 successful deposits: across_vault holds 3x 100_000, owner is short the same.
-    assert_eq!(fetch_token_balance(&svm, &fx.across_vault), 300_000);
+    // After 3 successful deposits: 3x 100_000 burned, owner is short the same.
+    assert_eq!(
+        fetch_mint_supply(&svm, &fx.source_mint),
+        supply_before - 300_000
+    );
     assert_eq!(
         fetch_token_balance(&svm, &fx.owner_ata),
         OWNER_STARTING_BALANCE - 300_000
@@ -1109,15 +1201,9 @@ fn validate_and_prepare_multi_mint_single_sra_independent_nonces() {
         across_vault: second_across_vault,
     };
 
-    let meta_b0 = invoke_source_flow(
-        &mut svm,
-        &fx.payer,
-        &fx.owner,
-        &second_fx,
-        &second_owner_ata,
-        params.clone(),
-    )
-    .expect("second mint deposit #0 should succeed");
+    let meta_b0 = second_fx
+        .invoke(&mut svm, params.clone())
+        .expect("second mint deposit #0 should succeed");
     let ev_b0 = extract_deposit_prepared(&meta_b0.logs).expect("second mint event #0");
 
     let meta_a1 = fx
@@ -1362,14 +1448,17 @@ fn validate_and_prepare_frozen_owner_ata_fails_cleanly() {
 }
 
 #[test]
-fn validate_and_prepare_accepts_output_above_u64_max() {
+fn output_above_u64_max_passes_handler_but_cctp_rejects_quote() {
+    // The handler widens the u256 output and accepts it (the IX-1 error index
+    // proves IX 0 passed); the CCTP adapter then rejects it — a u64 net can
+    // never cover an output above u64::MAX, by the quote invariant.
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
 
     let mut output_amount = [0u8; 32];
     output_amount[16..].copy_from_slice(&(1u128 << 64).to_be_bytes());
 
-    let meta = fx
+    let err = fx
         .invoke(
             &mut svm,
             PrepareParams {
@@ -1377,11 +1466,20 @@ fn validate_and_prepare_accepts_output_above_u64_max() {
                 ..default_prepare_params(&fx)
             },
         )
-        .expect("output_amount above u64::MAX must be accepted post-widening");
+        .expect_err("output above u64::MAX must reject in the adapter")
+        .err
+        .clone();
 
-    let ev = extract_deposit_prepared(&meta.logs).expect("DepositPrepared event");
-    assert_eq!(ev.output_amount, output_amount);
-    assert_eq!(fetch_mint_nonce(&svm, &fx.accounts.mint_nonce).nonce, 1);
+    adapter_error_at_1(
+        err,
+        CctpAdapterError::QuoteExceedsNetAfterFee,
+        "post-widening handler acceptance, CCTP quote rejection",
+    );
+    assert_eq!(
+        fetch_token_balance(&svm, &fx.owner_ata),
+        OWNER_STARTING_BALANCE,
+        "rejection reverts the whole paired tx",
+    );
 }
 
 #[test]

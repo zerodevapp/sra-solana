@@ -1,8 +1,9 @@
 //! Paired source-transaction size validation.
 //!
 //! Solana enforces a hard packet-size limit. The full source deposit
-//! flow is `validate_and_prepare` (handler) + `execute_deposit_across`
-//! (adapter) packaged as a single versioned transaction.
+//! flow is `validate_and_prepare` (handler) + `execute_deposit_cctp`
+//! (adapter) packaged as a single versioned transaction, co-signed by the
+//! ephemeral CCTP event keypair (a third signature = +64 bytes).
 
 mod common;
 
@@ -25,13 +26,8 @@ fn build_source_versioned_tx_with_lookup_tables(
     lookup_tables: &[AddressLookupTableAccount],
 ) -> VersionedTransaction {
     let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        fx,
-        &fetch_sra_config(svm, &fx.sra_config),
-        &params,
-        across_params_for(fx, &params),
-    );
+    let (execute_ix, event_data) =
+        execute_deposit_cctp_ix(&fx.payer.pubkey(), fx, &cctp_params_for(&params));
     let validate_ix = validate_and_prepare_ix(
         &fx.payer.pubkey(),
         &fx.owner.pubkey(),
@@ -54,8 +50,11 @@ fn build_source_versioned_tx_with_lookup_tables(
     )
     .expect("compile v0 message");
 
-    VersionedTransaction::try_new(VersionedMessage::V0(v0_msg), &[&fx.payer, &fx.owner])
-        .expect("sign versioned tx")
+    VersionedTransaction::try_new(
+        VersionedMessage::V0(v0_msg),
+        &[&fx.payer, &fx.owner, &event_data],
+    )
+    .expect("sign versioned tx")
 }
 
 fn build_source_versioned_tx(
@@ -64,13 +63,8 @@ fn build_source_versioned_tx(
     params: PrepareParams,
 ) -> VersionedTransaction {
     let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
-    let execute_ix = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        fx,
-        &fetch_sra_config(svm, &fx.sra_config),
-        &params,
-        across_params_for(fx, &params),
-    );
+    let (execute_ix, _event_data) =
+        execute_deposit_cctp_ix(&fx.payer.pubkey(), fx, &cctp_params_for(&params));
     let validate_ix = validate_and_prepare_ix(
         &fx.payer.pubkey(),
         &fx.owner.pubkey(),
