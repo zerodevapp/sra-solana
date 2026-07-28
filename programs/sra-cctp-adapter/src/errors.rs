@@ -21,4 +21,7 @@ pub enum CctpAdapterError {
     // error codes stay stable.
     #[msg("CCTP message bytes do not parse as a supported burn message")]
     MalformedMessage,
+
+    #[msg("Attestation does not verify against the enabled attesters")]
+    InvalidAttestation,
 }
