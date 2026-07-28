@@ -40,35 +40,6 @@ fn fee_params(fx: &ValidatePrepareFixture, protocol_fee_amount: u64) -> PrepareP
     params
 }
 
-/// Configures live fee state: recipient set + the single global protocol fee.
-/// Returns the canonical recipient fee ATA.
-fn enable_protocol_fee(
-    svm: &mut LiteSVM,
-    fx: &ValidatePrepareFixture,
-    default_fee_bps: u16,
-    allow_override: bool,
-    allow_sponsored: bool,
-) -> Pubkey {
-    let recipient = Pubkey::new_unique();
-    send_instructions(
-        svm,
-        &[
-            set_fee_recipient_ix(&fx.fee_admin.pubkey(), recipient),
-            set_protocol_fee_ix(
-                &fx.payer.pubkey(),
-                &fx.fee_admin.pubkey(),
-                default_fee_bps,
-                allow_override,
-                allow_sponsored,
-            ),
-        ],
-        &fx.payer,
-        &[&fx.fee_admin],
-    )
-    .expect("fee state setup must succeed");
-    create_ata(svm, &fx.payer, &recipient, &fx.source_mint)
-}
-
 fn expect_custom_error(
     result: Result<
         litesvm::types::TransactionMetadata,

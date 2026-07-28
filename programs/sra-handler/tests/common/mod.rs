@@ -784,6 +784,35 @@ pub fn fetch_asset_fee_tier(svm: &LiteSVM, pda: &Pubkey) -> AssetFeeTier {
     AssetFeeTier::try_deserialize(&mut acct.data.as_slice()).expect("valid AssetFeeTier")
 }
 
+/// Configures live fee state (recipient + the single global protocol fee) and
+/// returns the canonical recipient fee ATA.
+pub fn enable_protocol_fee(
+    svm: &mut LiteSVM,
+    fx: &ValidatePrepareFixture,
+    default_fee_bps: u16,
+    allow_override: bool,
+    allow_sponsored: bool,
+) -> Pubkey {
+    let recipient = Pubkey::new_unique();
+    send_instructions(
+        svm,
+        &[
+            set_fee_recipient_ix(&fx.fee_admin.pubkey(), recipient),
+            set_protocol_fee_ix(
+                &fx.payer.pubkey(),
+                &fx.fee_admin.pubkey(),
+                default_fee_bps,
+                allow_override,
+                allow_sponsored,
+            ),
+        ],
+        &fx.payer,
+        &[&fx.fee_admin],
+    )
+    .expect("fee state setup must succeed");
+    create_ata(svm, &fx.payer, &recipient, &fx.source_mint)
+}
+
 pub fn seed_mint_nonce_account(svm: &mut LiteSVM, pda: &Pubkey, nonce: u64, bump: u8) {
     let mut data = <MintNonce as Discriminator>::DISCRIMINATOR.to_vec();
     MintNonce { nonce, bump }.serialize(&mut data).unwrap();

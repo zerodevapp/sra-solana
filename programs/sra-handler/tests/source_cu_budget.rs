@@ -81,29 +81,6 @@ fn assert_under_budget(consumed: u64, label: &str) {
     );
 }
 
-/// Enables a global recipient + a default (global) protocol fee, and returns
-/// the canonical recipient fee ATA.
-fn enable_protocol_fee(svm: &mut LiteSVM, fx: &ValidatePrepareFixture) -> Pubkey {
-    let recipient = Pubkey::new_unique();
-    send_instructions(
-        svm,
-        &[
-            set_fee_recipient_ix(&fx.fee_admin.pubkey(), recipient),
-            set_protocol_fee_ix(
-                &fx.payer.pubkey(),
-                &fx.fee_admin.pubkey(),
-                DEFAULT_FEE_BPS,
-                false,
-                false,
-            ),
-        ],
-        &fx.payer,
-        &[&fx.fee_admin],
-    )
-    .expect("fee state setup must succeed");
-    create_ata(svm, &fx.payer, &recipient, &fx.source_mint)
-}
-
 #[test]
 fn source_2ix_flow_under_cu_budget() {
     let mut svm = setup_svm();
@@ -117,7 +94,7 @@ fn source_2ix_flow_under_cu_budget() {
 fn source_2ix_flow_with_fee_under_cu_budget() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
-    let fee_ata = enable_protocol_fee(&mut svm, &fx);
+    let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     // Heaviest production path: protocol fee ON adds a second token CPI
     // (vault -> fee-recipient `transfer_checked`). The quote drops to the
