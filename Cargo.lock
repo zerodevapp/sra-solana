@@ -2465,6 +2465,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mock-cctp"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+]
+
+[[package]]
 name = "mock-spoke-pool"
 version = "0.1.0"
 dependencies = [
@@ -6585,6 +6593,7 @@ dependencies = [
  "fslock",
  "litesvm",
  "litesvm-token",
+ "mock-cctp",
  "mock-spoke-pool",
  "mock-swap",
  "reqwest",

@@ -43,6 +43,7 @@ base64 = "0.22"
 bincode = "1.3"
 sra-across-adapter = { path = "../sra-across-adapter", features = ["no-entrypoint", "test-utils"] }
 sra-cctp-adapter = { path = "../sra-cctp-adapter", features = ["no-entrypoint"] }
+mock-cctp = { path = "../mock-cctp", features = ["no-entrypoint"] }
 mock-spoke-pool = { path = "../mock-spoke-pool", features = ["no-entrypoint"] }
 mock-swap = { path = "../mock-swap", features = ["no-entrypoint"] }
 
