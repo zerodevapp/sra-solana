@@ -16,4 +16,9 @@ pub enum CctpAdapterError {
 
     #[msg("Committed output exceeds the net input after the CCTP max fee")]
     QuoteExceedsNetAfterFee,
+
+    // Destination-leg variants are appended (never reordered) so deployed
+    // error codes stay stable.
+    #[msg("CCTP message bytes do not parse as a supported burn message")]
+    MalformedMessage,
 }
