@@ -8,6 +8,391 @@
   },
   "instructions": [
     {
+      "name": "execute_deposit_cctp",
+      "discriminator": [
+        121,
+        98,
+        89,
+        108,
+        206,
+        232,
+        106,
+        9
+      ],
+      "accounts": [
+        {
+          "name": "fee_payer",
+          "docs": [
+            "Pays the tx fee and the CCTP `MessageSent` event-account rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "sra_config"
+        },
+        {
+          "name": "mint_nonce",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  110,
+                  111,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "sra_config"
+              },
+              {
+                "kind": "account",
+                "path": "input_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                92,
+                4,
+                188,
+                181,
+                107,
+                183,
+                243,
+                190,
+                62,
+                5,
+                91,
+                94,
+                2,
+                252,
+                137,
+                8,
+                124,
+                142,
+                6,
+                233,
+                158,
+                155,
+                223,
+                111,
+                134,
+                251,
+                227,
+                254,
+                49,
+                214,
+                172,
+                92
+              ]
+            }
+          }
+        },
+        {
+          "name": "adapter_authority",
+          "docs": [
+            "the same address via `seeds::program = adapter_program.key()`. Owns",
+            "`adapter_custody` and signs the burn directly (no delegate approval)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  97,
+                  112,
+                  116,
+                  101,
+                  114,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "sra_config"
+              }
+            ]
+          }
+        },
+        {
+          "name": "adapter_custody",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "adapter_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "input_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "input_mint",
+          "docs": [
+            "The burn decreases the supply, so the mint is writable."
+          ],
+          "writable": true
+        },
+        {
+          "name": "sender_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  110,
+                  100,
+                  101,
+                  114,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "cctp_program"
+            }
+          }
+        },
+        {
+          "name": "message_transmitter",
+          "writable": true
+        },
+        {
+          "name": "token_messenger"
+        },
+        {
+          "name": "remote_token_messenger",
+          "docs": [
+            "must equal `destination_domain`)."
+          ]
+        },
+        {
+          "name": "token_minter"
+        },
+        {
+          "name": "local_token",
+          "writable": true
+        },
+        {
+          "name": "denylist_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  110,
+                  121,
+                  108,
+                  105,
+                  115,
+                  116,
+                  95,
+                  97,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "adapter_authority"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "cctp_program"
+            }
+          }
+        },
+        {
+          "name": "message_sent_event_data",
+          "docs": [
+            "Ephemeral keypair account CCTP initializes with the `MessageSent`",
+            "payload; co-signs the transaction, rent paid by `fee_payer`."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "message_transmitter_program"
+        },
+        {
+          "name": "cctp_program"
+        },
+        {
+          "name": "cctp_event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "cctp_program"
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "CctpDepositParams"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "recover_stuck_custody",
       "discriminator": [
         9,
@@ -270,6 +655,19 @@
   ],
   "accounts": [
     {
+      "name": "MintNonce",
+      "discriminator": [
+        207,
+        90,
+        192,
+        29,
+        25,
+        162,
+        153,
+        119
+      ]
+    },
+    {
       "name": "SraConfig",
       "discriminator": [
         218,
@@ -402,6 +800,68 @@
       }
     },
     {
+      "name": "CctpDepositParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "input_amount",
+            "docs": [
+              "Net of protocol fee (`PrepareParams::net_input_amount`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "output_amount",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "recipient",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_token",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "max_fee",
+            "docs": [
+              "CCTP fee cap; the destination-side `fee_executed` is bounded by this."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_finality_threshold",
+            "docs": [
+              "CCTP v2 finality; canonical values are `FINALITY_THRESHOLD_FAST`",
+              "(1000) and `FINALITY_THRESHOLD_FINALIZED` (2000), and the adapter",
+              "accepts `1..=2000`."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
       "name": "CustodyRecovered",
       "type": {
         "kind": "struct",
@@ -421,6 +881,27 @@
           {
             "name": "amount",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MintNonce",
+      "docs": [
+        "Persistent nonce per `(sra_config, source_mint)`. The owner-signed deposit",
+        "flow will create it lazily and increment it per source-mint deposit.",
+        "PDA seeds: [\"mint_nonce\", sra_config, source_mint]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }

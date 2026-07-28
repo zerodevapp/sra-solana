@@ -1,0 +1,254 @@
+{
+  "address": "CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe",
+  "metadata": {
+    "name": "token_messenger_minter_v2",
+    "version": "0.2.0",
+    "spec": "0.1.0",
+    "description": "Token Messenger and Minter for Cross-Chain Transfer Protocol V2",
+    "repository": "https://github.com/circlefin/solana-cctp-contracts"
+  },
+  "instructions": [
+    {
+      "name": "deposit_for_burn",
+      "discriminator": [
+        215,
+        60,
+        61,
+        46,
+        114,
+        55,
+        128,
+        176
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "burn_token_account"
+          ]
+        },
+        {
+          "name": "event_rent_payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "sender_authority_pda",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  110,
+                  100,
+                  101,
+                  114,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "burn_token_account",
+          "writable": true
+        },
+        {
+          "name": "denylist_account",
+          "docs": [
+            "Account is denylisted if the account exists at the expected PDA."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  110,
+                  121,
+                  108,
+                  105,
+                  115,
+                  116,
+                  95,
+                  97,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "message_transmitter",
+          "writable": true
+        },
+        {
+          "name": "token_messenger"
+        },
+        {
+          "name": "remote_token_messenger"
+        },
+        {
+          "name": "token_minter"
+        },
+        {
+          "name": "local_token",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  99,
+                  97,
+                  108,
+                  95,
+                  116,
+                  111,
+                  107,
+                  101,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "burn_token_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "burn_token_mint",
+          "writable": true
+        },
+        {
+          "name": "message_sent_event_data",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "message_transmitter_program",
+          "address": "CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC"
+        },
+        {
+          "name": "token_messenger_minter_program",
+          "address": "CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "DepositForBurnParams"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [],
+  "events": [],
+  "errors": [],
+  "types": [
+    {
+      "name": "DepositForBurnParams",
+      "repr": {
+        "kind": "c"
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "destination_domain",
+            "type": "u32"
+          },
+          {
+            "name": "mint_recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "destination_caller",
+            "type": "pubkey"
+          },
+          {
+            "name": "max_fee",
+            "type": "u64"
+          },
+          {
+            "name": "min_finality_threshold",
+            "type": "u32"
+          }
+        ]
+      }
+    }
+  ]
+}
