@@ -1,15 +1,5 @@
-//! Minimal Circle CCTP v2 TokenMessengerMinter mock, installed at the real
-//! program id in LiteSVM (mirrors the mock-spoke-pool role). `deposit_for_burn`
-//! keeps the deployed program's discriminator name, params Borsh layout, and
-//! account order — pinned against the vendored CCTP v2 IDL by
-//! `tests/mock_cctp.rs` — burns the custody tokens via the passed-through
-//! adapter-authority signature, and records what was "sent" in the ephemeral
-//! `message_sent_event_data` account.
-//!
-//! Still needed after the IDL vendoring: the IDL only describes the interface
-//! the adapter *encodes*, it isn't executable. LiteSVM source tests need a
-//! runnable program at the CCTP id, and the real program requires a fully
-//! initialized CCTP environment that only the Surfpool mainnet fork provides.
+//! Minimal Circle CCTP v2 TokenMessengerMinter mock for LiteSVM source tests,
+//! installed at the real program id. Runs the burn and records the sent params.
 
 use anchor_lang::prelude::*;
 use anchor_spl::token::{burn, Burn, Mint, Token, TokenAccount};
@@ -25,9 +15,8 @@ pub enum MockCctpError {
     MaxFeeMustBeLessThanAmount,
 }
 
-/// Wire mirror of the deployed `DepositForBurnParams`. Declared independently
-/// of the vendored IDL's generated type so the pin test in `tests/mock_cctp.rs`
-/// compares two definitions that cannot silently share a layout.
+/// Independent mirror of the IDL's params type; `tests/mock_cctp.rs` pins the
+/// two against each other, so don't merge them.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
 pub struct DepositForBurnParams {
     pub amount: u64,
@@ -38,10 +27,7 @@ pub struct DepositForBurnParams {
     pub min_finality_threshold: u32,
 }
 
-/// Mirror of the deployed `MessageSent` account shape (same Anchor account
-/// name, so the discriminator matches). The mock stores the Borsh-encoded
-/// params it received as the `message` payload rather than a wire-format CCTP
-/// message, so source tests can parse exactly what was "sent".
+/// Records the sent params (Borsh) for tests to read; not the real wire message.
 #[account]
 #[derive(InitSpace)]
 pub struct MessageSent {
@@ -65,12 +51,8 @@ pub mod mock_cctp {
             params.max_fee,
             MockCctpError::MaxFeeMustBeLessThanAmount
         );
-        // No min-fee/denylist emulation — those real-program checks are
-        // covered by the Surfpool E2E suites, not this LiteSVM stand-in.
+        // min-fee/denylist checks are left to the Surfpool E2E.
 
-        // The adapter-authority signature passes through via CPI privilege
-        // extension, so the mock burns with `owner` as the authority exactly
-        // like the deployed program.
         burn(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
@@ -91,40 +73,38 @@ pub mod mock_cctp {
     }
 }
 
-/// Account order mirrors the deployed `DepositForBurnContext` (the trailing
-/// Anchor `event_cpi` pair the adapter appends rides in `remaining_accounts`).
+/// Account order mirrors the deployed `DepositForBurnContext`; the trailing
+/// `event_cpi` pair rides in `remaining_accounts`.
 #[derive(Accounts)]
 pub struct DepositForBurn<'info> {
     pub owner: Signer<'info>,
     #[account(mut)]
     pub event_rent_payer: Signer<'info>,
-    /// CHECK: unused in the mock; kept for account-order parity.
+    /// CHECK: unused parity placeholder.
     pub sender_authority_pda: UncheckedAccount<'info>,
     #[account(mut)]
     pub burn_token_account: Box<Account<'info, TokenAccount>>,
-    /// CHECK: unused in the mock; kept for account-order parity.
+    /// CHECK: unused parity placeholder.
     pub denylist_account: UncheckedAccount<'info>,
-    /// CHECK: unused in the mock; kept for account-order parity.
+    /// CHECK: unused parity placeholder.
     #[account(mut)]
     pub message_transmitter: UncheckedAccount<'info>,
-    /// CHECK: unused in the mock; kept for account-order parity.
+    /// CHECK: unused parity placeholder.
     pub token_messenger: UncheckedAccount<'info>,
-    /// CHECK: unused in the mock; kept for account-order parity.
+    /// CHECK: unused parity placeholder.
     pub remote_token_messenger: UncheckedAccount<'info>,
-    /// CHECK: unused in the mock; kept for account-order parity.
+    /// CHECK: unused parity placeholder.
     pub token_minter: UncheckedAccount<'info>,
-    /// CHECK: unused in the mock; kept for account-order parity.
+    /// CHECK: unused parity placeholder.
     #[account(mut)]
     pub local_token: UncheckedAccount<'info>,
     #[account(mut)]
     pub burn_token_mint: Box<Account<'info, Mint>>,
-    /// Ephemeral keypair account; `init` requires its co-signature exactly
-    /// like the deployed program.
     #[account(init, payer = event_rent_payer, space = 8 + MessageSent::INIT_SPACE)]
     pub message_sent_event_data: Box<Account<'info, MessageSent>>,
-    /// CHECK: unused in the mock; kept for account-order parity.
+    /// CHECK: unused parity placeholder.
     pub message_transmitter_program: UncheckedAccount<'info>,
-    /// CHECK: unused in the mock; kept for account-order parity.
+    /// CHECK: unused parity placeholder.
     pub token_messenger_minter_program: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
