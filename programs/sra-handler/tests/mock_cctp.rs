@@ -1,11 +1,7 @@
-//! Pins the mock CCTP TokenMessengerMinter against the REAL `deposit_for_burn`
-//! interface: the mock's independently-declared params Borsh layout must match
-//! the vendored IDL's generated `DepositForBurnParams`, and the mock's Anchor
-//! instruction discriminator must equal the real `global:deposit_for_burn`
-//! selector. Together these prove the mock faithfully decodes what the
-//! adapter's IDL-derived CPI sends, so neither side can drift alone. Account
-//! order is proven executably by the source-flow suites and against the real
-//! deployed program by the Surfpool E2E.
+//! Pins the mock's `deposit_for_burn` encoding (discriminator + params layout)
+//! to the real interface: the vendored IDL's params type and the Anchor
+//! `global:deposit_for_burn` selector. Account order is covered by the
+//! source-flow suites and the Surfpool E2E.
 
 use anchor_lang::{AnchorSerialize, InstructionData};
 use solana_sdk::pubkey::Pubkey;
@@ -34,9 +30,7 @@ fn mock_cctp_deposit_for_burn_matches_real_interface() {
     }
     .data();
 
-    // Expected = the real Anchor `global:deposit_for_burn` discriminator ‖ the
-    // Borsh of the vendored IDL's own params type. If the mock's params layout
-    // or discriminator ever diverges from Circle's interface, this fails.
+    // Real discriminator ‖ Borsh of the vendored IDL's own params type.
     let mut expected =
         sra_common::instruction_data::instruction_discriminator("deposit_for_burn").to_vec();
     IdlParams {
