@@ -24,4 +24,10 @@ pub enum CctpAdapterError {
 
     #[msg("Attestation does not verify against the enabled attesters")]
     InvalidAttestation,
+
+    #[msg("MessageTransmitter state account is malformed or inconsistent")]
+    InvalidTransmitterState,
+
+    #[msg("Used-nonce receipt does not prove an executed mint")]
+    NonceNotUsed,
 }
