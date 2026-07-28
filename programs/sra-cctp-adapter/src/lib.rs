@@ -3,6 +3,7 @@ use anchor_lang::prelude::*;
 pub mod errors;
 pub mod events;
 pub mod instructions;
+pub mod state;
 pub mod utils;
 
 pub use errors::*;
@@ -23,5 +24,14 @@ pub mod sra_cctp_adapter {
 
     pub fn recover_stuck_custody(ctx: Context<RecoverStuckCustody>) -> Result<()> {
         instructions::recover_custody::handler(ctx)
+    }
+
+    pub fn verify_cctp_mint(
+        ctx: Context<VerifyCctpMint>,
+        nonce: [u8; 32],
+        message: Vec<u8>,
+        attestation: Vec<u8>,
+    ) -> Result<()> {
+        instructions::verify_mint::handler(ctx, nonce, message, attestation)
     }
 }
