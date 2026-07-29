@@ -74,9 +74,9 @@ pub const ACROSS_SPOKE_POOL_ID: Pubkey = pubkey!("JAZWcGrpSWNPTBj8QtJ9UyQqhJCDhG
 /// and strands the refund in `adapter_custody`.
 pub const MIN_FILL_DEADLINE_OFFSET: u32 = 300;
 
-/// Circle CCTP v2 program IDs — identical on devnet and mainnet, so not
-/// network-selected. Enforced on-chain via `#[account(address = ...)]` in the
-/// CCTP adapter.
+/// Circle CCTP v2 program IDs. Enforced on-chain via
+/// `#[account(address = ...)]` in the CCTP adapter. The CCTP corridor is
+/// mainnet-only — no constant in this section is network-selected.
 pub const CCTP_TOKEN_MESSENGER_MINTER_V2_ID: Pubkey =
     pubkey!("CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe");
 pub const CCTP_MESSAGE_TRANSMITTER_V2_ID: Pubkey =
@@ -90,47 +90,53 @@ pub const SOLANA_CCTP_DOMAIN: u32 = 5;
 pub const FINALITY_THRESHOLD_FAST: u32 = 1000;
 pub const FINALITY_THRESHOLD_FINALIZED: u32 = 2000;
 
-/// EVM chain id ↔ CCTP domain rows for the active network. Mainnet rows mirror
-/// sra-stx `CCTPAdapter.getDomainForChain` exactly, including its deliberate
-/// BNB (56) omission — CCTP v2 on BNB is USYC-only and SRA is USDC-only.
-/// One table backs both lookup directions, so the inverse cannot drift.
-#[cfg(not(feature = "devnet"))]
-const CCTP_CHAIN_DOMAINS: &[(u64, u32)] = &[
-    (1, 0),       // Ethereum
-    (43_114, 1),  // Avalanche
-    (10, 2),      // OP Mainnet
-    (42_161, 3),  // Arbitrum One
-    (8_453, 6),   // Base
-    (137, 7),     // Polygon PoS
-    (130, 10),    // Unichain
-    (59_144, 11), // Linea
-    (146, 13),    // Sonic
-    (480, 14),    // World Chain
-    (999, 19),    // HyperEVM
-    (57_073, 21), // Ink
-];
-#[cfg(feature = "devnet")]
-const CCTP_CHAIN_DOMAINS: &[(u64, u32)] = &[
-    (11_155_111, 0), // Ethereum Sepolia
-    (43_113, 1),     // Avalanche Fuji
-    (11_155_420, 2), // OP Sepolia
-    (421_614, 3),    // Arbitrum Sepolia
-    (84_532, 6),     // Base Sepolia
-    (80_002, 7),     // Polygon Amoy
-];
-
 /// CCTP destination domain for an EVM chain id; `None` = unsupported corridor.
+///
+/// Mainnet-only (the CCTP corridor has no devnet support) and mirrors sra-stx
+/// `CCTPAdapter.getDomainForChain` exactly, including its deliberate BNB (56)
+/// omission — CCTP v2 on BNB is USYC-only and SRA is USDC-only.
+///
+/// Scalar `match`es, deliberately: walking a `&[(u64, u32)]` const table here
+/// miscompiled under the SBF target (platform-tools v1.52 returned the first
+/// row for every input at runtime; host builds were correct), caught by the
+/// destination LiteSVM suite — which, exercising both directions on-chain, is
+/// the regression pin. The host-side round-trip test pins the two matches to
+/// each other.
 pub fn cctp_domain_for_chain(chain_id: u64) -> Option<u32> {
-    CCTP_CHAIN_DOMAINS
-        .iter()
-        .find_map(|&(chain, domain)| (chain == chain_id).then_some(domain))
+    match chain_id {
+        1 => Some(0),       // Ethereum
+        43_114 => Some(1),  // Avalanche
+        10 => Some(2),      // OP Mainnet
+        42_161 => Some(3),  // Arbitrum One
+        8_453 => Some(6),   // Base
+        137 => Some(7),     // Polygon PoS
+        130 => Some(10),    // Unichain
+        59_144 => Some(11), // Linea
+        146 => Some(13),    // Sonic
+        480 => Some(14),    // World Chain
+        999 => Some(19),    // HyperEVM
+        57_073 => Some(21), // Ink
+        _ => None,
+    }
 }
 
-/// Exact inverse of [`cctp_domain_for_chain`] (same table, keyed by domain).
+/// Exact inverse of [`cctp_domain_for_chain`] (same rows, keyed by domain).
 pub fn chain_id_for_cctp_domain(domain: u32) -> Option<u64> {
-    CCTP_CHAIN_DOMAINS
-        .iter()
-        .find_map(|&(chain, d)| (d == domain).then_some(chain))
+    match domain {
+        0 => Some(1),
+        1 => Some(43_114),
+        2 => Some(10),
+        3 => Some(42_161),
+        6 => Some(8_453),
+        7 => Some(137),
+        10 => Some(130),
+        11 => Some(59_144),
+        13 => Some(146),
+        14 => Some(480),
+        19 => Some(999),
+        21 => Some(57_073),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -149,8 +155,6 @@ mod tests {
                 pubkey!("JAZWcGrpSWNPTBj8QtJ9UyQqhJCDhG9GJkDeMf5NQBiq")
             );
             assert_eq!(SOLANA_CHAIN_ID, 133_268_194_659_241);
-            assert_eq!(cctp_domain_for_chain(421_614), Some(3)); // Arb Sepolia
-            assert_eq!(cctp_domain_for_chain(42_161), None); // mainnet row absent
         }
         #[cfg(not(feature = "devnet"))]
         {
@@ -159,10 +163,26 @@ mod tests {
                 pubkey!("DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru")
             );
             assert_eq!(SOLANA_CHAIN_ID, 34_268_394_551_451);
-            assert_eq!(cctp_domain_for_chain(42_161), Some(3)); // Arbitrum One
-            assert_eq!(cctp_domain_for_chain(421_614), None); // devnet row absent
         }
     }
+
+    /// The mainnet corridors, one row per supported chain — pins the two
+    /// scalar matches to each other and to sra-stx `getDomainForChain`.
+    /// Deliberately NOT feature-gated: the CCTP corridor is mainnet-only.
+    const CCTP_CHAIN_DOMAINS: &[(u64, u32)] = &[
+        (1, 0),       // Ethereum
+        (43_114, 1),  // Avalanche
+        (10, 2),      // OP Mainnet
+        (42_161, 3),  // Arbitrum One
+        (8_453, 6),   // Base
+        (137, 7),     // Polygon PoS
+        (130, 10),    // Unichain
+        (59_144, 11), // Linea
+        (146, 13),    // Sonic
+        (480, 14),    // World Chain
+        (999, 19),    // HyperEVM
+        (57_073, 21), // Ink
+    ];
 
     #[test]
     fn cctp_domain_table_round_trips() {
@@ -172,7 +192,7 @@ mod tests {
         }
     }
 
-    /// Find-first lookups are only an exact inverse if both columns are unique.
+    /// The matches are only an exact inverse if both columns are unique.
     #[test]
     fn cctp_domain_table_columns_are_unique() {
         for (i, &(chain, domain)) in CCTP_CHAIN_DOMAINS.iter().enumerate() {
@@ -189,6 +209,9 @@ mod tests {
         assert_eq!(cctp_domain_for_chain(56), None);
         assert_eq!(cctp_domain_for_chain(0), None);
         assert_eq!(cctp_domain_for_chain(SOLANA_CHAIN_ID), None);
+        // Testnets are unsupported — the corridor is mainnet-only.
+        assert_eq!(cctp_domain_for_chain(11_155_111), None); // Ethereum Sepolia
+        assert_eq!(cctp_domain_for_chain(421_614), None); // Arbitrum Sepolia
     }
 
     #[test]
