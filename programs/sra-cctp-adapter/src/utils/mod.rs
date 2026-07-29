@@ -1,3 +1,4 @@
+pub mod attestation;
 pub mod cctp_cpi;
 pub mod message;
 

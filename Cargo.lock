@@ -6568,6 +6568,7 @@ dependencies = [
  "anchor-lang",
  "anchor-spl",
  "hex",
+ "libsecp256k1",
  "solana-program",
  "sra-common",
 ]

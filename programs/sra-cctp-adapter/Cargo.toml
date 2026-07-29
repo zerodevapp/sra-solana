@@ -30,6 +30,9 @@ sra-common = { path = "../../crates/sra-common" }
 
 [dev-dependencies]
 hex = "0.4"
+# Test-side attestation signing only; the on-chain verifier uses the
+# secp256k1_recover syscall and a byte-compare high-s check instead.
+libsecp256k1 = "0.6"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
