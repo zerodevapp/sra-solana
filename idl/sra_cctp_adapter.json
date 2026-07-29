@@ -651,6 +651,261 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "verify_cctp_mint",
+      "discriminator": [
+        179,
+        195,
+        233,
+        29,
+        66,
+        215,
+        59,
+        238
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "message_transmitter",
+          "docs": [
+            "raw bytes (never CPI'd), so its layout is validated by",
+            "`deserialize_message_transmitter` in the handler body."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  115,
+                  115,
+                  97,
+                  103,
+                  101,
+                  95,
+                  116,
+                  114,
+                  97,
+                  110,
+                  115,
+                  109,
+                  105,
+                  116,
+                  116,
+                  101,
+                  114
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                200,
+                28,
+                225,
+                158,
+                220,
+                210,
+                210,
+                195,
+                64,
+                176,
+                47,
+                166,
+                27,
+                225,
+                213,
+                186,
+                221,
+                225,
+                89,
+                40,
+                51,
+                221,
+                249,
+                32,
+                9,
+                216,
+                207,
+                104,
+                84,
+                85
+              ]
+            }
+          }
+        },
+        {
+          "name": "used_nonce",
+          "docs": [
+            "seeds + owner; proves the mint executed. Parsed exact-layout in-body."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  100,
+                  95,
+                  110,
+                  111,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "nonce"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                200,
+                28,
+                225,
+                158,
+                220,
+                210,
+                210,
+                195,
+                64,
+                176,
+                47,
+                166,
+                27,
+                225,
+                213,
+                186,
+                221,
+                225,
+                89,
+                40,
+                51,
+                221,
+                249,
+                32,
+                9,
+                216,
+                207,
+                104,
+                84,
+                85
+              ]
+            }
+          }
+        },
+        {
+          "name": "route",
+          "docs": [
+            "The committed destination route the mint is being verified against. An",
+            "`Account` here requires it to be a genuine handler-owned route."
+          ]
+        },
+        {
+          "name": "verified_fill",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  101,
+                  114,
+                  105,
+                  102,
+                  105,
+                  101,
+                  100,
+                  95,
+                  102,
+                  105,
+                  108,
+                  108
+                ]
+              },
+              {
+                "kind": "const",
+                "value": [
+                  23,
+                  179,
+                  140,
+                  147,
+                  225,
+                  141,
+                  4,
+                  121,
+                  112,
+                  217,
+                  246,
+                  200,
+                  188,
+                  131,
+                  46,
+                  28,
+                  109,
+                  219,
+                  222,
+                  225,
+                  45,
+                  103,
+                  144,
+                  166,
+                  124,
+                  228,
+                  58,
+                  84,
+                  111,
+                  238,
+                  183,
+                  50
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "nonce"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "nonce",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "message",
+          "type": "bytes"
+        },
+        {
+          "name": "attestation",
+          "type": "bytes"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -668,6 +923,19 @@
       ]
     },
     {
+      "name": "SolanaSraRoute",
+      "discriminator": [
+        134,
+        92,
+        176,
+        20,
+        31,
+        152,
+        16,
+        120
+      ]
+    },
+    {
       "name": "SraConfig",
       "discriminator": [
         218,
@@ -678,6 +946,19 @@
         101,
         23,
         222
+      ]
+    },
+    {
+      "name": "VerifiedFill",
+      "discriminator": [
+        2,
+        228,
+        67,
+        96,
+        254,
+        74,
+        106,
+        58
       ]
     }
   ],
@@ -693,6 +974,19 @@
         113,
         35,
         187
+      ]
+    },
+    {
+      "name": "CctpMintVerified",
+      "discriminator": [
+        66,
+        106,
+        233,
+        96,
+        142,
+        138,
+        51,
+        223
       ]
     },
     {
@@ -754,9 +1048,62 @@
       "code": 6008,
       "name": "NonceNotUsed",
       "msg": "Used-nonce receipt does not prove an executed mint"
+    },
+    {
+      "code": 6009,
+      "name": "NonceMismatch",
+      "msg": "Message nonce does not match the supplied nonce"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidRecipientProgram",
+      "msg": "Message recipient is not the CCTP TokenMessengerMinter program"
+    },
+    {
+      "code": 6011,
+      "name": "DestinationDomainMismatch",
+      "msg": "Message destination domain is not this chain's CCTP domain"
+    },
+    {
+      "code": 6012,
+      "name": "MintRecipientMismatch",
+      "msg": "Mint recipient is not the route vault for the expected mint"
+    },
+    {
+      "code": 6013,
+      "name": "SourceDomainMismatch",
+      "msg": "Message source domain does not map to the route's source chain"
+    },
+    {
+      "code": 6014,
+      "name": "FeeExceedsMaxFee",
+      "msg": "Executed fee exceeds max fee, or max fee is not below the amount"
     }
   ],
   "types": [
+    {
+      "name": "AccountTemplate",
+      "docs": [
+        "Ordered account-slot policy for a `VerifiedCpi`'s inner instruction. Slot",
+        "order matches the inner CPI's account list; each slot is pinned by the",
+        "handler (`Fixed`) or supplied by the relayer as routing (`Free`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "slots",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "SlotRole"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
     {
       "name": "CctpDepositExecuted",
       "type": {
@@ -882,6 +1229,50 @@
       }
     },
     {
+      "name": "CctpMintVerified",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "verified_fill",
+            "type": "pubkey"
+          },
+          {
+            "name": "route",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_id",
+            "docs": [
+              "The Iris-assigned message nonce — the destination-side fill identity."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "expected_amount",
+            "type": "u64"
+          },
+          {
+            "name": "source_chain_id",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "CustodyRecovered",
       "type": {
         "kind": "struct",
@@ -906,6 +1297,68 @@
       }
     },
     {
+      "name": "FixedRole",
+      "docs": [
+        "Handler-controlled roles a `Fixed` slot can take. `Source`, `Destination`,",
+        "`SigningAuthority`, and `OutputMint` MUST appear in every template (enforced by",
+        "`validate_action_config`) so a relayer cannot redirect the input or output, and",
+        "so the handler reads the output mint from a pinned account."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "TokenProgram"
+          },
+          {
+            "name": "SigningAuthority"
+          },
+          {
+            "name": "Source"
+          },
+          {
+            "name": "Destination"
+          },
+          {
+            "name": "OutputMint"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MinOut",
+      "docs": [
+        "Minimum-output reference for a `VerifiedCpi`'s post-fee balance-diff gate."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "SignedQuote",
+            "fields": [
+              {
+                "name": "quoter",
+                "type": "pubkey"
+              }
+            ]
+          },
+          {
+            "name": "Oracle",
+            "fields": [
+              {
+                "name": "feed",
+                "type": "pubkey"
+              },
+              {
+                "name": "max_slippage_bps",
+                "type": "u16"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "name": "MintNonce",
       "docs": [
         "Persistent nonce per `(sra_config, source_mint)`. The owner-signed deposit",
@@ -918,6 +1371,186 @@
           {
             "name": "nonce",
             "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SlotRole",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Fixed",
+            "fields": [
+              {
+                "defined": {
+                  "name": "FixedRole"
+                }
+              }
+            ]
+          },
+          {
+            "name": "Free"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SolanaAction",
+      "docs": [
+        "A pre-registered action to execute on the destination chain after fill",
+        "finalization. v1: `SplTransfer` (static, exact-match accounts) and",
+        "`VerifiedCpi` (dynamic accounts, outcome-verified)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "SplTransfer",
+            "fields": [
+              {
+                "name": "recipient",
+                "type": "pubkey"
+              },
+              {
+                "name": "amount_bps",
+                "docs": [
+                  "Basis points of the execution vault balance to transfer (e.g., 10000 = 100%)."
+                ],
+                "type": "u16"
+              }
+            ]
+          },
+          {
+            "name": "VerifiedCpi",
+            "fields": [
+              {
+                "name": "program_id",
+                "docs": [
+                  "Pinned program — checked loader-owned-executable + exact pubkey at execution."
+                ],
+                "type": "pubkey"
+              },
+              {
+                "name": "input_mint",
+                "docs": [
+                  "Token spent from the vault (usually `expected_mint`)."
+                ],
+                "type": "pubkey"
+              },
+              {
+                "name": "input_bps",
+                "docs": [
+                  "Basis points of the vault moved into the scratch source — the input bound."
+                ],
+                "type": "u16"
+              },
+              {
+                "name": "account_template",
+                "type": {
+                  "defined": {
+                    "name": "AccountTemplate"
+                  }
+                }
+              },
+              {
+                "name": "output_mint",
+                "docs": [
+                  "Fungible receipt the engine balance-diffs (swap output, vault share, LST, …)."
+                ],
+                "type": "pubkey"
+              },
+              {
+                "name": "min_out",
+                "type": {
+                  "defined": {
+                    "name": "MinOut"
+                  }
+                }
+              },
+              {
+                "name": "allow_permissioned_output",
+                "docs": [
+                  "Opt-in for Token-2022 permissioned (perm-delegate / frozen) output mints."
+                ],
+                "type": "bool"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "SolanaSraRoute",
+      "docs": [
+        "Deterministic destination address for EVM->Solana fills.",
+        "PDA seeds: [\"sra_route\", owner, config_hash, salt]",
+        "config_hash = keccak256(borsh(owner, source_chain_id, expected_mint, action_config))"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "source_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "expected_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "action_config",
+            "docs": [
+              "The committed action list, stored typed so later instructions read it",
+              "directly instead of re-verifying a relayer-supplied copy. Also folded into",
+              "the route's config_hash (the PDA seed), so the address inherently commits",
+              "to it."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "SolanaAction"
+                }
+              }
+            }
+          },
+          {
+            "name": "salt",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "allowed_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "allowed_executors",
+            "docs": [
+              "Owner-managed; not in `route_config_hash` (mutable, like `allowed_adapters`).",
+              "Empty = no caller can `execute_actions`."
+            ],
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "paused",
+            "type": "bool"
           },
           {
             "name": "bump",
@@ -961,6 +1594,73 @@
                 32
               ]
             }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VerifiedFill",
+      "docs": [
+        "Adapter-owned verification artifact. Created by this adapter once it has",
+        "confirmed a CCTP mint, then read by the handler across the program boundary",
+        "to authorize `finalize_fill`. A vault-balance increase alone cannot prove a",
+        "legitimate bridge fill — this account is the trust boundary that does.",
+        "",
+        "The struct name must stay `VerifiedFill`: the handler hardcodes",
+        "`sha256(\"account:VerifiedFill\")[..8]` as the discriminator it accepts from",
+        "every adapter.",
+        "",
+        "The post-discriminator field layout is a cross-program ABI contract with",
+        "`sra_common::types::VerifiedFillData`. The handler reads this account as raw bytes",
+        "(it must accept fills from multiple adapter programs, each with its own",
+        "program id, so it cannot import this type) and deserializes via that plain",
+        "struct, requiring an exact layout match. Any field reorder, addition, or",
+        "removal here is a breaking change and MUST be mirrored there — the round-trip",
+        "and discriminator tests below fail loudly if the two drift."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "adapter",
+            "type": "pubkey"
+          },
+          {
+            "name": "route",
+            "type": "pubkey"
+          },
+          {
+            "name": "fill_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "expected_amount",
+            "type": "u64"
+          },
+          {
+            "name": "source_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
           },
           {
             "name": "bump",

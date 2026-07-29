@@ -30,4 +30,22 @@ pub enum CctpAdapterError {
 
     #[msg("Used-nonce receipt does not prove an executed mint")]
     NonceNotUsed,
+
+    #[msg("Message nonce does not match the supplied nonce")]
+    NonceMismatch,
+
+    #[msg("Message recipient is not the CCTP TokenMessengerMinter program")]
+    InvalidRecipientProgram,
+
+    #[msg("Message destination domain is not this chain's CCTP domain")]
+    DestinationDomainMismatch,
+
+    #[msg("Mint recipient is not the route vault for the expected mint")]
+    MintRecipientMismatch,
+
+    #[msg("Message source domain does not map to the route's source chain")]
+    SourceDomainMismatch,
+
+    #[msg("Executed fee exceeds max fee, or max fee is not below the amount")]
+    FeeExceedsMaxFee,
 }

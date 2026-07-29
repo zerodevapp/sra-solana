@@ -17,6 +17,18 @@ pub struct CctpDepositExecuted {
 }
 
 #[event]
+pub struct CctpMintVerified {
+    pub verified_fill: Pubkey,
+    pub route: Pubkey,
+    pub mint: Pubkey,
+    /// The Iris-assigned message nonce — the destination-side fill identity.
+    pub fill_id: [u8; 32],
+    pub amount: u64,
+    pub expected_amount: u64,
+    pub source_chain_id: u64,
+}
+
+#[event]
 pub struct CustodyRecovered {
     pub sra_config: Pubkey,
     pub mint: Pubkey,
