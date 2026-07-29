@@ -86,15 +86,13 @@ pub fn handler(
     message: Vec<u8>,
     attestation: Vec<u8>,
 ) -> Result<()> {
-    // 1. The live transmitter configuration (the deserializer enforces its
-    //    internal validity).
+    // 1. Live transmitter config (the deserializer enforces its validity).
     let state = {
         let data = ctx.accounts.message_transmitter.try_borrow_data()?;
         deserialize_message_transmitter(&data)?
     };
 
-    // 2. Circle's attestation binds the full caller-supplied message bytes to
-    //    the same trust root the transmitter minted under.
+    // 2. Attestation binds the caller-supplied bytes to Circle's trust root.
     verify_attestation_signatures(
         &keccak::hash(&message),
         &attestation,
@@ -102,18 +100,16 @@ pub fn handler(
         &state.enabled_attesters,
     )?;
 
-    // 3. The used-nonce receipt proves `receive_message` executed for this
-    //    nonce — an attested-but-never-received message records no evidence.
+    // 3. Used-nonce receipt proves the mint executed (attested ≠ received).
     let used_nonce = {
         let data = ctx.accounts.used_nonce.try_borrow_data()?;
         deserialize_used_nonce(&data)?
     };
     require!(used_nonce.is_used, CctpAdapterError::NonceNotUsed);
 
-    // 4. Header cross-checks over the attestation-bound bytes. The nonce
-    //    equality binds the seed argument (which pinned `used_nonce` and seeds
-    //    `verified_fill`) to the message; the recipient check requires the
-    //    used nonce to belong to a *burn* message, not some other receiver's.
+    // 4. Header checks. `nonce` equality binds the seed arg (which pinned
+    //    `used_nonce` / seeds `verified_fill`) to the message; recipient ==
+    //    TokenMessengerMinter requires the used nonce to be a *burn* message.
     let msg = CctpMessage::parse(&message)?;
     require!(
         msg.version() == state.version,
@@ -131,10 +127,8 @@ pub fn handler(
     );
     // `destination_caller` deliberately unchecked: receive is permissionless.
 
-    // 5. Body cross-checks against the committed route. The ATA derivation
-    //    binds the mint, so delivered funds are necessarily `expected_mint`;
-    //    the fee bounds mirror the CCTP program's own (`fee_executed ≤
-    //    max_fee < amount`).
+    // 5. Body checks vs the route. `mint_recipient == ATA(route, mint)` binds
+    //    delivered funds to the route mint; fee bounds mirror CCTP's own.
     let body = BurnMessage::parse(msg.body())?;
     require!(
         body.version() == BURN_MESSAGE_BODY_VERSION,
@@ -160,10 +154,9 @@ pub fn handler(
         CctpAdapterError::FeeExceedsMaxFee
     );
 
-    // 6. Record the verification artifact. Both subtractions are safe under
-    //    the fee bounds above, and `delivered ≥ committed_minimum` (the
-    //    handler's `finalize_fill` invariant) holds because
-    //    `fee_executed ≤ max_fee`.
+    // 6. Record the artifact. Both subtractions are safe under the fee bounds,
+    //    and `delivered ≥ committed_minimum` (finalize_fill's invariant) holds
+    //    since `fee_executed ≤ max_fee`.
     let delivered = amount - fee_executed;
     let committed_minimum = amount - max_fee;
     ctx.accounts.verified_fill.set_inner(VerifiedFill {
