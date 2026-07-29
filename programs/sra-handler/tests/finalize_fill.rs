@@ -734,3 +734,72 @@ fn finalize_cannot_consume_donated_route_vault() {
     assert_eq!(fetch_token_balance(&svm, &route_vault), AMOUNT);
     assert_eq!(fetch_token_balance(&svm, &execution_vault), 0);
 }
+
+// --------------------------------------------------------------------------
+// CCTP evidence: finalize_fill is adapter-agnostic — a route allowlisting the
+// CCTP adapter consumes a verify_cctp_mint artifact through the same generic
+// owner + PDA + layout pins the Across path exercises above.
+// --------------------------------------------------------------------------
+
+#[test]
+fn finalize_fill_consumes_cctp_verified_fill_end_to_end() {
+    use common::cctp::*;
+
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 100 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+    let (route, route_config_hash) =
+        create_cctp_route_with_hash(&mut svm, &payer, &owner, mint, [0x31; 32]);
+
+    let nonce = [0x66; 32];
+    let (attester, attester_addr) = test_attester();
+    plant_transmitter_state(&mut svm, 1, vec![attester_addr]);
+    plant_used_nonce(&mut svm, nonce, true);
+
+    // The "mint": fund the route vault with exactly what CCTP delivered
+    // (amount − fee_executed), as the real receive_message would.
+    let (amount, max_fee, fee_executed) = (AMOUNT, 4_000u64, 17u64);
+    let delivered = amount - fee_executed;
+    let route_vault = derive_ata(&route, &mint);
+    mint_to(&mut svm, &payer, &payer, &mint, &route_vault, delivered);
+
+    let message = sample_cctp_message(nonce, &route, &mint, amount, max_fee, fee_executed).encode();
+    let attestation = sign_attestation(&message, &[&attester]);
+    send_ix(
+        &mut svm,
+        verify_cctp_mint_ix(&payer.pubkey(), &route, nonce, message, attestation),
+        &payer,
+        &[],
+    )
+    .expect("verify_cctp_mint should succeed");
+
+    let (verified_fill, _) = derive_cctp_verified_fill_pda(&nonce);
+    let ix = finalize_fill_ix(
+        &payer.pubkey(),
+        &route,
+        route_config_hash,
+        &verified_fill,
+        nonce,
+        &mint,
+    );
+    send_ix(&mut svm, ix.clone(), &payer, &[])
+        .expect("finalize_fill should consume the CCTP VerifiedFill");
+
+    // The full delivered amount staged into the execution vault; receipt written.
+    let (execution_authority, _) = derive_execution_authority_pda(&route);
+    assert_eq!(
+        fetch_token_balance(&svm, &derive_ata(&execution_authority, &mint)),
+        delivered
+    );
+    assert_eq!(fetch_token_balance(&svm, &route_vault), 0);
+    let receipt = fetch_fill_receipt(&svm, &derive_fill_receipt_pda(&route, &nonce).0);
+    assert_eq!(receipt.execution_status, ExecutionStatus::Finalized);
+    assert_eq!(receipt.amount, delivered);
+    assert_eq!(receipt.expected_amount, amount - max_fee);
+
+    // Replay: the FillReceipt PDA already exists, so a second finalization of
+    // the same nonce collides and aborts.
+    send_ix(&mut svm, ix, &payer, &[])
+        .expect_err("second finalize of the same CCTP fill must fail");
+}

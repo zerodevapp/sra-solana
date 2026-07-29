@@ -6594,6 +6594,7 @@ dependencies = [
  "base64 0.22.1",
  "bincode",
  "fslock",
+ "libsecp256k1",
  "litesvm",
  "litesvm-token",
  "mock-cctp",

@@ -392,3 +392,91 @@ fn dest_finalize_execute_verified_cpi_under_cu_budget() {
     );
     assert_under_budget(consumed, "finalize + execute_actions (verified-CPI swap)");
 }
+
+// --- CCTP destination flow: verify_cctp_mint + finalize_fill ------------------
+//
+// The CCTP verify leg replaces the Across relay-hash re-derivation with
+// attestation re-verification — one secp256k1_recover syscall (~25k CU) per
+// signature — so consumption scales with the transmitter's signature
+// threshold. Measure at 1 signature and at 2 (the live mainnet threshold).
+
+fn cctp_2ix_flow_under_budget(attester_count: usize, label: &str) {
+    use common::cctp::*;
+    use libsecp256k1::SecretKey;
+
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 100 * SOL);
+    let owner = funded_keypair(&mut svm, 100 * SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), DECIMALS);
+    let (route, route_config_hash) =
+        create_cctp_route_with_hash(&mut svm, &payer, &owner, mint, [0x21; 32]);
+
+    let keys: Vec<SecretKey> = (0..attester_count)
+        .map(|i| SecretKey::parse(&[0x42 + i as u8; 32]).unwrap())
+        .collect();
+    let mut sorted: Vec<&SecretKey> = keys.iter().collect();
+    sorted.sort_by_key(|secret| attester_address(secret));
+    plant_transmitter_state(
+        &mut svm,
+        attester_count as u32,
+        sorted
+            .iter()
+            .map(|secret| attester_address(secret))
+            .collect(),
+    );
+
+    let nonce = [0x55; 32];
+    plant_used_nonce(&mut svm, nonce, true);
+    // Fund the route vault with the delivered amount so finalize takes the
+    // full staging path (fee_executed = 0 ⇒ delivered = AMOUNT).
+    mint_to(
+        &mut svm,
+        &payer,
+        &payer,
+        &mint,
+        &derive_ata(&route, &mint),
+        AMOUNT,
+    );
+
+    let message = sample_cctp_message(nonce, &route, &mint, AMOUNT, 4_000, 0).encode();
+    let attestation = sign_attestation(&message, &sorted);
+    let (verified_fill, _) = derive_cctp_verified_fill_pda(&nonce);
+
+    let consumed = send_instructions(
+        &mut svm,
+        &[
+            cu_limit_ix(),
+            verify_cctp_mint_ix(&payer.pubkey(), &route, nonce, message, attestation),
+            finalize_fill_ix(
+                &payer.pubkey(),
+                &route,
+                route_config_hash,
+                &verified_fill,
+                nonce,
+                &mint,
+            ),
+        ],
+        &payer,
+        &[],
+    )
+    .expect("CCTP destination 2-IX flow must execute")
+    .compute_units_consumed;
+
+    // Prove the flow ran before trusting the measurement.
+    let (fill_receipt, _) = derive_fill_receipt_pda(&route, &nonce);
+    assert_eq!(status(&svm, &fill_receipt), ExecutionStatus::Finalized);
+    assert_under_budget(consumed, label);
+}
+
+#[test]
+fn dest_cctp_2ix_flow_under_cu_budget_one_signature() {
+    cctp_2ix_flow_under_budget(1, "CCTP 2-IX verify + finalize (1 sig)");
+}
+
+#[test]
+fn dest_cctp_2ix_flow_under_cu_budget_two_signatures() {
+    cctp_2ix_flow_under_budget(
+        2,
+        "CCTP 2-IX verify + finalize (2 sigs, live mainnet threshold)",
+    );
+}

@@ -334,3 +334,39 @@ fn dest_max_verified_cpi_execute_actions_exceeds_packet_limit_even_with_alt() {
         "max-action VerifiedCpi execute_actions with ALT is {size} bytes; if this now fits, the heaviest-route assumption changed — re-derive the per-route action/account/data budget",
     );
 }
+
+// --- CCTP verify_cctp_mint + finalize_fill (message rides as instruction data) --
+
+/// The CCTP settle pair. Unlike the Across pair, `verify_cctp_mint` carries
+/// the full 376-byte message (empty hook) plus the attestation — sized at two
+/// signatures (130 bytes), the live mainnet threshold — as instruction data,
+/// which an address lookup table cannot compress.
+#[test]
+fn dest_cctp_verify_finalize_2ix_fits_within_packet_limit_with_alt() {
+    use common::cctp::*;
+
+    let d = dest();
+    let nonce = FILL_ID;
+    let message = sample_cctp_message(nonce, &d.route, &d.mint, AMOUNT, 4_000, 0).encode();
+    let attestation = vec![0u8; 2 * 65];
+    let (verified_fill, _) = derive_cctp_verified_fill_pda(&nonce);
+    let ixs = vec![
+        verify_cctp_mint_ix(&d.payer.pubkey(), &d.route, nonce, message, attestation),
+        finalize_fill_ix(
+            &d.payer.pubkey(),
+            &d.route,
+            d.route_config_hash,
+            &verified_fill,
+            nonce,
+            &d.mint,
+        ),
+    ];
+    let alt = representative_lookup_table(&ixs);
+    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt]));
+
+    println!("dest CCTP verify+finalize 2-IX with ALT: {size} / {PACKET_DATA_SIZE} bytes");
+    assert!(
+        size <= PACKET_DATA_SIZE,
+        "CCTP verify+finalize with ALT is {size} bytes, exceeds {PACKET_DATA_SIZE}-byte packet limit",
+    );
+}
