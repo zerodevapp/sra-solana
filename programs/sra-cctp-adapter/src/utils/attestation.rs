@@ -11,9 +11,11 @@
 //!
 //! One deliberate deviation in mechanism, none in behavior: Circle rejects
 //! high-`s` via libsecp's `is_high()`; on-chain we compare the 32 big-endian
-//! `s` bytes against `n/2` directly, so the program carries no libsecp
-//! dependency. (`s ≥ n` is also rejected: it exceeds `n/2` here, where Circle
-//! fails signature parsing instead.)
+//! `s` bytes against `⌊n/2⌋` directly (`s ≥ ⌊n/2⌋` rejected — the exact set
+//! `is_high` rejects, boundary included), so the program carries no libsecp
+//! dependency. (`s ≥ n` is also rejected: it exceeds `⌊n/2⌋`, where Circle
+//! fails signature parsing instead.) `high_s_boundary_matches_libsecp_is_high`
+//! pins our predicate to `is_high` across the boundary and a random sweep.
 
 use anchor_lang::prelude::*;
 use solana_program::{keccak, secp256k1_recover::secp256k1_recover};
@@ -23,8 +25,15 @@ use crate::CctpAdapterError;
 /// One concatenated attestation signature: `r(32) ‖ s(32) ‖ recovery_id(1)`.
 pub const ATTESTATION_SIGNATURE_LEN: usize = 65;
 
-/// The secp256k1 group order halved, big-endian. A signature with `s` above
-/// this is the malleable twin of a canonical one and is rejected.
+/// `⌊n/2⌋` for the secp256k1 group order `n`, big-endian. Circle rejects any
+/// `s ≥` this via libsecp's `Scalar::is_high` (verified against libsecp256k1
+/// 0.6.0, the version Circle's message-transmitter-v2 pins): `is_high` is
+/// `true` for `s == ⌊n/2⌋` as well as above it. We reject the same set with a
+/// 32-byte big-endian `s ≥ SECP256K1_HALF_N` compare, so the program carries
+/// no libsecp dependency; `secp256k1_recover` separately rejects `s ≥ n`.
+/// (This is one point stricter than EIP-2's `s ≤ ⌊n/2⌋`, matching Circle, not
+/// Ethereum — the boundary point is a malleability twin an attester would
+/// never emit and is pinned by `high_s_boundary_matches_libsecp_is_high`.)
 const SECP256K1_HALF_N: [u8; 32] = [
     0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     0x5d, 0x57, 0x6e, 0x73, 0x57, 0xa4, 0x50, 0x1d, 0xdf, 0xe9, 0x2f, 0x46, 0x68, 0x1b, 0x20, 0xa0,
@@ -72,7 +81,7 @@ fn recover_attester(message_hash: &keccak::Hash, signature: &[u8]) -> Result<Pub
         CctpAdapterError::InvalidAttestation
     );
     require!(
-        signature[32..64] <= SECP256K1_HALF_N[..],
+        signature[32..64] < SECP256K1_HALF_N[..],
         CctpAdapterError::InvalidAttestation
     );
     let pubkey = secp256k1_recover(message_hash.as_ref(), recovery_id - 27, &signature[..64])
@@ -86,7 +95,76 @@ fn recover_attester(message_hash: &keccak::Hash, signature: &[u8]) -> Result<Pub
 #[cfg(test)]
 mod tests {
     use super::*;
+    use libsecp256k1::curve::Scalar;
     use libsecp256k1::{sign, Message, PublicKey, SecretKey};
+
+    /// Differential pin: our high-`s` predicate (`s < SECP256K1_HALF_N`) must
+    /// accept exactly the set Circle's `Scalar::is_high` accepts (`!is_high`),
+    /// so "attested by Circle" ⇔ "accepted here" at the byte level. Checks the
+    /// boundary (where a `<=` vs `<` slip would show) plus a deterministic
+    /// sweep. Uses the same libsecp256k1 0.6.0 Circle's transmitter pins.
+    #[test]
+    fn high_s_boundary_matches_libsecp_is_high() {
+        fn ours_accepts(s: &[u8; 32]) -> bool {
+            s[..] < SECP256K1_HALF_N[..]
+        }
+        fn circle_accepts(s: &[u8; 32]) -> bool {
+            let mut scalar = Scalar::default();
+            // `set_b32` returns overflow (s ≥ n); libsecp rejects those at
+            // signature parse, so treat as not-accepted.
+            let overflowed: bool = scalar.set_b32(s).into();
+            !overflowed && !scalar.is_high()
+        }
+        fn add_one(mut b: [u8; 32]) -> [u8; 32] {
+            for i in (0..32).rev() {
+                let (v, carry) = b[i].overflowing_add(1);
+                b[i] = v;
+                if !carry {
+                    break;
+                }
+            }
+            b
+        }
+        fn sub_one(mut b: [u8; 32]) -> [u8; 32] {
+            for i in (0..32).rev() {
+                let (v, borrow) = b[i].overflowing_sub(1);
+                b[i] = v;
+                if !borrow {
+                    break;
+                }
+            }
+            b
+        }
+
+        let mut cases = vec![
+            [0u8; 32],
+            sub_one(SECP256K1_HALF_N),
+            SECP256K1_HALF_N,
+            add_one(SECP256K1_HALF_N),
+            [0xff; 32],
+        ];
+        // Deterministic LCG sweep, half the samples biased into the high region.
+        let mut x: u128 = 0x9E37_79B9_7F4A_7C15;
+        for i in 0..20_000u32 {
+            x = x
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            let mut b = [0u8; 32];
+            b[..16].copy_from_slice(&x.to_be_bytes());
+            b[16..].copy_from_slice(&x.wrapping_mul(0xDEAD_BEEF).to_be_bytes());
+            if i % 2 == 0 {
+                b[0] |= 0x7f;
+            }
+            cases.push(b);
+        }
+        for s in cases {
+            assert_eq!(
+                ours_accepts(&s),
+                circle_accepts(&s),
+                "high-s predicate diverges from libsecp is_high at s = {s:02x?}"
+            );
+        }
+    }
 
     fn key(byte: u8) -> SecretKey {
         SecretKey::parse(&[byte; 32]).expect("valid test secret key")
