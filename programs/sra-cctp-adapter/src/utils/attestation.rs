@@ -1,21 +1,9 @@
-//! Attestation re-verification — an exact port of Circle's
-//! `MessageTransmitter::verify_attestation_signatures`.
-//!
-//! The destination trust design re-runs the transmitter's own signature check
-//! over `keccak256(message)` against the **live** attester set, binding the
-//! caller-supplied message bytes to the same trust root the transmitter used
-//! when it minted. Rules (Circle's, verbatim): the attestation is
-//! `signature_threshold` concatenated 65-byte `r ‖ s ‖ v` signatures, each
-//! with `v ∈ 27..=30` and low `s`, whose recovered EVM addresses are strictly
-//! increasing (which also bans duplicates) and all enabled attesters.
-//!
-//! One deliberate deviation in mechanism, none in behavior: Circle rejects
-//! high-`s` via libsecp's `is_high()`; on-chain we compare the 32 big-endian
-//! `s` bytes against `⌊n/2⌋` directly (`s ≥ ⌊n/2⌋` rejected — the exact set
-//! `is_high` rejects, boundary included), so the program carries no libsecp
-//! dependency. (`s ≥ n` is also rejected: it exceeds `⌊n/2⌋`, where Circle
-//! fails signature parsing instead.) `high_s_boundary_matches_libsecp_is_high`
-//! pins our predicate to `is_high` across the boundary and a random sweep.
+//! Attestation re-verification — a port of Circle's
+//! `MessageTransmitter::verify_attestation_signatures`: `signature_threshold`
+//! concatenated 65-byte `r‖s‖v` signatures over `keccak256(message)`, each
+//! `v ∈ 27..=30` and low-`s`, recovered EVM addresses strictly increasing
+//! (bans dupes) and all enabled attesters. Re-running it binds the
+//! caller-supplied bytes to the same trust root the transmitter minted under.
 
 use anchor_lang::prelude::*;
 use solana_program::{keccak, secp256k1_recover::secp256k1_recover};
@@ -25,30 +13,33 @@ use crate::CctpAdapterError;
 /// One concatenated attestation signature: `r(32) ‖ s(32) ‖ recovery_id(1)`.
 pub const ATTESTATION_SIGNATURE_LEN: usize = 65;
 
-/// `⌊n/2⌋` for the secp256k1 group order `n`, big-endian. Circle rejects any
-/// `s ≥` this via libsecp's `Scalar::is_high` (verified against libsecp256k1
-/// 0.6.0, the version Circle's message-transmitter-v2 pins): `is_high` is
-/// `true` for `s == ⌊n/2⌋` as well as above it. We reject the same set with a
-/// 32-byte big-endian `s ≥ SECP256K1_HALF_N` compare, so the program carries
-/// no libsecp dependency; `secp256k1_recover` separately rejects `s ≥ n`.
-/// (This is one point stricter than EIP-2's `s ≤ ⌊n/2⌋`, matching Circle, not
-/// Ethereum — the boundary point is a malleability twin an attester would
-/// never emit and is pinned by `high_s_boundary_matches_libsecp_is_high`.)
+/// `⌊n/2⌋` for the secp256k1 order `n`, big-endian. We reject `s ≥` this — the
+/// exact set libsecp's `is_high` rejects (verified against 0.6.0, Circle's
+/// pin; one point stricter than EIP-2's `s ≤ ⌊n/2⌋`), so we carry no libsecp
+/// dep. Pinned by `high_s_boundary_matches_libsecp_is_high`.
 const SECP256K1_HALF_N: [u8; 32] = [
     0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     0x5d, 0x57, 0x6e, 0x73, 0x57, 0xa4, 0x50, 0x1d, 0xdf, 0xe9, 0x2f, 0x46, 0x68, 0x1b, 0x20, 0xa0,
 ];
 
 /// Verify `attestation` over `message_hash` against the transmitter's live
-/// attester configuration. Every failure mode — length, recovery id, high-s,
-/// unrecoverable signature, unknown/duplicate/misordered attester — surfaces
-/// as `InvalidAttestation`.
+/// attester configuration. Every failure mode — zero threshold, length,
+/// recovery id, high-s, unrecoverable signature, unknown/duplicate/misordered
+/// attester — surfaces as `InvalidAttestation`.
 pub fn verify_attestation_signatures(
     message_hash: &keccak::Hash,
     attestation: &[u8],
     signature_threshold: u32,
     enabled_attesters: &[Pubkey],
 ) -> Result<()> {
+    // Self-guard, not just a caller invariant: a zero threshold makes the
+    // length check accept an empty attestation and the loop verify nothing.
+    // The transmitter deserializer already rejects it, but this function takes
+    // the threshold as a loose param, so it must fail closed on its own.
+    require!(
+        signature_threshold > 0,
+        CctpAdapterError::InvalidAttestation
+    );
     require!(
         attestation.len() == ATTESTATION_SIGNATURE_LEN * signature_threshold as usize,
         CctpAdapterError::InvalidAttestation
@@ -98,11 +89,9 @@ mod tests {
     use libsecp256k1::curve::Scalar;
     use libsecp256k1::{sign, Message, PublicKey, SecretKey};
 
-    /// Differential pin: our high-`s` predicate (`s < SECP256K1_HALF_N`) must
-    /// accept exactly the set Circle's `Scalar::is_high` accepts (`!is_high`),
-    /// so "attested by Circle" ⇔ "accepted here" at the byte level. Checks the
-    /// boundary (where a `<=` vs `<` slip would show) plus a deterministic
-    /// sweep. Uses the same libsecp256k1 0.6.0 Circle's transmitter pins.
+    /// Our high-`s` predicate must accept exactly the set `!is_high` accepts,
+    /// so "attested by Circle" ⇔ "accepted here". Boundary (where a `<=`/`<`
+    /// slip shows) plus a deterministic sweep, against Circle's pinned 0.6.0.
     #[test]
     fn high_s_boundary_matches_libsecp_is_high() {
         fn ours_accepts(s: &[u8; 32]) -> bool {
@@ -213,6 +202,21 @@ mod tests {
         let sk = key(0x42);
         verify_attestation_signatures(&hash(), &sign_one(&hash(), &sk), 1, &[attester(&sk)])
             .expect("1-of-1 must verify");
+    }
+
+    /// A zero threshold makes the length check accept an empty attestation and
+    /// the loop verify nothing — the function must fail closed on its own,
+    /// independent of the transmitter deserializer's guard.
+    #[test]
+    fn zero_threshold_rejected() {
+        rejects(&hash(), &[], 0, &[], "zero threshold + empty attestation");
+        rejects(
+            &hash(),
+            &sign_one(&hash(), &key(0x42)),
+            0,
+            &[attester(&key(0x42))],
+            "zero threshold with a real signature present",
+        );
     }
 
     #[test]
