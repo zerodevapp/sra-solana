@@ -734,6 +734,16 @@
       "code": 6004,
       "name": "QuoteExceedsNetAfterFee",
       "msg": "Committed output exceeds the net input after the CCTP max fee"
+    },
+    {
+      "code": 6005,
+      "name": "MalformedMessage",
+      "msg": "CCTP message bytes do not parse as a supported burn message"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidAttestation",
+      "msg": "Attestation does not verify against the enabled attesters"
     }
   ],
   "types": [
