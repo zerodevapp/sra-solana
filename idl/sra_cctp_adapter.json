@@ -744,6 +744,16 @@
       "code": 6006,
       "name": "InvalidAttestation",
       "msg": "Attestation does not verify against the enabled attesters"
+    },
+    {
+      "code": 6007,
+      "name": "InvalidTransmitterState",
+      "msg": "MessageTransmitter state account is malformed or inconsistent"
+    },
+    {
+      "code": 6008,
+      "name": "NonceNotUsed",
+      "msg": "Used-nonce receipt does not prove an executed mint"
     }
   ],
   "types": [
