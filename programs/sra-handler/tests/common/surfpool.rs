@@ -2,9 +2,11 @@
 //!
 //! Both end-to-end suites (`source_e2e_surfpool.rs`, `dest_e2e_surfpool.rs`)
 //! target the SAME Surfpool instance at `SURFPOOL_RPC_URL` — a mainnet fork
-//! carrying the real Across SVM Spoke Pool and real USDC. Everything here is
-//! transport plumbing: readiness/deploy polling, transaction submission,
-//! address-lookup-table lifecycle, Surfpool cheat-code RPC, and log retrieval.
+//! carrying the real Across SVM Spoke Pool, the real CCTP v2 programs, and
+//! real USDC. Everything here is transport plumbing: readiness/deploy
+//! polling, transaction submission, address-lookup-table lifecycle, Surfpool
+//! cheat-code RPC, log retrieval, and the CCTP fork setup (attester takeover
+//! + the keeper-reference `receive_message` builder).
 //!
 //! Serialization: the suites live in separate test binaries, i.e. separate
 //! processes, so an in-process mutex cannot serialize them. [`surfpool_lock`]
@@ -12,7 +14,7 @@
 //! WITHIN a binary (each open handle contends), replacing the old file-local
 //! `SURFPOOL_TEST_MUTEX`. The lock releases on drop, including on panic.
 
-use anchor_lang::AccountDeserialize;
+use anchor_lang::{prelude::borsh, AccountDeserialize, AnchorSerialize};
 use fslock::LockFile;
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
@@ -25,13 +27,24 @@ use solana_program::address_lookup_table::{
 use solana_sdk::{
     clock::{Clock, Slot},
     commitment_config::CommitmentConfig,
-    instruction::Instruction,
+    instruction::{AccountMeta, Instruction},
     message::{v0, VersionedMessage},
     pubkey::Pubkey,
     signature::{Keypair, Signature, Signer},
     transaction::{Transaction, VersionedTransaction},
 };
+use solana_system_interface::program as system_program;
+use sra_cctp_adapter::utils::cctp_state::{
+    deserialize_message_transmitter, MESSAGE_TRANSMITTER_DISCRIMINATOR,
+};
+use sra_common::{
+    constants::{CCTP_MESSAGE_TRANSMITTER_V2_ID, CCTP_TOKEN_MESSENGER_MINTER_V2_ID, USDC_MINT},
+    instruction_data::encode_anchor_instruction_data,
+};
 use std::{env, error::Error, path::PathBuf, thread::sleep, time::Duration};
+
+use super::cctp::{derive_transmitter_state_pda, derive_used_nonce_pda};
+use super::derive_ata;
 
 pub const SURFPOOL_RPC_URL: &str = "http://127.0.0.1:8899";
 pub const SURFPOOL_RETRY_COUNT: usize = 30;
@@ -374,6 +387,22 @@ pub fn logs_for_signature(http: &Client, signature: &Signature) -> TestResult<Ve
     Ok(logs)
 }
 
+/// Count `Program <id> invoke` / `Program <id> success` execution-log lines —
+/// the proof a REAL bridge program ran (not a mock): the top-level CPI plus
+/// any nested self-invokes (`emit_cpi`).
+pub fn program_log_counts(logs: &[String], program_id: &Pubkey) -> (usize, usize) {
+    let invoke_prefix = format!("Program {program_id} invoke");
+    let success_prefix = format!("Program {program_id} success");
+    (
+        logs.iter()
+            .filter(|line| line.contains(&invoke_prefix))
+            .count(),
+        logs.iter()
+            .filter(|line| line.contains(&success_prefix))
+            .count(),
+    )
+}
+
 pub fn read_anchor_account<T: AccountDeserialize>(
     rpc: &RpcClient,
     address: &Pubkey,
@@ -388,4 +417,161 @@ pub fn clock_unix_timestamp(rpc: &RpcClient) -> TestResult<i64> {
     let data = rpc.get_account_data(&solana_sdk::sysvar::clock::ID)?;
     let clock: Clock = bincode::deserialize(&data)?;
     Ok(clock.unix_timestamp)
+}
+
+// ---------------------------------------------------------------------------
+// CCTP v2 fork setup + keeper-reference builders
+// ---------------------------------------------------------------------------
+
+/// Live CCTP v2 mainnet values, pinned once from the real accounts via
+/// `get_account` + the exact layouts (read 2026-07-30):
+/// - MessageTransmitter `W1k5ijkaSTo5iA5zChNpfzcy796fLhkBxfmJuR8W8HU`:
+///   `version = 1` (pinned as `common::cctp::CCTP_HEADER_VERSION`),
+///   `signature_threshold = 2` over 2 enabled attesters (both replaced on the
+///   fork by [`override_transmitter_attesters`]).
+/// - TokenMessenger `AawthJCGRmggpfv9MMWV6Jmo9cue4gL9wUZgRBShg58W`:
+///   `message_body_version = 1` (pinned as the adapter's
+///   `BURN_MESSAGE_BODY_VERSION`), `min_fee = 0` (so `max_fee = 0` deposits
+///   clear the on-chain fee floor), and `fee_recipient` below (its USDC ATA
+///   collects `fee_executed` on every mint).
+pub const CCTP_FEE_RECIPIENT: Pubkey =
+    Pubkey::from_str_const("4BPnUzFDibVcWQ5zzixGodRUHwqDxHYpUPdPYus3Bn56");
+
+/// Circle's fee-collection USDC account on the mint leg: the ATA of the live
+/// `token_messenger.fee_recipient`.
+pub fn cctp_fee_recipient_ata() -> Pubkey {
+    derive_ata(&CCTP_FEE_RECIPIENT, &USDC_MINT)
+}
+
+/// Take over the fork's CCTP v2 attester set: re-encode the REAL transmitter
+/// state with `signature_threshold = 1` and `enabled_attesters = [attester]`
+/// — a full data rewrite via `surfnet_setAccount`, the same pattern as
+/// [`unpause_across_spoke_state`]. The one overridden account then feeds both
+/// the real `receive_message` and the adapter's `verify_cctp_mint`, keeping
+/// the fork self-consistent. Idempotent.
+pub fn override_transmitter_attesters(
+    rpc: &RpcClient,
+    http: &Client,
+    attester: Pubkey,
+) -> TestResult<()> {
+    let state_pda = derive_transmitter_state_pda();
+    let mut state = deserialize_message_transmitter(&rpc.get_account_data(&state_pda)?)
+        .map_err(|err| format!("transmitter state {state_pda} failed to parse: {err}"))?;
+    if state.signature_threshold == 1 && state.enabled_attesters == [attester] {
+        surfpool_log("override_transmitter_attesters: fork already carries the test attester");
+        return Ok(());
+    }
+    state.signature_threshold = 1;
+    state.enabled_attesters = vec![attester];
+    let mut data = MESSAGE_TRANSMITTER_DISCRIMINATOR.to_vec();
+    state.serialize(&mut data)?;
+    let hex_data: String = data.iter().map(|byte| format!("{byte:02x}")).collect();
+    surfpool_rpc(
+        http,
+        "surfnet_setAccount",
+        json!([state_pda.to_string(), { "data": hex_data }]),
+    )?;
+    surfpool_log("override_transmitter_attesters: installed the test attester (threshold 1)");
+    Ok(())
+}
+
+/// The EVM TokenMessenger the fork's CCTP config trusts for `remote_domain` —
+/// the 32-byte `sender` a crafted burn message must carry. Read live from the
+/// `RemoteTokenMessenger` PDA (layout: 8-byte discriminator ‖ `domain: u32` ‖
+/// `token_messenger: Pubkey`).
+pub fn cctp_remote_token_messenger(rpc: &RpcClient, remote_domain: u32) -> TestResult<[u8; 32]> {
+    let pda = Pubkey::find_program_address(
+        &[
+            b"remote_token_messenger",
+            remote_domain.to_string().as_bytes(),
+        ],
+        &CCTP_TOKEN_MESSENGER_MINTER_V2_ID,
+    )
+    .0;
+    let data = rpc.get_account_data(&pda)?;
+    let discriminator = solana_program::hash::hash(b"account:RemoteTokenMessenger").to_bytes();
+    if data.len() != 44
+        || data[..8] != discriminator[..8]
+        || u32::from_le_bytes(data[8..12].try_into()?) != remote_domain
+    {
+        return Err(format!("remote token messenger {pda} has an unexpected layout").into());
+    }
+    Ok(data[12..44].try_into()?)
+}
+
+/// Anchor wire params of the transmitter's `receive_message`.
+#[derive(AnchorSerialize)]
+struct ReceiveMessageParams {
+    message: Vec<u8>,
+    attestation: Vec<u8>,
+}
+
+/// The real MessageTransmitter v2 `receive_message` instruction for a USDC
+/// burn message — the KEEPER REFERENCE account list. Fixed transmitter
+/// accounts first (`payer` is also the permissionless `caller`), then the
+/// `handle_receive_finalized_message` remaining accounts exactly as Circle's
+/// client encodes them. The `remote_token_messenger` / `token_pair` seeds
+/// encode `remote_domain` as DECIMAL-STRING bytes; `remote_usdc` is the
+/// source chain's USDC address, zero-padded to 32 bytes.
+pub fn receive_message_ix(
+    payer: &Pubkey,
+    nonce: [u8; 32],
+    message: Vec<u8>,
+    attestation: Vec<u8>,
+    remote_domain: u32,
+    remote_usdc: [u8; 32],
+    recipient_token_account: &Pubkey,
+) -> Instruction {
+    let tmm = CCTP_TOKEN_MESSENGER_MINTER_V2_ID;
+    let transmitter = CCTP_MESSAGE_TRANSMITTER_V2_ID;
+    let domain_seed = remote_domain.to_string();
+    let find = |seeds: &[&[u8]], program: &Pubkey| Pubkey::find_program_address(seeds, program).0;
+    Instruction {
+        program_id: transmitter,
+        accounts: vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new_readonly(*payer, true), // caller (permissionless receive)
+            AccountMeta::new_readonly(
+                find(
+                    &[b"message_transmitter_authority", tmm.as_ref()],
+                    &transmitter,
+                ),
+                false,
+            ),
+            AccountMeta::new_readonly(derive_transmitter_state_pda(), false),
+            AccountMeta::new(derive_used_nonce_pda(&nonce), false),
+            AccountMeta::new_readonly(tmm, false), // receiver program
+            AccountMeta::new_readonly(system_program::ID, false),
+            AccountMeta::new_readonly(find(&[b"__event_authority"], &transmitter), false),
+            AccountMeta::new_readonly(transmitter, false),
+            // remaining accounts → handle_receive_finalized_message
+            AccountMeta::new_readonly(find(&[b"token_messenger"], &tmm), false),
+            AccountMeta::new_readonly(
+                find(&[b"remote_token_messenger", domain_seed.as_bytes()], &tmm),
+                false,
+            ),
+            AccountMeta::new(find(&[b"token_minter"], &tmm), false),
+            AccountMeta::new(find(&[b"local_token", USDC_MINT.as_ref()], &tmm), false),
+            AccountMeta::new_readonly(
+                find(
+                    &[b"token_pair", domain_seed.as_bytes(), remote_usdc.as_ref()],
+                    &tmm,
+                ),
+                false,
+            ),
+            AccountMeta::new(cctp_fee_recipient_ata(), false),
+            AccountMeta::new(*recipient_token_account, false),
+            AccountMeta::new(find(&[b"custody", USDC_MINT.as_ref()], &tmm), false),
+            AccountMeta::new_readonly(anchor_spl::token::ID, false),
+            AccountMeta::new_readonly(find(&[b"__event_authority"], &tmm), false),
+            AccountMeta::new_readonly(tmm, false),
+        ],
+        data: encode_anchor_instruction_data(
+            "receive_message",
+            &ReceiveMessageParams {
+                message,
+                attestation,
+            },
+        ),
+    }
 }
