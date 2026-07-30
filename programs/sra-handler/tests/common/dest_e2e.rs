@@ -20,10 +20,7 @@ use sra_across_adapter::utils::svm_spoke;
 use sra_across_adapter::utils::svm_spoke::types::RelayData;
 use sra_common::{
     abi::u256_from_u64,
-    constants::{
-        ACROSS_SPOKE_POOL_ID, CCTP_MESSAGE_TRANSMITTER_V2_ID, CCTP_TOKEN_MESSENGER_MINTER_V2_ID,
-        SOLANA_CHAIN_ID, USDC_MINT,
-    },
+    constants::{ACROSS_SPOKE_POOL_ID, SOLANA_CHAIN_ID, USDC_MINT},
     types::{CreateRouteParams, FillReceipt},
 };
 
@@ -539,34 +536,4 @@ impl SurfpoolDestFixture {
         let (fill_receipt, _) = derive_fill_receipt_pda(&self.route, &fill_id);
         read_anchor_account(&self.rpc, &fill_receipt)
     }
-}
-
-/// The mint leg must show BOTH real CCTP programs running: the transmitter
-/// (receive_message + its emit_cpi self-invoke) and the TokenMessengerMinter
-/// it CPIs into.
-pub fn assert_real_cctp_ran(logs: &[String]) {
-    for (label, program_id) in [
-        ("MessageTransmitter", CCTP_MESSAGE_TRANSMITTER_V2_ID),
-        ("TokenMessengerMinter", CCTP_TOKEN_MESSENGER_MINTER_V2_ID),
-    ] {
-        let (invokes, successes) = program_log_counts(logs, &program_id);
-        assert!(
-            invokes >= 1 && successes >= 1,
-            "expected the real {label} program {program_id} to run, got {invokes} invoke(s) / {successes} success(es)"
-        );
-    }
-}
-
-/// Count `Program <spoke> invoke/success` lines — the fill leg must show the
-/// real program running (top-level fill_relay + its emit_cpi self-invoke).
-pub fn assert_real_spoke_pool_ran(logs: &[String]) {
-    let (across_invokes, across_successes) = program_log_counts(logs, &ACROSS_SPOKE_POOL_ID);
-    assert!(
-        across_invokes >= 2,
-        "expected ≥2 Across invocations (fill_relay + emit_cpi event), got {across_invokes}"
-    );
-    assert!(
-        across_successes >= 2,
-        "expected ≥2 Across success lines (fill_relay + emit_cpi event), got {across_successes}"
-    );
 }

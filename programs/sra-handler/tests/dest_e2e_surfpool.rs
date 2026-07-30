@@ -48,6 +48,9 @@ use common::surfpool::*;
 use common::*;
 use solana_program::keccak;
 use solana_sdk::signature::Signer;
+use sra_common::constants::{
+    ACROSS_SPOKE_POOL_ID, CCTP_MESSAGE_TRANSMITTER_V2_ID, CCTP_TOKEN_MESSENGER_MINTER_V2_ID,
+};
 use sra_common::types::ExecutionStatus;
 
 #[test]
@@ -74,7 +77,12 @@ fn dest_e2e_real_across_happy_path() {
     let (_, logs) = fx
         .execute_real_fill(&relay_data)
         .expect("real fill_relay should succeed against real Across");
-    assert_real_spoke_pool_ran(&logs);
+    assert_program_ran(
+        &logs,
+        "Across spoke pool (fill_relay + emit_cpi event)",
+        &ACROSS_SPOKE_POOL_ID,
+        2,
+    );
     assert_eq!(
         fx.token_amount(&fx.route_vault).expect("read route vault"),
         OUTPUT_AMOUNT,
@@ -312,7 +320,18 @@ fn cctp_happy_path(fee_executed: u64) {
     let logs = fx
         .execute_real_receive(&msg)
         .expect("real receive_message should succeed against real CCTP v2");
-    assert_real_cctp_ran(&logs);
+    assert_program_ran(
+        &logs,
+        "MessageTransmitter",
+        &CCTP_MESSAGE_TRANSMITTER_V2_ID,
+        1,
+    );
+    assert_program_ran(
+        &logs,
+        "TokenMessengerMinter",
+        &CCTP_TOKEN_MESSENGER_MINTER_V2_ID,
+        1,
+    );
     assert_eq!(
         fx.token_amount(&fx.route_vault).expect("read route vault"),
         delivered,
