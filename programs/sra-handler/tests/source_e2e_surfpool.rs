@@ -1,3 +1,19 @@
+//! Source E2E against the REAL bridge programs on a Surfpool mainnet fork:
+//! the Across SVM Spoke Pool and the CCTP v2 TokenMessengerMinter /
+//! MessageTransmitter. One fixture drives the paired
+//! `validate_and_prepare` + `execute_deposit_*` v0 transaction (compute
+//! budget + ALT) for whichever adapter it was bootstrapped with.
+//!
+//! KEEPER SPEC (Solana → EVM over CCTP; this suite is the reference for the
+//! on-chain leg): (1) submit the paired deposit transaction below — the
+//! ephemeral `message_sent_event_data` keypair co-signs; (2) poll Iris
+//! `GET /v2/messages/5?transactionHash=<sig>` until `status == complete`;
+//! (3) submit `receiveMessage(message, attestation)` on the destination EVM
+//! MessageTransmitter — requires a funded EVM wallet (ops requirement);
+//! (4) after ≥ 5 days, optionally `reclaim_event_account(attestation,
+//! destination_message)` to recover the ~0.004 SOL event-account rent
+//! (payee must be the original fee payer).
+
 mod common;
 
 use anchor_lang::AccountDeserialize;
@@ -11,9 +27,13 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{read_keypair_file, Keypair, Signer},
 };
+use sra_cctp_adapter::utils::message::{BurnMessage, CctpMessage};
 use sra_common::abi::u256_from_u64;
 use sra_common::{
-    constants::{ACROSS_SPOKE_POOL_ID, USDC_MINT},
+    constants::{
+        cctp_domain_for_chain, ACROSS_SPOKE_POOL_ID, CCTP_MESSAGE_TRANSMITTER_V2_ID,
+        CCTP_TOKEN_MESSENGER_MINTER_V2_ID, SOLANA_CCTP_DOMAIN, USDC_MINT,
+    },
     source_deposit::{AcrossDepositParams, PrepareParams},
     types::{MintNonce, SourceHandlerData, SraConfig},
 };
@@ -57,11 +77,15 @@ struct SurfpoolSourceFixture {
     owner_ata: Pubkey,
     across_state: Pubkey,
     across_vault: Pubkey,
+    adapter_program: Pubkey,
     accounts: ValidatePrepareAccounts,
 }
 
 impl SurfpoolSourceFixture {
-    fn bootstrap() -> TestResult<Self> {
+    /// Bootstrap an SRA whose `handler_data` allowlists exactly
+    /// `adapter_program` — the same fresh-owner/fresh-root setup for either
+    /// adapter, differing only in the bridge whose fork presence is checked.
+    fn bootstrap(adapter_program: Pubkey) -> TestResult<Self> {
         surfpool_log("bootstrap: starting Surfpool source fixture setup");
         let rpc = rpc_client();
         wait_for_surfpool(&rpc)?;
@@ -72,24 +96,30 @@ impl SurfpoolSourceFixture {
         let owner = Keypair::new();
         let address_book_root = Keypair::new();
         let address_book_root_pubkey = address_book_root.pubkey();
-        let handler_data = sample_handler_data(address_book_root_pubkey);
+        let mut handler_data = sample_handler_data(address_book_root_pubkey);
+        handler_data.allowed_adapters = vec![adapter_program];
         let target_token = sample_target_token();
         let target_chain_id = sample_prepare_params(target_token).target_chain_id;
         let salt = [0xAB; 32];
         let (sra_config, _) = derive_sra_pda(&owner.pubkey(), &handler_data, &salt);
-        let accounts =
-            ValidatePrepareAccounts::derive(&sra_config, &USDC_MINT, &ADAPTER_PROGRAM_ID);
+        let accounts = ValidatePrepareAccounts::derive(&sra_config, &USDC_MINT, &adapter_program);
         let owner_ata = derive_ata(&owner.pubkey(), &USDC_MINT);
         let (across_state, _) = derive_real_across_state_pda();
         let across_vault = derive_ata(&across_state, &USDC_MINT);
 
-        wait_for_program_deploys(&rpc, &[PROGRAM_ID, ADAPTER_PROGRAM_ID])?;
+        wait_for_program_deploys(&rpc, &[PROGRAM_ID, adapter_program])?;
         surfpool_log("bootstrap: local programs are deployed");
-        rpc.get_account(&ACROSS_SPOKE_POOL_ID)?;
-        surfpool_log(format!(
-            "bootstrap: Across spoke pool {ACROSS_SPOKE_POOL_ID} is reachable"
-        ));
-        unpause_across_spoke_state(&rpc, &http, &across_state)?;
+        if adapter_program == ADAPTER_PROGRAM_ID {
+            rpc.get_account(&ACROSS_SPOKE_POOL_ID)?;
+            surfpool_log(format!(
+                "bootstrap: Across spoke pool {ACROSS_SPOKE_POOL_ID} is reachable"
+            ));
+            unpause_across_spoke_state(&rpc, &http, &across_state)?;
+        } else {
+            rpc.get_account(&CCTP_TOKEN_MESSENGER_MINTER_V2_ID)?;
+            rpc.get_account(&CCTP_MESSAGE_TRANSMITTER_V2_ID)?;
+            surfpool_log("bootstrap: CCTP v2 programs are reachable");
+        }
 
         request_and_confirm_airdrop(&rpc, "payer", &payer.pubkey(), 10 * SOL)?;
         request_and_confirm_airdrop(&rpc, "owner", &owner.pubkey(), SOL)?;
@@ -200,6 +230,7 @@ impl SurfpoolSourceFixture {
             owner_ata,
             across_state,
             across_vault,
+            adapter_program,
             accounts,
         };
         fixture.seed_owner_usdc(OWNER_STARTING_BALANCE)?;
@@ -225,14 +256,41 @@ impl SurfpoolSourceFixture {
         Ok(())
     }
 
-    fn invoke_source_flow(&self, params: PrepareParams) -> TestResult<Vec<String>> {
-        let current_nonce = self.current_nonce()?;
+    /// The account/keypair view the shared instruction builders take.
+    fn vp_fixture(&self, target_chain_id: u64) -> ValidatePrepareFixture {
+        ValidatePrepareFixture {
+            payer: self.payer.insecure_clone(),
+            owner: self.owner.insecure_clone(),
+            fee_admin: Keypair::new(),
+            address_book_root: self.address_book_root,
+            handler_data: self.handler_data.clone(),
+            sra_config: self.sra_config,
+            source_mint: USDC_MINT,
+            target_chain_id,
+            target_token: self.target_token,
+            adapter_program: self.adapter_program,
+            accounts: self.accounts.clone(),
+            owner_ata: self.owner_ata,
+            across_state: self.across_state,
+            across_vault: self.across_vault,
+        }
+    }
+
+    /// Pair `validate_and_prepare` with the given adapter leg and submit the
+    /// production shape: one v0 transaction, compute budget first, all
+    /// non-signer accounts resolved through a real address lookup table.
+    fn submit_source_flow(
+        &self,
+        params: &PrepareParams,
+        execute_ix: solana_sdk::instruction::Instruction,
+        extra_signers: &[&Keypair],
+    ) -> TestResult<Vec<String>> {
         surfpool_log(format!(
-            "invoke_source_flow: starting for target_chain_id={} input_amount={} output_amount={:?} current_nonce={}",
+            "submit_source_flow: starting for target_chain_id={} input_amount={} output_amount={:?} current_nonce={}",
             params.target_chain_id,
             params.input_amount,
             params.output_amount,
-            current_nonce
+            self.current_nonce()?
         ));
         let address_book_entry = derive_address_book_pda(
             &self.address_book_root,
@@ -241,34 +299,6 @@ impl SurfpoolSourceFixture {
             &params.target_token,
         )
         .0;
-        let execute_ix = execute_deposit_across_ix(
-            &self.payer.pubkey(),
-            &ValidatePrepareFixture {
-                payer: self.payer.insecure_clone(),
-                owner: self.owner.insecure_clone(),
-                fee_admin: Keypair::new(),
-                address_book_root: self.address_book_root,
-                handler_data: self.handler_data.clone(),
-                sra_config: self.sra_config,
-                source_mint: USDC_MINT,
-                target_chain_id: params.target_chain_id,
-                target_token: self.target_token,
-                adapter_program: ADAPTER_PROGRAM_ID,
-                accounts: self.accounts.clone(),
-                owner_ata: self.owner_ata,
-                across_state: self.across_state,
-                across_vault: self.across_vault,
-            },
-            &read_anchor_account::<SraConfig>(&self.rpc, &self.sra_config)?,
-            &params,
-            AcrossDepositParams::from_prepare(
-                &params,
-                self.payer.pubkey(),
-                FILL_DEADLINE_OFFSET_SECS,
-                EXCLUSIVITY_PERIOD_SECS,
-            )
-            .expect("prepare params must produce a valid net amount"),
-        );
         let validate_ix = validate_and_prepare_ix(
             &self.payer.pubkey(),
             &self.owner.pubkey(),
@@ -286,21 +316,53 @@ impl SurfpoolSourceFixture {
             representative_lookup_addresses(&[validate_ix.clone(), execute_ix.clone()]);
         let lookup_table = prepare_lookup_table(&self.rpc, &self.payer, lookup_addresses)?;
 
+        let mut signers = vec![&self.owner];
+        signers.extend_from_slice(extra_signers);
         let signature = send_versioned_transaction(
             &self.rpc,
             "source_flow",
             &self.payer,
-            &[&self.owner],
+            &signers,
             &[compute_budget_ix(), validate_ix, execute_ix],
             &[lookup_table],
         )?;
 
         let logs = logs_for_signature(&self.http, &signature)?;
         surfpool_log(format!(
-            "invoke_source_flow: fetched {} local log line(s) for signature {signature}",
+            "submit_source_flow: fetched {} local log line(s) for signature {signature}",
             logs.len()
         ));
         Ok(logs)
+    }
+
+    fn invoke_source_flow(&self, params: PrepareParams) -> TestResult<Vec<String>> {
+        let execute_ix = execute_deposit_across_ix(
+            &self.payer.pubkey(),
+            &self.vp_fixture(params.target_chain_id),
+            &read_anchor_account::<SraConfig>(&self.rpc, &self.sra_config)?,
+            &params,
+            AcrossDepositParams::from_prepare(
+                &params,
+                self.payer.pubkey(),
+                FILL_DEADLINE_OFFSET_SECS,
+                EXCLUSIVITY_PERIOD_SECS,
+            )
+            .expect("prepare params must produce a valid net amount"),
+        );
+        self.submit_source_flow(&params, execute_ix, &[])
+    }
+
+    /// The CCTP paired flow: the ephemeral `message_sent_event_data` keypair
+    /// co-signs, and its pubkey is returned so tests can read back the real
+    /// `MessageSent` account the transmitter wrote.
+    fn invoke_source_flow_cctp(&self, params: PrepareParams) -> TestResult<(Vec<String>, Pubkey)> {
+        let (execute_ix, event_data) = execute_deposit_cctp_ix(
+            &self.payer.pubkey(),
+            &self.vp_fixture(params.target_chain_id),
+            &cctp_params_for(&params),
+        );
+        let logs = self.submit_source_flow(&params, execute_ix, &[&event_data])?;
+        Ok((logs, event_data.pubkey()))
     }
 
     fn current_nonce(&self) -> TestResult<u64> {
@@ -345,13 +407,29 @@ impl SurfpoolSourceFixture {
             .amount
             .parse()?)
     }
+
+    /// Total USDC supply on the fork — the CCTP deposit is a BURN, asserted
+    /// as a supply decrease (Across, by contrast, escrows into its vault).
+    fn usdc_supply(&self) -> TestResult<u64> {
+        Ok(self.rpc.get_token_supply(&USDC_MINT)?.amount.parse()?)
+    }
+}
+
+/// The REAL bridge program must have run — at least one invoke and one
+/// success line in the execution logs.
+fn assert_program_ran(logs: &[String], label: &str, program_id: &Pubkey) {
+    let (invokes, successes) = program_log_counts(logs, program_id);
+    assert!(
+        invokes >= 1 && successes >= 1,
+        "expected the real {label} program {program_id} to run, got {invokes} invoke(s) / {successes} success(es)"
+    );
 }
 
 #[test]
 #[ignore = "requires Surfpool at http://127.0.0.1:8899"]
 fn source_e2e_real_across_happy_path() {
     let _lock = surfpool_lock().expect("acquire surfpool lock");
-    let fx = SurfpoolSourceFixture::bootstrap().expect("bootstrap fixture");
+    let fx = SurfpoolSourceFixture::bootstrap(ADAPTER_PROGRAM_ID).expect("bootstrap fixture");
     let pre_owner = fx
         .owner_token_amount()
         .expect("read owner ATA before deposit");
@@ -387,16 +465,7 @@ fn source_e2e_real_across_happy_path() {
             .nonce,
     ));
 
-    let invoke_prefix = format!("Program {} invoke", ACROSS_SPOKE_POOL_ID);
-    let success_prefix = format!("Program {} success", ACROSS_SPOKE_POOL_ID);
-    let across_invokes = logs
-        .iter()
-        .filter(|line| line.contains(&invoke_prefix))
-        .count();
-    let across_successes = logs
-        .iter()
-        .filter(|line| line.contains(&success_prefix))
-        .count();
+    let (across_invokes, across_successes) = program_log_counts(&logs, &ACROSS_SPOKE_POOL_ID);
     assert!(
         across_invokes >= 2,
         "expected ≥2 Across invocations (deposit_now + emit_cpi event), got {across_invokes}"
@@ -421,7 +490,7 @@ fn source_e2e_real_across_happy_path() {
 #[ignore = "requires Surfpool at http://127.0.0.1:8899"]
 fn source_e2e_real_across_nonce_increments() {
     let _lock = surfpool_lock().expect("acquire surfpool lock");
-    let fx = SurfpoolSourceFixture::bootstrap().expect("bootstrap fixture");
+    let fx = SurfpoolSourceFixture::bootstrap(ADAPTER_PROGRAM_ID).expect("bootstrap fixture");
     surfpool_log("source_e2e_real_across_nonce_increments: running first deposit");
 
     fx.invoke_source_flow(default_prepare_params_rpc(&fx))
@@ -437,6 +506,122 @@ fn source_e2e_real_across_nonce_increments() {
             .nonce,
     ));
 
+    assert_eq!(
+        fx.mint_nonce()
+            .expect("read mint nonce after second deposit")
+            .nonce,
+        2
+    );
+}
+
+#[test]
+#[ignore = "requires Surfpool at http://127.0.0.1:8899"]
+fn source_e2e_real_cctp_happy_path() {
+    let _lock = surfpool_lock().expect("acquire surfpool lock");
+    let fx = SurfpoolSourceFixture::bootstrap(CCTP_ADAPTER_PROGRAM_ID).expect("bootstrap fixture");
+    let params = default_prepare_params_rpc(&fx);
+    let pre_owner = fx
+        .owner_token_amount()
+        .expect("read owner ATA before deposit");
+    let pre_supply = fx.usdc_supply().expect("read USDC supply before deposit");
+    surfpool_log(format!(
+        "source_e2e_real_cctp_happy_path: pre balances owner={pre_owner} usdc_supply={pre_supply}"
+    ));
+
+    let (logs, message_sent) = fx
+        .invoke_source_flow_cctp(params.clone())
+        .expect("paired source flow should succeed against real CCTP v2");
+
+    // The real TokenMessengerMinter ran (deposit_for_burn) and CPI'd the real
+    // MessageTransmitter (send_message) — a burn, not a vault transfer.
+    assert_program_ran(
+        &logs,
+        "TokenMessengerMinter",
+        &CCTP_TOKEN_MESSENGER_MINTER_V2_ID,
+    );
+    assert_program_ran(&logs, "MessageTransmitter", &CCTP_MESSAGE_TRANSMITTER_V2_ID);
+    assert_eq!(
+        fx.owner_token_amount().expect("read owner ATA"),
+        pre_owner - INPUT_AMOUNT
+    );
+    assert_eq!(fx.sra_vault_amount().expect("read SRA vault"), 0);
+    assert_eq!(
+        fx.adapter_custody_amount().expect("read adapter custody"),
+        0
+    );
+    // Fees are disabled in this fixture, so the full input is the net burn.
+    assert_eq!(
+        fx.usdc_supply().expect("read USDC supply"),
+        pre_supply - INPUT_AMOUNT,
+        "deposit_for_burn must reduce the USDC supply by the net amount"
+    );
+
+    // The ephemeral MessageSent account the real transmitter wrote: parse the
+    // wire message with the adapter's own parsers and pin every field the
+    // source leg controls (the nonce stays zeroed — Iris assigns it off-chain
+    // at attestation time).
+    let event_account = fx
+        .rpc
+        .get_account(&message_sent)
+        .expect("MessageSent account exists");
+    assert_eq!(event_account.owner, CCTP_MESSAGE_TRANSMITTER_V2_ID);
+    let event: mock_cctp::MessageSent = read_anchor_account(&fx.rpc, &message_sent)
+        .expect("MessageSent account parses (real layout == mock layout)");
+    assert_eq!(event.rent_payer, fx.payer.pubkey());
+    let message = CctpMessage::parse(&event.message).expect("wire message parses");
+    let expected_domain =
+        cctp_domain_for_chain(params.target_chain_id).expect("target chain has a CCTP domain");
+    let remote_token_messenger = cctp_remote_token_messenger(&fx.rpc, expected_domain)
+        .expect("read the trusted remote token messenger from the fork");
+    assert_eq!(message.version(), cctp::CCTP_HEADER_VERSION);
+    assert_eq!(message.source_domain(), SOLANA_CCTP_DOMAIN);
+    assert_eq!(message.destination_domain(), expected_domain);
+    assert_eq!(
+        message.nonce(),
+        [0u8; 32],
+        "nonce is zero-filled at burn time"
+    );
+    assert_eq!(
+        message.recipient(),
+        Pubkey::new_from_array(remote_token_messenger),
+        "recipient must be the destination domain's TokenMessenger"
+    );
+    let body = BurnMessage::parse(message.body()).expect("burn body parses");
+    assert_eq!(
+        body.version(),
+        sra_cctp_adapter::utils::message::BURN_MESSAGE_BODY_VERSION
+    );
+    assert_eq!(body.burn_token(), USDC_MINT.to_bytes());
+    assert_eq!(
+        body.mint_recipient(),
+        Pubkey::new_from_array(params.recipient)
+    );
+    assert_eq!(body.amount().expect("amount slot"), INPUT_AMOUNT);
+    assert_eq!(body.max_fee().expect("max_fee slot"), 0);
+    assert_eq!(body.fee_executed().expect("fee_executed slot"), 0);
+
+    assert_eq!(fx.mint_nonce().expect("read mint nonce").nonce, 1);
+}
+
+#[test]
+#[ignore = "requires Surfpool at http://127.0.0.1:8899"]
+fn source_e2e_real_cctp_nonce_increments() {
+    let _lock = surfpool_lock().expect("acquire surfpool lock");
+    let fx = SurfpoolSourceFixture::bootstrap(CCTP_ADAPTER_PROGRAM_ID).expect("bootstrap fixture");
+    surfpool_log("source_e2e_real_cctp_nonce_increments: running first deposit");
+
+    let (_, first_event) = fx
+        .invoke_source_flow_cctp(default_prepare_params_rpc(&fx))
+        .expect("first deposit succeeds");
+    surfpool_log("source_e2e_real_cctp_nonce_increments: running second deposit");
+    let (_, second_event) = fx
+        .invoke_source_flow_cctp(default_prepare_params_rpc(&fx))
+        .expect("second deposit succeeds");
+
+    assert_ne!(
+        first_event, second_event,
+        "each deposit writes its own ephemeral MessageSent account"
+    );
     assert_eq!(
         fx.mint_nonce()
             .expect("read mint nonce after second deposit")
