@@ -415,16 +415,6 @@ impl SurfpoolSourceFixture {
     }
 }
 
-/// The REAL bridge program must have run — at least one invoke and one
-/// success line in the execution logs.
-fn assert_program_ran(logs: &[String], label: &str, program_id: &Pubkey) {
-    let (invokes, successes) = program_log_counts(logs, program_id);
-    assert!(
-        invokes >= 1 && successes >= 1,
-        "expected the real {label} program {program_id} to run, got {invokes} invoke(s) / {successes} success(es)"
-    );
-}
-
 #[test]
 #[ignore = "requires Surfpool at http://127.0.0.1:8899"]
 fn source_e2e_real_across_happy_path() {
@@ -465,14 +455,11 @@ fn source_e2e_real_across_happy_path() {
             .nonce,
     ));
 
-    let (across_invokes, across_successes) = program_log_counts(&logs, &ACROSS_SPOKE_POOL_ID);
-    assert!(
-        across_invokes >= 2,
-        "expected ≥2 Across invocations (deposit_now + emit_cpi event), got {across_invokes}"
-    );
-    assert!(
-        across_successes >= 2,
-        "expected ≥2 Across success lines (deposit_now + emit_cpi event), got {across_successes}"
+    assert_program_ran(
+        &logs,
+        "Across spoke pool (deposit_now + emit_cpi event)",
+        &ACROSS_SPOKE_POOL_ID,
+        2,
     );
     assert_eq!(post_owner, pre_owner - INPUT_AMOUNT);
     assert_eq!(post_sra_vault, 0);
@@ -538,8 +525,14 @@ fn source_e2e_real_cctp_happy_path() {
         &logs,
         "TokenMessengerMinter",
         &CCTP_TOKEN_MESSENGER_MINTER_V2_ID,
+        1,
     );
-    assert_program_ran(&logs, "MessageTransmitter", &CCTP_MESSAGE_TRANSMITTER_V2_ID);
+    assert_program_ran(
+        &logs,
+        "MessageTransmitter",
+        &CCTP_MESSAGE_TRANSMITTER_V2_ID,
+        1,
+    );
     assert_eq!(
         fx.owner_token_amount().expect("read owner ATA"),
         pre_owner - INPUT_AMOUNT
