@@ -387,20 +387,31 @@ pub fn logs_for_signature(http: &Client, signature: &Signature) -> TestResult<Ve
     Ok(logs)
 }
 
-/// Count `Program <id> invoke` / `Program <id> success` execution-log lines —
-/// the proof a REAL bridge program ran (not a mock): the top-level CPI plus
-/// any nested self-invokes (`emit_cpi`).
-pub fn program_log_counts(logs: &[String], program_id: &Pubkey) -> (usize, usize) {
+/// The REAL bridge program (not a mock) must appear in the execution logs at
+/// least `min_invocations` times — as both `Program <id> invoke` and
+/// `Program <id> success` lines (the top-level CPI plus any nested
+/// self-invokes, e.g. `emit_cpi`).
+pub fn assert_program_ran(
+    logs: &[String],
+    label: &str,
+    program_id: &Pubkey,
+    min_invocations: usize,
+) {
     let invoke_prefix = format!("Program {program_id} invoke");
     let success_prefix = format!("Program {program_id} success");
-    (
-        logs.iter()
-            .filter(|line| line.contains(&invoke_prefix))
-            .count(),
-        logs.iter()
-            .filter(|line| line.contains(&success_prefix))
-            .count(),
-    )
+    let invokes = logs
+        .iter()
+        .filter(|line| line.contains(&invoke_prefix))
+        .count();
+    let successes = logs
+        .iter()
+        .filter(|line| line.contains(&success_prefix))
+        .count();
+    assert!(
+        invokes >= min_invocations && successes >= min_invocations,
+        "expected the real {label} program {program_id} to run ≥{min_invocations}×, \
+         got {invokes} invoke(s) / {successes} success(es)"
+    );
 }
 
 pub fn read_anchor_account<T: AccountDeserialize>(
