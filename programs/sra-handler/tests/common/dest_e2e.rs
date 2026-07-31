@@ -6,6 +6,7 @@
 //! amount, and wire-crafting decision lives here.
 
 use anchor_spl::associated_token::spl_associated_token_account;
+use hex_literal::hex;
 use libsecp256k1::SecretKey;
 use reqwest::blocking::Client;
 use serde_json::json;
@@ -61,13 +62,12 @@ pub const SECOND_FILL_AMOUNT: u64 = 1_500_000;
 pub const CCTP_FEE_EXECUTED: u64 = 2_500;
 /// Headroom the source-side quote committed to: `fee_executed ≤ max_fee`.
 pub const CCTP_MAX_FEE: u64 = 5_000;
-/// Arbitrum's native USDC, zero-padded to the 32-byte wire form — the crafted
-/// burn message must carry the real remote token so the fork's genuine
-/// `token_pair` account (domain 3) resolves it on `receive_message`.
-pub const ARBITRUM_USDC: [u8; 32] = [
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xaf, 0x88, 0xd0, 0x65, 0xe7, 0x7c, 0x8c, 0xc2, 0x23, 0x93,
-    0x27, 0xc5, 0xed, 0xb3, 0xa4, 0x32, 0x26, 0x8e, 0x58, 0x31,
-];
+/// Arbitrum's native USDC (`0xaf88d065e77c8cC2239327C5EDb3A432268e5831`),
+/// zero-padded to the 32-byte wire form — the crafted burn message must carry
+/// the real remote token so the fork's genuine `token_pair` account
+/// (domain 3) resolves it on `receive_message`.
+pub const ARBITRUM_USDC: [u8; 32] =
+    hex!("000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e5831");
 
 /// The delegate signer the real `fill_relay` moves relayer funds through:
 /// `["delegate", keccak256(borsh(relay_hash ‖ repayment_chain_id ‖
