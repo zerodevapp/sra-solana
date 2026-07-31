@@ -31,6 +31,7 @@ solana-sdk-ids = "2.2.1"
 sra-common = { path = "../../crates/sra-common" }
 
 [dev-dependencies]
+hex-literal = "1"
 libsecp256k1 = "0.6"
 litesvm = "0.7.1"
 litesvm-token = "0.7.1"
