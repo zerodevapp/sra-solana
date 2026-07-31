@@ -132,7 +132,7 @@ jobs:
       - name: Install branch programs
         run: |
           authority=$(solana address)
-          for program_id in 7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5 8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU; do
+          for program_id in 7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5 8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU 2bXAvxF3U4FtWAnJtcL9LDnwM7qnErf3y3m6USLRKpRw; do
             # The rotated program IDs may not exist on mainnet (yet), so the fork
             # has nothing to take over. Seed each ID by cloning the Across
             # SpokePool program as a placeholder — the branch deploy below
@@ -148,6 +148,7 @@ jobs:
           done
           NO_DNA=1 solana program deploy --use-rpc --url http://127.0.0.1:8899 --program-id 7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5 --upgrade-authority ~/.config/solana/id.json target/deploy/sra_handler.so
           NO_DNA=1 solana program deploy --use-rpc --url http://127.0.0.1:8899 --program-id 8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU --upgrade-authority ~/.config/solana/id.json target/deploy/sra_across_adapter.so
+          NO_DNA=1 solana program deploy --use-rpc --url http://127.0.0.1:8899 --program-id 2bXAvxF3U4FtWAnJtcL9LDnwM7qnErf3y3m6USLRKpRw --upgrade-authority ~/.config/solana/id.json target/deploy/sra_cctp_adapter.so
 
       - name: Run source Surfpool E2E
         run: NO_DNA=1 cargo test -p sra-handler --test source_e2e_surfpool -- --ignored --nocapture
