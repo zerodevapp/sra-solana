@@ -33,4 +33,12 @@ pub mod sra_across_adapter {
     ) -> Result<()> {
         instructions::verify_fill::handler(ctx, relay_hash, relay_data)
     }
+
+    pub fn verify_across_fill_after_close(
+        ctx: Context<VerifyAcrossFillAfterClose>,
+        relay_hash: [u8; 32],
+        relay_data: crate::utils::svm_spoke::types::RelayData,
+    ) -> Result<()> {
+        instructions::verify_fill_after_close::handler(ctx, relay_hash, relay_data)
+    }
 }

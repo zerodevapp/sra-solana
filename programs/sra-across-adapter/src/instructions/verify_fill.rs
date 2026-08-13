@@ -31,7 +31,61 @@ use crate::AcrossAdapterError;
 
 /// Fill-status PDA seed prefix the deployed Across SpokePool uses
 /// (`["fills", relay_hash]`).
-const FILL_STATUS_SEED: &[u8] = b"fills";
+pub(crate) const FILL_STATUS_SEED: &[u8] = b"fills";
+
+/// Relay/route validation and `VerifiedFill` construction shared by the live
+/// verification path and the post-close owner fallback. Deliberately excludes
+/// the `FillStatus::Filled` proof — each caller supplies its own evidence that
+/// the fill happened.
+pub(crate) fn validated_verified_fill(
+    route: &Account<SolanaSraRoute>,
+    relay_hash: [u8; 32],
+    relay_data: &RelayData,
+    bump: u8,
+) -> Result<VerifiedFill> {
+    // Bind the caller-supplied relay data to the fill: re-deriving the relay
+    // hash over `relay_data` must reproduce the hash that seeds the fill-status
+    // PDA. The fill lands on this chain, so the bound chain id is this chain's.
+    require!(
+        compute_relay_hash(relay_data, SOLANA_CHAIN_ID)? == relay_hash,
+        AcrossAdapterError::RelayHashMismatch
+    );
+
+    // Cross-check the (now relay-hash-bound) routing fields against the
+    // committed route.
+    let route_key = route.key();
+    require_keys_eq!(
+        relay_data.recipient,
+        route_key,
+        AcrossAdapterError::RecipientMismatch
+    );
+    require_keys_eq!(
+        relay_data.output_token,
+        route.expected_mint,
+        AcrossAdapterError::OutputTokenMismatch
+    );
+    require_eq!(
+        relay_data.origin_chain_id,
+        route.source_chain_id,
+        AcrossAdapterError::OriginChainMismatch
+    );
+
+    // Across binds a single exact-fill output amount, so it is both the
+    // delivered amount and the source-committed minimum the handler later
+    // enforces. `output_token` has been checked equal to the route mint;
+    // persisting it names the asset this fill delivered.
+    Ok(VerifiedFill {
+        adapter: crate::ID,
+        route: route_key,
+        fill_id: relay_hash,
+        mint: relay_data.output_token,
+        amount: relay_data.output_amount,
+        expected_amount: relay_data.output_amount,
+        source_chain_id: relay_data.origin_chain_id,
+        created_at: Clock::get()?.unix_timestamp,
+        bump,
+    })
+}
 
 #[derive(Accounts)]
 #[instruction(relay_hash: [u8; 32])]
@@ -82,51 +136,17 @@ pub fn handler(
         AcrossAdapterError::FillNotCompleted
     );
 
-    // 2. Bind the caller-supplied relay data to the verified fill: re-deriving the
-    //    relay hash over `relay_data` must reproduce the hash that seeds the
-    //    fill-status PDA. The fill lands on this chain, so the bound chain id is
-    //    this chain's id.
-    require!(
-        compute_relay_hash(&relay_data, SOLANA_CHAIN_ID)? == relay_hash,
-        AcrossAdapterError::RelayHashMismatch
-    );
+    // 2/3/4. Bind the relay data to the hash, cross-check the route, and record
+    //    the verification artifact.
+    let verified = validated_verified_fill(
+        &ctx.accounts.route,
+        relay_hash,
+        &relay_data,
+        ctx.bumps.verified_fill,
+    )?;
+    ctx.accounts.verified_fill.set_inner(verified);
 
-    // 3. Cross-check the (now relay-hash-bound) routing fields against the
-    //    committed route.
     let route_key = ctx.accounts.route.key();
-    require_keys_eq!(
-        relay_data.recipient,
-        route_key,
-        AcrossAdapterError::RecipientMismatch
-    );
-    require_keys_eq!(
-        relay_data.output_token,
-        ctx.accounts.route.expected_mint,
-        AcrossAdapterError::OutputTokenMismatch
-    );
-    require_eq!(
-        relay_data.origin_chain_id,
-        ctx.accounts.route.source_chain_id,
-        AcrossAdapterError::OriginChainMismatch
-    );
-
-    // 4. Record the verification artifact from the bound relay data. Across binds a
-    //    single exact-fill output amount, so it is both the delivered amount and
-    //    the source-committed minimum the handler later enforces. `output_token`
-    //    has been checked equal to the route mint; persisting it names the asset
-    //    this fill delivered.
-    ctx.accounts.verified_fill.set_inner(VerifiedFill {
-        adapter: crate::ID,
-        route: route_key,
-        fill_id: relay_hash,
-        mint: relay_data.output_token,
-        amount: relay_data.output_amount,
-        expected_amount: relay_data.output_amount,
-        source_chain_id: relay_data.origin_chain_id,
-        created_at: Clock::get()?.unix_timestamp,
-        bump: ctx.bumps.verified_fill,
-    });
-
     emit!(AcrossFillVerified {
         verified_fill: ctx.accounts.verified_fill.key(),
         route: route_key,

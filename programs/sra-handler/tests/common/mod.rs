@@ -1888,6 +1888,37 @@ pub fn verify_across_fill_ix(
     }
 }
 
+/// Build the owner-attested fallback used only after Across has closed the
+/// canonical fill-status PDA and the relay deadline has passed.
+pub fn verify_across_fill_after_close_ix(
+    payer: &Pubkey,
+    owner: &Pubkey,
+    route: &Pubkey,
+    relay_hash: [u8; 32],
+    relay_data: RelayData,
+) -> Instruction {
+    let (fill_status, _) = derive_fill_status_pda(&relay_hash);
+    let (verified_fill, _) = derive_verified_fill_pda(&relay_hash);
+    Instruction {
+        program_id: ADAPTER_PROGRAM_ID,
+        accounts: sra_across_adapter::accounts::VerifyAcrossFillAfterClose {
+            payer: *payer,
+            owner: *owner,
+            fill_status,
+            route: *route,
+            verified_fill,
+            across_program: ACROSS_SPOKE_POOL_ID,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: sra_across_adapter::instruction::VerifyAcrossFillAfterClose {
+            relay_hash,
+            relay_data,
+        }
+        .data(),
+    }
+}
+
 pub fn fetch_verified_fill(svm: &LiteSVM, pda: &Pubkey) -> sra_across_adapter::state::VerifiedFill {
     let acct = svm.get_account(pda).expect("verified_fill account exists");
     sra_across_adapter::state::VerifiedFill::try_deserialize(&mut acct.data.as_slice())
