@@ -10,7 +10,9 @@
 //! replay protection remain unchanged.
 
 use anchor_lang::prelude::*;
-use sra_common::{constants::ACROSS_SPOKE_POOL_ID, seeds::SEED_VERIFIED_FILL, types::SolanaSraRoute};
+use sra_common::{
+    constants::ACROSS_SPOKE_POOL_ID, seeds::SEED_VERIFIED_FILL, types::SolanaSraRoute,
+};
 
 use crate::events::AcrossFillVerifiedAfterClose;
 use crate::instructions::verify_fill::{validated_verified_fill, FILL_STATUS_SEED};

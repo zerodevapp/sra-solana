@@ -5,12 +5,8 @@ mod common;
 use anchor_lang::error::ErrorCode;
 use common::*;
 use solana_sdk::{
-    clock::Clock,
-    instruction::InstructionError,
-    pubkey::Pubkey,
-    signature::Keypair,
-    signer::Signer,
-    transaction::TransactionError,
+    clock::Clock, instruction::InstructionError, pubkey::Pubkey, signature::Keypair,
+    signer::Signer, transaction::TransactionError,
 };
 use sra_across_adapter::utils::svm_spoke::types::RelayData;
 use sra_common::types::ExecutionStatus;
@@ -199,7 +195,13 @@ fn fallback_requires_the_route_owner() {
         fix.relay_data.clone(),
     );
     assert_eq!(
-        send_ix_expect_err(&mut svm, ix, &fix.payer, &[&stranger], "wrong owner rejects"),
+        send_ix_expect_err(
+            &mut svm,
+            ix,
+            &fix.payer,
+            &[&stranger],
+            "wrong owner rejects"
+        ),
         anchor_error(ErrorCode::ConstraintHasOne),
     );
 }
@@ -227,13 +229,7 @@ fn fallback_rejects_a_closed_shape_before_or_at_deadline() {
         let mut svm = setup_svm();
         let fix = setup_filled_route(&mut svm);
         let status = derive_fill_status_pda(&fix.relay_hash).0;
-        set_fill_status_account(
-            &mut svm,
-            status,
-            solana_sdk::system_program::ID,
-            vec![],
-            0,
-        );
+        set_fill_status_account(&mut svm, status, solana_sdk::system_program::ID, vec![], 0);
         set_time(
             &mut svm,
             i64::from(fix.relay_data.fill_deadline) + timestamp_offset,
@@ -268,13 +264,8 @@ fn lamport_dust_on_closed_status_cannot_block_fallback() {
     assert_eq!(account.owner, solana_sdk::system_program::ID);
     assert!(account.data.is_empty());
 
-    send_ix(
-        &mut svm,
-        fix.fallback_ix(),
-        &fix.payer,
-        &[&fix.owner],
-    )
-    .expect("lamports are irrelevant to closed-account detection");
+    send_ix(&mut svm, fix.fallback_ix(), &fix.payer, &[&fix.owner])
+        .expect("lamports are irrelevant to closed-account detection");
 }
 
 #[test]
@@ -372,13 +363,8 @@ fn normal_verification_prevents_later_fallback_replay() {
     )
     .expect("normal verification wins");
     fix.advance_past_deadline_and_close(&mut svm);
-    send_ix(
-        &mut svm,
-        fix.fallback_ix(),
-        &fix.payer,
-        &[&fix.owner],
-    )
-    .expect_err("canonical VerifiedFill init prevents fallback replay");
+    send_ix(&mut svm, fix.fallback_ix(), &fix.payer, &[&fix.owner])
+        .expect_err("canonical VerifiedFill init prevents fallback replay");
 }
 
 #[test]
