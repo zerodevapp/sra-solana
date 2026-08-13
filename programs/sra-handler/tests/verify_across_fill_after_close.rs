@@ -22,6 +22,30 @@ fn anchor_error(code: ErrorCode) -> TransactionError {
     TransactionError::InstructionError(0, InstructionError::Custom(code as u32))
 }
 
+fn adapter_error(error: sra_across_adapter::AcrossAdapterError) -> TransactionError {
+    TransactionError::InstructionError(0, InstructionError::Custom(error.into()))
+}
+
+fn set_fill_status_account(
+    svm: &mut litesvm::LiteSVM,
+    address: Pubkey,
+    owner: Pubkey,
+    data: Vec<u8>,
+    lamports: u64,
+) {
+    svm.set_account(
+        address,
+        solana_sdk::account::Account {
+            lamports,
+            data,
+            owner,
+            executable: false,
+            rent_epoch: 0,
+        },
+    )
+    .expect("set fill-status test account");
+}
+
 fn set_time(svm: &mut litesvm::LiteSVM, unix_timestamp: i64) {
     let mut clock = svm.get_sysvar::<Clock>();
     clock.unix_timestamp = unix_timestamp;
@@ -159,4 +183,216 @@ fn closed_fill_status_owner_fallback_finalizes_delivered_fill() {
     );
     assert_eq!(receipt.execution_status, ExecutionStatus::Finalized);
     assert_eq!(receipt.amount, OUTPUT_AMOUNT);
+}
+
+#[test]
+fn fallback_requires_the_route_owner() {
+    let mut svm = setup_svm();
+    let fix = setup_filled_route(&mut svm);
+    fix.advance_past_deadline_and_close(&mut svm);
+    let stranger = funded_keypair(&mut svm, SOL);
+    let ix = verify_across_fill_after_close_ix(
+        &fix.payer.pubkey(),
+        &stranger.pubkey(),
+        &fix.route,
+        fix.relay_hash,
+        fix.relay_data.clone(),
+    );
+    assert_eq!(
+        send_ix_expect_err(&mut svm, ix, &fix.payer, &[&stranger], "wrong owner rejects"),
+        anchor_error(ErrorCode::ConstraintHasOne),
+    );
+}
+
+#[test]
+fn fallback_rejects_a_live_across_owned_status() {
+    let mut svm = setup_svm();
+    let fix = setup_filled_route(&mut svm);
+    set_time(&mut svm, i64::from(fix.relay_data.fill_deadline) + 1);
+    assert_eq!(
+        send_ix_expect_err(
+            &mut svm,
+            fix.fallback_ix(),
+            &fix.payer,
+            &[&fix.owner],
+            "live status rejects",
+        ),
+        adapter_error(sra_across_adapter::AcrossAdapterError::FillStatusNotClosed),
+    );
+}
+
+#[test]
+fn fallback_rejects_a_closed_shape_before_or_at_deadline() {
+    for timestamp_offset in [-1i64, 0] {
+        let mut svm = setup_svm();
+        let fix = setup_filled_route(&mut svm);
+        let status = derive_fill_status_pda(&fix.relay_hash).0;
+        set_fill_status_account(
+            &mut svm,
+            status,
+            solana_sdk::system_program::ID,
+            vec![],
+            0,
+        );
+        set_time(
+            &mut svm,
+            i64::from(fix.relay_data.fill_deadline) + timestamp_offset,
+        );
+        assert_eq!(
+            send_ix_expect_err(
+                &mut svm,
+                fix.fallback_ix(),
+                &fix.payer,
+                &[&fix.owner],
+                "deadline has not strictly passed",
+            ),
+            adapter_error(sra_across_adapter::AcrossAdapterError::FillDeadlineNotPassed),
+        );
+    }
+}
+
+#[test]
+fn lamport_dust_on_closed_status_cannot_block_fallback() {
+    let mut svm = setup_svm();
+    let fix = setup_filled_route(&mut svm);
+    fix.advance_past_deadline_and_close(&mut svm);
+    let status = derive_fill_status_pda(&fix.relay_hash).0;
+    send_ix(
+        &mut svm,
+        solana_sdk::system_instruction::transfer(&fix.payer.pubkey(), &status, 1),
+        &fix.payer,
+        &[],
+    )
+    .expect("dust closed status address");
+    let account = svm.get_account(&status).expect("dusted status exists");
+    assert_eq!(account.owner, solana_sdk::system_program::ID);
+    assert!(account.data.is_empty());
+
+    send_ix(
+        &mut svm,
+        fix.fallback_ix(),
+        &fix.payer,
+        &[&fix.owner],
+    )
+    .expect("lamports are irrelevant to closed-account detection");
+}
+
+#[test]
+fn fallback_rejects_nonempty_or_foreign_owned_status_accounts() {
+    for (owner, data) in [
+        (solana_sdk::system_program::ID, vec![1u8]),
+        (PROGRAM_ID, Vec::new()),
+    ] {
+        let mut svm = setup_svm();
+        let fix = setup_filled_route(&mut svm);
+        let status = derive_fill_status_pda(&fix.relay_hash).0;
+        set_fill_status_account(&mut svm, status, owner, data, 1);
+        set_time(&mut svm, i64::from(fix.relay_data.fill_deadline) + 1);
+        assert_eq!(
+            send_ix_expect_err(
+                &mut svm,
+                fix.fallback_ix(),
+                &fix.payer,
+                &[&fix.owner],
+                "not a closed Across status",
+            ),
+            adapter_error(sra_across_adapter::AcrossAdapterError::FillStatusNotClosed),
+        );
+    }
+}
+
+#[test]
+fn fallback_rejects_a_noncanonical_status_address() {
+    let mut svm = setup_svm();
+    let fix = setup_filled_route(&mut svm);
+    fix.advance_past_deadline_and_close(&mut svm);
+    let canonical = derive_fill_status_pda(&fix.relay_hash).0;
+    let mut ix = fix.fallback_ix();
+    let slot = ix
+        .accounts
+        .iter()
+        .position(|meta| meta.pubkey == canonical)
+        .expect("fill-status meta");
+    ix.accounts[slot].pubkey = Pubkey::new_unique();
+    assert_eq!(
+        send_ix_expect_err(&mut svm, ix, &fix.payer, &[&fix.owner], "wrong PDA rejects"),
+        anchor_error(ErrorCode::ConstraintSeeds),
+    );
+}
+
+#[test]
+fn fallback_rejects_tampered_relay_data() {
+    let mut svm = setup_svm();
+    let fix = setup_filled_route(&mut svm);
+    fix.advance_past_deadline_and_close(&mut svm);
+    let mut tampered = fix.relay_data.clone();
+    tampered.output_amount += 1;
+    let ix = verify_across_fill_after_close_ix(
+        &fix.payer.pubkey(),
+        &fix.owner.pubkey(),
+        &fix.route,
+        fix.relay_hash,
+        tampered,
+    );
+    assert_eq!(
+        send_ix_expect_err(&mut svm, ix, &fix.payer, &[&fix.owner], "tamper rejects"),
+        adapter_error(sra_across_adapter::AcrossAdapterError::RelayHashMismatch),
+    );
+}
+
+#[test]
+fn fallback_emits_owner_attested_event() {
+    let mut svm = setup_svm();
+    let fix = setup_filled_route(&mut svm);
+    fix.advance_past_deadline_and_close(&mut svm);
+    let meta = send_ix_with_meta(&mut svm, fix.fallback_ix(), &fix.payer, &[&fix.owner])
+        .expect("fallback verifies");
+    let event: sra_across_adapter::events::AcrossFillVerifiedAfterClose =
+        extract_anchor_event(&meta.logs).expect("fallback event emitted");
+    assert_eq!(event.owner, fix.owner.pubkey());
+    assert_eq!(event.route, fix.route);
+    assert_eq!(event.fill_id, fix.relay_hash);
+    assert_eq!(event.amount, OUTPUT_AMOUNT);
+}
+
+#[test]
+fn normal_verification_prevents_later_fallback_replay() {
+    let mut svm = setup_svm();
+    let fix = setup_filled_route(&mut svm);
+    send_ix(
+        &mut svm,
+        verify_across_fill_ix(
+            &fix.payer.pubkey(),
+            &fix.route,
+            fix.relay_hash,
+            fix.relay_data.clone(),
+        ),
+        &fix.payer,
+        &[],
+    )
+    .expect("normal verification wins");
+    fix.advance_past_deadline_and_close(&mut svm);
+    send_ix(
+        &mut svm,
+        fix.fallback_ix(),
+        &fix.payer,
+        &[&fix.owner],
+    )
+    .expect_err("canonical VerifiedFill init prevents fallback replay");
+}
+
+#[test]
+fn fallback_finalization_cannot_be_replayed() {
+    let mut svm = setup_svm();
+    let fix = setup_filled_route(&mut svm);
+    fix.advance_past_deadline_and_close(&mut svm);
+    send_instructions(
+        &mut svm,
+        &[fix.fallback_ix(), fix.finalize_ix()],
+        &fix.payer,
+        &[&fix.owner],
+    )
+    .expect("first settlement succeeds");
+    send_ix(&mut svm, fix.finalize_ix(), &fix.payer, &[])
+        .expect_err("canonical FillReceipt init prevents finalization replay");
 }
