@@ -446,6 +446,10 @@ fn verify_across_fill_fill_status_closed_rejected() {
     )
     .expect("mock_fill should succeed");
     let (fill_status_pda, _) = derive_fill_status_pda(&relay_hash);
+    // `mock_fill` stores deadline 0; the mock close requires `now > deadline`.
+    let mut clock = svm.get_sysvar::<Clock>();
+    clock.unix_timestamp = clock.unix_timestamp.max(1);
+    svm.set_sysvar::<Clock>(&clock);
     send_ix(
         &mut svm,
         close_fill_pda_ix(&relayer.pubkey(), &fill_status_pda),
