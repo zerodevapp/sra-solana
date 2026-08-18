@@ -89,6 +89,7 @@ impl SurfpoolSourceFixture {
         surfpool_log(format!(
             "bootstrap: Across spoke pool {ACROSS_SPOKE_POOL_ID} is reachable"
         ));
+        unpause_across_spoke_state(&rpc, &http, &across_state)?;
 
         request_and_confirm_airdrop(&rpc, "payer", &payer.pubkey(), 10 * SOL)?;
         request_and_confirm_airdrop(&rpc, "owner", &owner.pubkey(), SOL)?;

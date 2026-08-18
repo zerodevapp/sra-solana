@@ -9,7 +9,7 @@ pub mod utils;
 pub use errors::*;
 pub use instructions::*;
 
-declare_id!("CunqmNJVjTxR8f7bxEXsnX7LCtN4bpPgVqzKq9Tw1eqp");
+declare_id!("8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU");
 
 #[program]
 pub mod sra_across_adapter {

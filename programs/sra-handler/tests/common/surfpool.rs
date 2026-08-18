@@ -319,6 +319,37 @@ pub fn surfpool_rpc(http: &Client, method: &str, params: Value) -> TestResult<Va
     Ok(response["result"].clone())
 }
 
+/// Across paused deposits AND fills on the live Solana spoke (observed
+/// 2026-07-23), and the fork inherits that state, failing every deposit/fill
+/// with `DepositsArePaused`/`FillsArePaused`. Clear the two pause bools —
+/// the first two bytes after the 8-byte anchor discriminator in the spoke's
+/// `State` account — so the suites keep exercising the unpaused paths they
+/// encode. Idempotent; a no-op once Across unpauses.
+pub fn unpause_across_spoke_state(
+    rpc: &RpcClient,
+    http: &Client,
+    state: &Pubkey,
+) -> TestResult<()> {
+    let mut data = rpc.get_account_data(state)?;
+    if data.len() < 10 {
+        return Err(format!("spoke state {state} too short: {} bytes", data.len()).into());
+    }
+    if data[8] == 0 && data[9] == 0 {
+        surfpool_log("unpause_across_spoke_state: spoke already unpaused");
+        return Ok(());
+    }
+    data[8] = 0; // paused_deposits
+    data[9] = 0; // paused_fills
+    let hex_data: String = data.iter().map(|byte| format!("{byte:02x}")).collect();
+    surfpool_rpc(
+        http,
+        "surfnet_setAccount",
+        json!([state.to_string(), { "data": hex_data }]),
+    )?;
+    surfpool_log("unpause_across_spoke_state: cleared pause flags on the fork");
+    Ok(())
+}
+
 /// Fetch the execution logs of a locally processed signature via Surfpool's
 /// `surfnet_getLocalSignatures` extension.
 pub fn logs_for_signature(http: &Client, signature: &Signature) -> TestResult<Vec<String>> {

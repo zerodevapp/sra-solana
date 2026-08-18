@@ -129,6 +129,7 @@ impl SurfpoolDestFixture {
         surfpool_log(format!(
             "bootstrap: Across spoke pool {ACROSS_SPOKE_POOL_ID} is reachable"
         ));
+        unpause_across_spoke_state(&rpc, &http, &derive_real_across_state_pda().0)?;
 
         for (label, key, lamports) in [
             ("payer", payer.pubkey(), 10 * SOL),

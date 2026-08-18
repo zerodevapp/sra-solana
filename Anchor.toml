@@ -6,12 +6,12 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-sra_across_adapter = "CunqmNJVjTxR8f7bxEXsnX7LCtN4bpPgVqzKq9Tw1eqp"
-sra_handler = "2U8tvBcQjZx8r6RG4r1pnxdG9LfJF4Ya4hZsNGRmhqt9"
+sra_across_adapter = "8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU"
+sra_handler = "7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5"
 
 [programs.mainnet]
-sra_across_adapter = "CunqmNJVjTxR8f7bxEXsnX7LCtN4bpPgVqzKq9Tw1eqp"
-sra_handler = "2U8tvBcQjZx8r6RG4r1pnxdG9LfJF4Ya4hZsNGRmhqt9"
+sra_across_adapter = "8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU"
+sra_handler = "7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5"
 
 [registry]
 url = "https://api.apr.dev"
