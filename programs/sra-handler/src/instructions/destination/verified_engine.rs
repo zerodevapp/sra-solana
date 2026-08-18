@@ -369,7 +369,10 @@ fn mint_data_is_permissioned(data: &[u8]) -> Result<bool> {
         .map_err(|_| error!(SraError::ActionAccountMismatch))?
     {
         match ext {
-            ExtensionType::PermanentDelegate | ExtensionType::Pausable => return Ok(true),
+            ExtensionType::PermanentDelegate
+            | ExtensionType::Pausable
+            | ExtensionType::TransferHook
+            | ExtensionType::NonTransferable => return Ok(true),
             ExtensionType::DefaultAccountState => {
                 let das = mint
                     .get_extension::<DefaultAccountState>()
@@ -378,7 +381,31 @@ fn mint_data_is_permissioned(data: &[u8]) -> Result<bool> {
                     return Ok(true);
                 }
             }
-            _ => {}
+            ExtensionType::TransferFeeConfig
+            | ExtensionType::MintCloseAuthority
+            | ExtensionType::ConfidentialTransferMint
+            | ExtensionType::InterestBearingConfig
+            | ExtensionType::ConfidentialTransferFeeConfig
+            | ExtensionType::MetadataPointer
+            | ExtensionType::TokenMetadata
+            | ExtensionType::GroupPointer
+            | ExtensionType::TokenGroup
+            | ExtensionType::GroupMemberPointer
+            | ExtensionType::TokenGroupMember
+            | ExtensionType::ConfidentialMintBurn
+            | ExtensionType::ScaledUiAmount => {}
+            ExtensionType::Uninitialized
+            | ExtensionType::TransferFeeAmount
+            | ExtensionType::ConfidentialTransferAccount
+            | ExtensionType::ImmutableOwner
+            | ExtensionType::MemoTransfer
+            | ExtensionType::CpiGuard
+            | ExtensionType::NonTransferableAccount
+            | ExtensionType::TransferHookAccount
+            | ExtensionType::ConfidentialTransferFeeAmount
+            | ExtensionType::PausableAccount => {
+                return Err(error!(SraError::ActionAccountMismatch));
+            }
         }
     }
     Ok(false)
@@ -569,8 +596,10 @@ mod tests {
     // ---- mint_is_permissioned (Token-2022 extension scan) ----
 
     use anchor_lang::solana_program::program_option::COption;
+    use anchor_spl::token_2022::spl_token_2022::extension::non_transferable::NonTransferable;
     use anchor_spl::token_2022::spl_token_2022::extension::pausable::PausableConfig;
     use anchor_spl::token_2022::spl_token_2022::extension::permanent_delegate::PermanentDelegate;
+    use anchor_spl::token_2022::spl_token_2022::extension::transfer_hook::TransferHook;
     use anchor_spl::token_2022::spl_token_2022::extension::{
         BaseStateWithExtensionsMut, StateWithExtensionsMut,
     };
@@ -620,6 +649,22 @@ mod tests {
         // is enough — paused state is not required.
         let data = packed_mint(&[ExtensionType::Pausable], |m| {
             m.init_extension::<PausableConfig>(true).unwrap();
+        });
+        assert!(mint_data_is_permissioned(&data).unwrap());
+    }
+
+    #[test]
+    fn transfer_hook_mint_is_permissioned() {
+        let data = packed_mint(&[ExtensionType::TransferHook], |m| {
+            m.init_extension::<TransferHook>(true).unwrap();
+        });
+        assert!(mint_data_is_permissioned(&data).unwrap());
+    }
+
+    #[test]
+    fn non_transferable_mint_is_permissioned() {
+        let data = packed_mint(&[ExtensionType::NonTransferable], |m| {
+            m.init_extension::<NonTransferable>(true).unwrap();
         });
         assert!(mint_data_is_permissioned(&data).unwrap());
     }
