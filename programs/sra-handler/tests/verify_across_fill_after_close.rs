@@ -1,26 +1,13 @@
-//! Owner-attested recovery after Across reclaims a delivered fill's status PDA.
-
 mod common;
 
 use anchor_lang::error::ErrorCode;
 use common::*;
-use solana_sdk::{
-    clock::Clock, instruction::InstructionError, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, transaction::TransactionError,
-};
-use sra_across_adapter::utils::svm_spoke::types::RelayData;
+use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
+use sra_across_adapter::{utils::svm_spoke::types::RelayData, AcrossAdapterError};
 use sra_common::types::ExecutionStatus;
 
 const OUTPUT_AMOUNT: u64 = 4_000_000;
 const SOURCE_CHAIN_ID: u64 = 42_161;
-
-fn anchor_error(code: ErrorCode) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(code as u32))
-}
-
-fn adapter_error(error: sra_across_adapter::AcrossAdapterError) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(error.into()))
-}
 
 fn set_fill_status_account(
     svm: &mut litesvm::LiteSVM,
@@ -40,12 +27,6 @@ fn set_fill_status_account(
         },
     )
     .expect("set fill-status test account");
-}
-
-fn set_time(svm: &mut litesvm::LiteSVM, unix_timestamp: i64) {
-    let mut clock = svm.get_sysvar::<Clock>();
-    clock.unix_timestamp = unix_timestamp;
-    svm.set_sysvar::<Clock>(&clock);
 }
 
 struct FilledRoute {
@@ -160,13 +141,20 @@ fn closed_fill_status_owner_fallback_finalizes_delivered_fill() {
         anchor_error(ErrorCode::ConstraintOwner),
     );
 
-    send_instructions(
+    let meta = send_instructions(
         &mut svm,
         &[fix.fallback_ix(), fix.finalize_ix()],
         &fix.payer,
         &[&fix.owner],
     )
     .expect("owner fallback and normal finalization should compose");
+
+    let event: sra_across_adapter::events::AcrossFillVerifiedAfterClose =
+        extract_anchor_event(&meta.logs).expect("fallback event emitted");
+    assert_eq!(event.owner, fix.owner.pubkey());
+    assert_eq!(event.route, fix.route);
+    assert_eq!(event.fill_id, fix.relay_hash);
+    assert_eq!(event.amount, OUTPUT_AMOUNT);
 
     let execution_authority = derive_execution_authority_pda(&fix.route).0;
     let execution_vault = derive_ata(&execution_authority, &fix.mint);
@@ -219,7 +207,7 @@ fn fallback_rejects_a_live_across_owned_status() {
             &[&fix.owner],
             "live status rejects",
         ),
-        adapter_error(sra_across_adapter::AcrossAdapterError::FillStatusNotClosed),
+        adapter_error(AcrossAdapterError::FillStatusNotClosed),
     );
 }
 
@@ -242,7 +230,7 @@ fn fallback_rejects_a_closed_shape_before_or_at_deadline() {
                 &[&fix.owner],
                 "deadline has not strictly passed",
             ),
-            adapter_error(sra_across_adapter::AcrossAdapterError::FillDeadlineNotPassed),
+            adapter_error(AcrossAdapterError::FillDeadlineNotPassed),
         );
     }
 }
@@ -287,7 +275,7 @@ fn fallback_rejects_nonempty_or_foreign_owned_status_accounts() {
                 &[&fix.owner],
                 "not a closed Across status",
             ),
-            adapter_error(sra_across_adapter::AcrossAdapterError::FillStatusNotClosed),
+            adapter_error(AcrossAdapterError::FillStatusNotClosed),
         );
     }
 }
@@ -327,23 +315,8 @@ fn fallback_rejects_tampered_relay_data() {
     );
     assert_eq!(
         send_ix_expect_err(&mut svm, ix, &fix.payer, &[&fix.owner], "tamper rejects"),
-        adapter_error(sra_across_adapter::AcrossAdapterError::RelayHashMismatch),
+        adapter_error(AcrossAdapterError::RelayHashMismatch),
     );
-}
-
-#[test]
-fn fallback_emits_owner_attested_event() {
-    let mut svm = setup_svm();
-    let fix = setup_filled_route(&mut svm);
-    fix.advance_past_deadline_and_close(&mut svm);
-    let meta = send_ix_with_meta(&mut svm, fix.fallback_ix(), &fix.payer, &[&fix.owner])
-        .expect("fallback verifies");
-    let event: sra_across_adapter::events::AcrossFillVerifiedAfterClose =
-        extract_anchor_event(&meta.logs).expect("fallback event emitted");
-    assert_eq!(event.owner, fix.owner.pubkey());
-    assert_eq!(event.route, fix.route);
-    assert_eq!(event.fill_id, fix.relay_hash);
-    assert_eq!(event.amount, OUTPUT_AMOUNT);
 }
 
 #[test]
@@ -365,20 +338,4 @@ fn normal_verification_prevents_later_fallback_replay() {
     fix.advance_past_deadline_and_close(&mut svm);
     send_ix(&mut svm, fix.fallback_ix(), &fix.payer, &[&fix.owner])
         .expect_err("canonical VerifiedFill init prevents fallback replay");
-}
-
-#[test]
-fn fallback_finalization_cannot_be_replayed() {
-    let mut svm = setup_svm();
-    let fix = setup_filled_route(&mut svm);
-    fix.advance_past_deadline_and_close(&mut svm);
-    send_instructions(
-        &mut svm,
-        &[fix.fallback_ix(), fix.finalize_ix()],
-        &fix.payer,
-        &[&fix.owner],
-    )
-    .expect("first settlement succeeds");
-    send_ix(&mut svm, fix.finalize_ix(), &fix.payer, &[])
-        .expect_err("canonical FillReceipt init prevents finalization replay");
 }

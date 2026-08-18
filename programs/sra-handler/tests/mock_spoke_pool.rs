@@ -185,10 +185,8 @@ fn mock_spoke_pool_close_fill_pda_reclaims_account() {
         "fill_status exists before close"
     );
 
-    // `mock_fill` stores deadline 0; the close gate requires `now > deadline`.
-    let mut clock = svm.get_sysvar::<solana_sdk::clock::Clock>();
-    clock.unix_timestamp = clock.unix_timestamp.max(1);
-    svm.set_sysvar::<solana_sdk::clock::Clock>(&clock);
+    let timestamp = now(&svm).max(1);
+    set_time(&mut svm, timestamp);
 
     send_ix(
         &mut svm,
@@ -250,9 +248,7 @@ fn mock_close_requires_recorded_relayer_and_passed_deadline() {
     )
     .expect_err("deadline must strictly pass");
 
-    let mut clock = svm.get_sysvar::<solana_sdk::clock::Clock>();
-    clock.unix_timestamp = i64::from(deadline) + 1;
-    svm.set_sysvar::<solana_sdk::clock::Clock>(&clock);
+    set_time(&mut svm, i64::from(deadline) + 1);
     send_ix(
         &mut svm,
         close_fill_pda_ix(&relayer.pubkey(), &status),

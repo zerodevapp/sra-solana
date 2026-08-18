@@ -13,10 +13,7 @@ mod common;
 use anchor_lang::error::ErrorCode;
 use common::*;
 use mock_spoke_pool::FillStatus;
-use solana_sdk::{
-    clock::Clock, instruction::InstructionError, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, transaction::TransactionError,
-};
+use solana_sdk::{clock::Clock, pubkey::Pubkey, signature::Keypair, signer::Signer};
 use sra_across_adapter::utils::svm_spoke::types::RelayData;
 use sra_across_adapter::AcrossAdapterError;
 use sra_common::types::ManageRouteParams;
@@ -26,10 +23,6 @@ const OUTPUT_AMOUNT: u64 = 4_000_000;
 /// bound to.
 const SOURCE_CHAIN_ID: u64 = 42_161;
 const FILL_DEADLINE: u32 = 1_900_000_000;
-
-fn adapter_error(err: AcrossAdapterError) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(err.into()))
-}
 
 struct Dest {
     payer: Keypair,
@@ -446,10 +439,8 @@ fn verify_across_fill_fill_status_closed_rejected() {
     )
     .expect("mock_fill should succeed");
     let (fill_status_pda, _) = derive_fill_status_pda(&relay_hash);
-    // `mock_fill` stores deadline 0; the mock close requires `now > deadline`.
-    let mut clock = svm.get_sysvar::<Clock>();
-    clock.unix_timestamp = clock.unix_timestamp.max(1);
-    svm.set_sysvar::<Clock>(&clock);
+    let timestamp = now(&svm).max(1);
+    set_time(&mut svm, timestamp);
     send_ix(
         &mut svm,
         close_fill_pda_ix(&relayer.pubkey(), &fill_status_pda),

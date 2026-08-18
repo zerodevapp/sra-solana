@@ -26,7 +26,7 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_system_interface::program as system_program;
-use sra_across_adapter::utils::svm_spoke::types::RelayData;
+use sra_across_adapter::{utils::svm_spoke::types::RelayData, AcrossAdapterError};
 use sra_common::{
     abi::u256_from_u64,
     constants::{ACROSS_SPOKE_POOL_ID, SOLANA_CHAIN_ID},
@@ -61,6 +61,10 @@ pub fn custom_error(err: SraError) -> TransactionError {
 /// `TransactionError` for an Anchor built-in `ErrorCode` at instruction index 0.
 pub fn anchor_error(code: ErrorCode) -> TransactionError {
     TransactionError::InstructionError(0, InstructionError::Custom(code as u32))
+}
+
+pub fn adapter_error(err: AcrossAdapterError) -> TransactionError {
+    TransactionError::InstructionError(0, InstructionError::Custom(err.into()))
 }
 
 /// The `execution_status` of the fill receipt at `fill_receipt`.
@@ -115,6 +119,12 @@ pub fn runtime(inner_data: Vec<u8>, min_amount_out: u64, expiry: i64) -> Verifie
 /// Current on-chain unix timestamp.
 pub fn now(svm: &LiteSVM) -> i64 {
     svm.get_sysvar::<Clock>().unix_timestamp
+}
+
+pub fn set_time(svm: &mut LiteSVM, unix_timestamp: i64) {
+    let mut clock = svm.get_sysvar::<Clock>();
+    clock.unix_timestamp = unix_timestamp;
+    svm.set_sysvar::<Clock>(&clock);
 }
 
 fn program_so_path() -> PathBuf {
@@ -1888,8 +1898,6 @@ pub fn verify_across_fill_ix(
     }
 }
 
-/// Build the owner-attested fallback used only after Across has closed the
-/// canonical fill-status PDA and the relay deadline has passed.
 pub fn verify_across_fill_after_close_ix(
     payer: &Pubkey,
     owner: &Pubkey,
