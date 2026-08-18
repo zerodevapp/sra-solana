@@ -282,7 +282,7 @@ Flagged proactively so they are not mistaken for findings. Some are deliberate S
 - **No Across integrator/referral ID** on the source deposit (EVM appends one).
 - **No oracle fallback** for `min_out` (signed quote is the only path; oracle configs are refused at `create_route`).
 - **Shared execution vault per route.** Concurrent in-flight fills of the same route share one execution vault; recovery always drains the full balance safely, but per-fill accounting can be ambiguous if two fills overlap. The design assumes single-tenant routes (owner == route controller); a pooled/ multi-tenant vault would make the generic verified-CPI action unsafe.
-- **Permissioned Token-2022 output** (permanent-delegate / pausable / default-frozen) can be frozen or clawed back by its issuer; routes must opt in explicitly to accept such mints.
+- **Restricted Token-2022 output** may be frozen, clawed back, vetoed by a transfer hook, or non-transferable; routes must opt in explicitly to accept such mints.
 - **CPI depth.** Solana's ~4–5 level CPI stack is a hard ceiling; deep swap routes plus token-hook accounts can exhaust it.
 - **Closed fill-status account.** If Across lets a relayer close the `FillStatusAccount` after the deadline, on-chain fill verification is no longer possible; a signed relay-attestation fallback is designed but not shipped.
 - **ALT-mandatory source tx.** The source transaction requires an Address Lookup Table to fit the packet size (CI-enforced).

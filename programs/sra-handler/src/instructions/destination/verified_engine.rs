@@ -345,10 +345,10 @@ pub(crate) fn token_account_usable(
     }
 }
 
-/// Whether `mint_info` carries an issuer-control extension — permanent delegate,
-/// pausable, or default-frozen — that lets a third party move or freeze the held
-/// token. Holding such an output is a custody hazard the route owner must opt into
-/// (`allow_permissioned_output`). Legacy SPL mints carry no extensions.
+/// Whether `mint_info` carries an extension that lets an issuer control or block
+/// movement of held tokens. Holding such an output is a custody hazard the route
+/// owner must opt into (`allow_permissioned_output`). Legacy SPL mints carry no
+/// extensions.
 pub(crate) fn mint_is_permissioned(mint_info: &AccountInfo) -> Result<bool> {
     if mint_info.owner != &anchor_spl::token_2022::ID {
         return Ok(false);

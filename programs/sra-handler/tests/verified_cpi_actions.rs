@@ -5,8 +5,8 @@
 //! scratch-bounded input, pinned source/destination/authority, balance-diff
 //! `≥ min_out` from an authorized signed quote, fail-closed, scratch swept empty.
 //! The output may be a Token-2022 mint: the balance-diff is post-fee, and a
-//! permissioned (permanent-delegate / pausable / default-frozen) output requires an
-//! explicit opt-in. The concrete Jupiter template and the oracle `min_out` fallback
+//! issuer-controlled or transfer-restricted Token-2022 output requires an explicit
+//! opt-in. The concrete Jupiter template and the oracle `min_out` fallback
 //! are follow-ups; here the swap is a mock and `min_out` is a signed quote (the
 //! EVM-parity primary resolver, ed25519 on Solana).
 
