@@ -1126,6 +1126,11 @@
       "code": 6012,
       "name": "FillDeadlineNotPassed",
       "msg": "Across fill deadline has not passed"
+    },
+    {
+      "code": 6013,
+      "name": "ExecutedAmountUnavailable",
+      "msg": "Across proof does not authenticate the executed output amount"
     }
   ],
   "types": [

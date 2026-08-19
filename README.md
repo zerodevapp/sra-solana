@@ -190,6 +190,7 @@ yarn lint:fix    # rewrite
 
 - Program IDs in `Anchor.toml` and `declare_id!` are dev placeholders; they will rotate before any audited deployment.
 - The TS test harness is intentionally thin — Rust LiteSVM tests are the source of truth for behavioural coverage today.
+- Across fills should be verified by a permissionless cranker before `exclusivity_deadline`. Later verification is accepted only when the relay's exclusivity lasts through `fill_deadline`; slow fills and other amount-ambiguous fills fail closed.
 - No mainnet deployment exists. **Do not** point any production system at these program IDs.
 - **Launch checklist — burn upgrade authority.** The programs are designed to be immutable in production, but that cannot be enforced from inside the repo: it is a manual deploy-time step. After the verifiable build is deployed and verified on-chain, finalize each program with `solana program set-upgrade-authority <PROGRAM_ID> --final` and confirm the authority reads `none` before routing value through it.
 

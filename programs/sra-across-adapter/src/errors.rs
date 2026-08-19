@@ -40,4 +40,7 @@ pub enum AcrossAdapterError {
 
     #[msg("Across fill deadline has not passed")]
     FillDeadlineNotPassed,
+
+    #[msg("Across proof does not authenticate the executed output amount")]
+    ExecutedAmountUnavailable,
 }

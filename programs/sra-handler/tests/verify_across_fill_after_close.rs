@@ -42,6 +42,13 @@ struct FilledRoute {
 }
 
 fn setup_filled_route(svm: &mut litesvm::LiteSVM) -> FilledRoute {
+    setup_filled_route_with_exclusivity_gap(svm, 0)
+}
+
+fn setup_filled_route_with_exclusivity_gap(
+    svm: &mut litesvm::LiteSVM,
+    exclusivity_gap: u32,
+) -> FilledRoute {
     let payer = funded_keypair(svm, 100 * SOL);
     let owner = funded_keypair(svm, SOL);
     let relayer = funded_keypair(svm, 100 * SOL);
@@ -55,7 +62,9 @@ fn setup_filled_route(svm: &mut litesvm::LiteSVM) -> FilledRoute {
     let fill_deadline = u32::try_from(now(svm) + 10).expect("LiteSVM timestamp fits u32");
     let mut relay_data = sample_relay_data(route, mint, SOURCE_CHAIN_ID, OUTPUT_AMOUNT);
     relay_data.fill_deadline = fill_deadline;
-    relay_data.exclusivity_deadline = fill_deadline - 1;
+    relay_data.exclusivity_deadline = fill_deadline
+        .checked_sub(exclusivity_gap)
+        .expect("exclusivity gap must not exceed fill deadline");
     let relay_hash = relay_hash_for(&relay_data);
 
     send_ix(
@@ -124,6 +133,13 @@ impl FilledRoute {
 }
 
 #[test]
+#[should_panic(expected = "exclusivity gap must not exceed fill deadline")]
+fn setup_rejects_exclusivity_gap_larger_than_fill_deadline() {
+    let mut svm = setup_svm();
+    setup_filled_route_with_exclusivity_gap(&mut svm, u32::MAX);
+}
+
+#[test]
 fn closed_fill_status_owner_fallback_finalizes_delivered_fill() {
     let mut svm = setup_svm();
     let fix = setup_filled_route(&mut svm);
@@ -167,6 +183,27 @@ fn closed_fill_status_owner_fallback_finalizes_delivered_fill() {
     );
     assert_eq!(receipt.execution_status, ExecutionStatus::Finalized);
     assert_eq!(receipt.amount, OUTPUT_AMOUNT);
+}
+
+#[test]
+fn fallback_rejects_fill_with_ambiguous_executed_amount() {
+    let mut svm = setup_svm();
+    let fix = setup_filled_route_with_exclusivity_gap(&mut svm, 1);
+    fix.advance_past_deadline_and_close(&mut svm);
+
+    assert_eq!(
+        send_ix_expect_err(
+            &mut svm,
+            fix.fallback_ix(),
+            &fix.payer,
+            &[&fix.owner],
+            "ambiguous fill amount must reject",
+        ),
+        adapter_error(AcrossAdapterError::ExecutedAmountUnavailable)
+    );
+    assert!(svm
+        .get_account(&derive_verified_fill_pda(&fix.relay_hash).0)
+        .is_none());
 }
 
 #[test]
