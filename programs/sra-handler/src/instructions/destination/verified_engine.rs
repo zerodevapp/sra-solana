@@ -161,6 +161,15 @@ pub(crate) fn execute_verified<'info>(
         data: call.inner_data.to_vec(),
     };
     invoke_signed(&ix, &infos, scratch_signer)?;
+    require!(
+        scratch_account_usable(
+            scratch,
+            call.token_program.key,
+            call.input_mint.key,
+            scratch_auth.key,
+        ),
+        SraError::ScratchControlChanged
+    );
 
     // Verify the outcome (fail-closed).
     let post_v = post.observe()?;
@@ -341,6 +350,25 @@ pub(crate) fn token_account_usable(
 ) -> bool {
     match token_account(info, token_program) {
         Some(t) => t.mint == *mint && t.state != AccountState::Frozen,
+        None => false,
+    }
+}
+
+pub(crate) fn scratch_account_usable(
+    info: &AccountInfo,
+    token_program: &Pubkey,
+    mint: &Pubkey,
+    authority: &Pubkey,
+) -> bool {
+    match token_account(info, token_program) {
+        Some(t) => {
+            t.mint == *mint
+                && t.owner == *authority
+                && t.delegate.is_none()
+                && t.delegated_amount == 0
+                && t.close_authority.is_none()
+                && t.state != AccountState::Frozen
+        }
         None => false,
     }
 }
