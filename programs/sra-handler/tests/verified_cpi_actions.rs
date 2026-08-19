@@ -128,7 +128,7 @@ fn stage_with_vault_amount(
     quoter: &Keypair,
     out_kind: OutKind,
     vault_amount: u64,
-    make_actions: impl FnOnce(Pubkey, Pubkey, Pubkey) -> Vec<SolanaAction>,
+    make_actions: impl FnOnce(Pubkey, Pubkey, Pubkey, Pubkey) -> Vec<SolanaAction>,
     create_destination: bool,
 ) -> Staged {
     let payer = funded_keypair(svm, 100 * SOL);
@@ -385,10 +385,10 @@ fn assert_zero_input_scratch_mutation_reverts(mutation: mock_swap::ScratchMutati
         &quoter,
         OutKind::Legacy,
         1,
-        |input, output, q| {
+        |input, output, program, q| {
             vec![
                 spl(recipient, 9_999),
-                verified_cpi(input, output, 1, signed(q)),
+                verified_cpi(input, output, program, 1, signed(q)),
             ]
         },
         true,
