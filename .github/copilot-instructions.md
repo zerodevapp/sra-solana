@@ -62,9 +62,10 @@ argument, transaction ordering, and the CPI call graph.
 - Sysvars (clock / rent / instructions): read via checked accessors or a pinned
   canonical address — never a caller-passed account trusted by its layout alone.
 - Token-2022: use the post-fee received balance (amount received != amount
-  sent), pass through transfer-hook extra accounts and budget CU, and never
-  silently custody permanent-delegate / pausable / default-frozen mints (require
-  explicit opt-in). Don't assume SPL-Token semantics.
+  sent), pass through transfer-hook extra accounts and budget CU, and require
+  explicit opt-in for issuer-controlled or transfer-restricted mints, including
+  permanent delegate, pausable, default-frozen, transfer-hook, and
+  non-transferable mints. Don't assume SPL-Token semantics.
 
 ## Arithmetic & cross-chain value
 - All token-amount math in `u128` with `checked_*` (or a justified

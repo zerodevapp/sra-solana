@@ -29,7 +29,7 @@ pub enum SolanaAction {
         /// Fungible receipt the engine balance-diffs (swap output, vault share, LST, …).
         output_mint: Pubkey,
         min_out: MinOut,
-        /// Opt-in for Token-2022 permissioned (perm-delegate / frozen) output mints.
+        /// Opt-in for issuer-controlled or transfer-restricted Token-2022 output mints.
         allow_permissioned_output: bool,
     },
 }
