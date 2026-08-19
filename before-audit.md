@@ -77,6 +77,7 @@ Result: tokens enter Across; a relayer fills on the EVM target; the EVM handler 
 
 1. Across fills output tokens into the route vault ATA (external, untrusted).
 2. **`verify_across_fill` (adapter, permissionless)** — read the Across `FillStatusAccount` at its pinned PDA, confirm `Filled`, re-derive the relay hash from supplied relay data (cryptographic binding to the fill), cross-check recipient = route / output token = expected mint / origin chain = source chain, and mint a `VerifiedFill` PDA (`init` → replay-once).
+   - **`verify_across_fill_after_close` (adapter, route owner)** — fallback used only after the canonical Across fill-status PDA is System-owned and data-empty and the relay deadline has strictly passed. The owner-supplied relay data must still re-derive the canonical relay hash and match the route. It creates the same canonical `VerifiedFill`, so normal finalization and replay protection remain unchanged.
 3. **`finalize_fill` (handler, permissionless)** — require `!paused`; require the `VerifiedFill`'s owning program is in `allowed_adapters`; deserialize and re-validate every field; move the full verified amount route vault → execution vault (execution authority PDA signs); `init` a `FillReceipt` replay marker with status `Finalized`. **No fee is taken here** — fees are source-side only.
 4. **`execute_actions` (handler, permissionless but executor-gated)** — require an executor in `allowed_executors` and `!paused`; run the committed `action_config` (hash-verified against the route). Two-pass: structural problems (frozen ATA, missing account) soft-fail to `ActionsFailed`; a CPI revert or `min_out` shortfall hard-fails the whole transaction. Success → `ActionsSucceeded`.
 
@@ -143,6 +144,7 @@ All gated by the `FeeConfig` **admin** (single key, transferable via a two-step 
 | `execute_deposit_across` | Bound to the paired handler instruction | Mutual instruction attestation; Across timing floors; approve custody; CPI Across `deposit_now`. |
 | `recover_stuck_custody` | SRA owner (signs) | Refund a stranded custody ATA to the owner after a deposit abort; `sra_config.owner == owner`. |
 | `verify_across_fill` | **Permissionless** | Read Across fill status (must be `Filled`); re-derive relay hash; cross-check all routing fields and chain ID; mint `VerifiedFill` PDA. |
+| `verify_across_fill_after_close` | Route owner (signs); payer may differ | Canonical fill-status PDA is System-owned + data-empty; `now > fill_deadline`; relay-hash and route fields revalidated; initializes the ordinary canonical `VerifiedFill`. |
 
 ---
 
@@ -209,7 +211,7 @@ These are the properties the security of the destination side rests on. Each is 
 6. **Redirect resistance.** Static transfers must exact-match `ATA(recipient, expected_mint)`. Verified-CPI outputs are pinned to the owner's ATA.
 7. **CPI containment.** Verified-CPI input is bounded to the scratch account (`input_bps` of the vault), the inner CPI is signed only by the scratch authority (never the execution authority), the output is pinned to the owner's ATA, `min_out` is enforced by post-fee balance diff, and the scratch is swept empty afterward.
 8. **Quote integrity.** `min_out` is quoter-signed over a context hash (route ‖ fill_id ‖ action_index), the chain ID, and an expiry — no cross- fill, cross-action, or cross-chain replay.
-9. **No-strand guarantee.** Every non-terminal state has an exit path, and a committed action config must consume exactly 100% of the staged snapshot, so terminal success leaves at most floor-division dust (swept by any later fill's execution or a sibling receipt's recovery). Funds are never permanently locked by a failed action.
+9. **No-strand guarantee.** Every non-terminal state has an exit path, and a committed action config must consume exactly 100% of the staged snapshot, so terminal success leaves at most floor-division dust (swept by any later fill's execution or a sibling receipt's recovery). Funds are never permanently locked by a failed action. Delivered route-vault funds also retain an owner-driven exit when Across has reclaimed the pre-verification fill-status proof.
 
 ---
 
@@ -284,7 +286,7 @@ Flagged proactively so they are not mistaken for findings. Some are deliberate S
 - **Shared execution vault per route.** Concurrent in-flight fills of the same route share one execution vault; recovery always drains the full balance safely, but per-fill accounting can be ambiguous if two fills overlap. The design assumes single-tenant routes (owner == route controller); a pooled/ multi-tenant vault would make the generic verified-CPI action unsafe.
 - **Restricted Token-2022 output** may be frozen, clawed back, vetoed by a transfer hook, or non-transferable; routes must opt in explicitly to accept such mints.
 - **CPI depth.** Solana's ~4–5 level CPI stack is a hard ceiling; deep swap routes plus token-hook accounts can exhaust it.
-- **Closed fill-status account.** If Across lets a relayer close the `FillStatusAccount` after the deadline, on-chain fill verification is no longer possible; a signed relay-attestation fallback is designed but not shipped.
+- **Closed fill-status fallback trust.** Across permits the recorded relayer to close a `FillStatusAccount` after its deadline. Once closed, current account state cannot prove the historical fill, so `verify_across_fill_after_close` deliberately substitutes the affected route owner's signature. The fallback is unavailable before the deadline or while any live/nonempty status account exists, remains bound to the canonical relay hash and route, and creates the ordinary non-closeable `VerifiedFill`. This trust downgrade is scoped to the owner's own route and cannot move funds directly or bypass `finalize_fill`.
 - **ALT-mandatory source tx.** The source transaction requires an Address Lookup Table to fit the packet size (CI-enforced).
 
 ---
