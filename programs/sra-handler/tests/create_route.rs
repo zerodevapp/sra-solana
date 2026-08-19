@@ -54,6 +54,44 @@ fn create_route_happy_path() {
 }
 
 #[test]
+fn create_route_reuses_preexisting_vault_atas_with_funds() {
+    const ROUTE_VAULT_AMOUNT: u64 = 1_000_000;
+
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+
+    let params = sample_create_route_params(mint, [25u8; 32]);
+    let hash = route_config_hash_for(&owner.pubkey(), &params);
+    let (route_pda, _) = derive_route_pda(&owner.pubkey(), &hash, &params.salt);
+    let (execution_authority, _) = derive_execution_authority_pda(&route_pda);
+    let route_vault = create_ata(&mut svm, &payer, &route_pda, &mint);
+    let execution_vault = create_ata(&mut svm, &payer, &execution_authority, &mint);
+    mint_to(
+        &mut svm,
+        &payer,
+        &payer,
+        &mint,
+        &route_vault,
+        ROUTE_VAULT_AMOUNT,
+    );
+
+    let ix = create_route_ix(
+        &payer.pubkey(),
+        &owner.pubkey(),
+        params,
+        &[ADAPTER_PROGRAM_ID],
+    );
+    send_ix(&mut svm, ix, &payer, &[&owner])
+        .expect("create_route should reuse preexisting vault ATAs");
+
+    assert_eq!(fetch_route(&svm, &route_pda).owner, owner.pubkey());
+    assert_eq!(fetch_token_balance(&svm, &route_vault), ROUTE_VAULT_AMOUNT);
+    assert_eq!(fetch_token_balance(&svm, &execution_vault), 0);
+}
+
+#[test]
 fn create_route_emits_route_created() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
