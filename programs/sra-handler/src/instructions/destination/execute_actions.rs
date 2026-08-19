@@ -288,9 +288,6 @@ pub(crate) fn run_committed_actions<'info>(
                         || output_token_program == anchor_spl::token_2022::ID,
                     SraError::ActionAccountMismatch
                 );
-                // Safety gate: never silently custody a permissioned output
-                // (permanent-delegate / pausable / default-frozen) unless the route
-                // explicitly opted in.
                 require!(
                     *allow_permissioned_output || !mint_is_permissioned(output_mint_info)?,
                     SraError::PermissionedOutputNotAllowed

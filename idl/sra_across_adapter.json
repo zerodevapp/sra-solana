@@ -1629,7 +1629,7 @@
               {
                 "name": "allow_permissioned_output",
                 "docs": [
-                  "Opt-in for Token-2022 permissioned (perm-delegate / frozen) output mints."
+                  "Opt-in for issuer-controlled or transfer-restricted Token-2022 output mints."
                 ],
                 "type": "bool"
               }
