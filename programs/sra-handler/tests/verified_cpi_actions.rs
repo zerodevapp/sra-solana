@@ -637,6 +637,39 @@ fn verified_cpi_missing_quote_rejected() {
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
 }
 
+#[test]
+fn verified_cpi_missing_quote_with_missing_destination_rejected() {
+    let mut svm = setup_svm();
+    let quoter = Keypair::new();
+    let s = stage(
+        &mut svm,
+        &quoter,
+        OutKind::Legacy,
+        |input, output, program, q| vec![verified_cpi(input, output, program, 10_000, signed(q))],
+        false,
+    );
+    let expiry = now(&svm) + 3_600;
+    let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        &s.input_mint,
+        s.verified_metas(s.destination),
+    );
+
+    let err = send_ix_expect_err(
+        &mut svm,
+        exec,
+        &s.payer,
+        &[],
+        "missing signed quote rejected before pinned-account soft failure",
+    );
+    assert_eq!(err, custom_error_at(0, SraError::InvalidPriceSignature));
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
+    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+}
+
 // --------------------------------------------------------------------------
 // Soft fail (recoverable) and deferred-feature gates
 // --------------------------------------------------------------------------
