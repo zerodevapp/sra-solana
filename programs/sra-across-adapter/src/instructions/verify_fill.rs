@@ -9,7 +9,10 @@
 //! 2. Re-deriving the relay hash over the caller-supplied `relay_data` must
 //!    reproduce that same `relay_hash` — the cryptographic binding of the data
 //!    to the Across-verified fill. Any mutated field yields a different hash.
-//! 3. The verified routing fields are cross-checked against the committed route.
+//! 3. The original output amount is accepted only before slow fills become
+//!    possible or when the relay has no slow-fill window. The prompt path
+//!    relies on the monotonic Solana clock Across also reads.
+//! 4. The verified routing fields are cross-checked against the committed route.
 //!
 //! The resulting `VerifiedFill` is the trust boundary the handler reads (across
 //! the program boundary) to authorize fund movement; a vault-balance increase
@@ -70,10 +73,13 @@ pub(crate) fn validated_verified_fill(
         AcrossAdapterError::OriginChainMismatch
     );
 
-    // Across binds a single exact-fill output amount, so it is both the
-    // delivered amount and the source-committed minimum the handler later
-    // enforces. `output_token` has been checked equal to the route mint;
-    // persisting it names the asset this fill delivered.
+    let created_at = Clock::get()?.unix_timestamp;
+    require!(
+        created_at <= i64::from(relay_data.exclusivity_deadline)
+            || relay_data.exclusivity_deadline >= relay_data.fill_deadline,
+        AcrossAdapterError::ExecutedAmountUnavailable
+    );
+
     Ok(VerifiedFill {
         adapter: crate::ID,
         route: route_key,
@@ -82,7 +88,7 @@ pub(crate) fn validated_verified_fill(
         amount: relay_data.output_amount,
         expected_amount: relay_data.output_amount,
         source_chain_id: relay_data.origin_chain_id,
-        created_at: Clock::get()?.unix_timestamp,
+        created_at,
         bump,
     })
 }
@@ -136,8 +142,6 @@ pub fn handler(
         AcrossAdapterError::FillNotCompleted
     );
 
-    // 2/3/4. Bind the relay data to the hash, cross-check the route, and record
-    //    the verification artifact.
     let verified = validated_verified_fill(
         &ctx.accounts.route,
         relay_hash,
