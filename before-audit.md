@@ -76,8 +76,8 @@ Result: tokens enter Across; a relayer fills on the EVM target; the EVM handler 
 **Fill lifecycle (deterministic; parts are permissionless):**
 
 1. Across fills output tokens into the route vault ATA (external, untrusted).
-2. **`verify_across_fill` (adapter, permissionless)** — read the Across `FillStatusAccount` at its pinned PDA, confirm `Filled`, re-derive the relay hash from supplied relay data (cryptographic binding to the fill), cross-check recipient = route / output token = expected mint / origin chain = source chain, and mint a `VerifiedFill` PDA (`init` → replay-once).
-   - **`verify_across_fill_after_close` (adapter, route owner)** — fallback used only after the canonical Across fill-status PDA is System-owned and data-empty and the relay deadline has strictly passed. The owner-supplied relay data must still re-derive the canonical relay hash and match the route. It creates the same canonical `VerifiedFill`, so normal finalization and replay protection remain unchanged.
+2. **`verify_across_fill` (adapter, permissionless)** — read the Across `FillStatusAccount` at its pinned PDA, confirm `Filled`, re-derive the relay hash from supplied relay data (cryptographic binding to the fill), cross-check recipient = route / output token = expected mint / origin chain = source chain, and mint a `VerifiedFill` PDA (`init` → replay-once). The original output amount is accepted only when verification occurs at or before `exclusivity_deadline`, or when `exclusivity_deadline >= fill_deadline` makes the slow-fill window empty; otherwise verification rejects with `ExecutedAmountUnavailable`. The prompt branch relies on the monotonic Solana clock used by both programs.
+   - **`verify_across_fill_after_close` (adapter, route owner)** — fallback used only after the canonical Across fill-status PDA is System-owned and data-empty and the relay deadline has strictly passed. Because prompt verification is then impossible, the relay must have had no slow-fill window. The owner-supplied relay data must still re-derive the canonical relay hash and match the route. It creates the same canonical `VerifiedFill`, so normal finalization and replay protection remain unchanged.
 3. **`finalize_fill` (handler, permissionless)** — require `!paused`; require the `VerifiedFill`'s owning program is in `allowed_adapters`; deserialize and re-validate every field; move the full verified amount route vault → execution vault (execution authority PDA signs); `init` a `FillReceipt` replay marker with status `Finalized`. **No fee is taken here** — fees are source-side only.
 4. **`execute_actions` (handler, permissionless but executor-gated)** — require an executor in `allowed_executors` and `!paused`; run the committed `action_config` (hash-verified against the route). Two-pass: structural problems (frozen ATA, missing account) soft-fail to `ActionsFailed`; a CPI revert or `min_out` shortfall hard-fails the whole transaction. Success → `ActionsSucceeded`.
 
@@ -143,8 +143,8 @@ All gated by the `FeeConfig` **admin** (single key, transferable via a two-step 
 | --- | --- | --- |
 | `execute_deposit_across` | Bound to the paired handler instruction | Mutual instruction attestation; Across timing floors; approve custody; CPI Across `deposit_now`. |
 | `recover_stuck_custody` | SRA owner (signs) | Refund a stranded custody ATA to the owner after a deposit abort; `sra_config.owner == owner`. |
-| `verify_across_fill` | **Permissionless** | Read Across fill status (must be `Filled`); re-derive relay hash; cross-check all routing fields and chain ID; mint `VerifiedFill` PDA. |
-| `verify_across_fill_after_close` | Route owner (signs); payer may differ | Canonical fill-status PDA is System-owned + data-empty; `now > fill_deadline`; relay-hash and route fields revalidated; initializes the ordinary canonical `VerifiedFill`. |
+| `verify_across_fill` | **Permissionless** | Read Across fill status (must be `Filled`); re-derive relay hash; require proof that slow filling was not possible; cross-check all routing fields and chain ID; mint `VerifiedFill` PDA. |
+| `verify_across_fill_after_close` | Route owner (signs); payer may differ | Canonical fill-status PDA is System-owned + data-empty; `now > fill_deadline`; relay had no slow-fill window; relay-hash and route fields revalidated; initializes the ordinary canonical `VerifiedFill`. |
 
 ---
 
@@ -203,7 +203,7 @@ There are **three distinct signing authorities** on the destination side — the
 
 These are the properties the security of the destination side rests on. Each is a good audit target — try to break it.
 
-1. **Fill authenticity.** A `VerifiedFill` can only correspond to a real Across fill: the `FillStatusAccount` is pinned to the canonical SpokePool, and the relay data is byte-bound to the fill's relay hash.
+1. **Fill and amount authenticity.** A `VerifiedFill` can only correspond to a real Across fill: the `FillStatusAccount` is pinned to the canonical SpokePool, and the relay data is byte-bound to the fill's relay hash. The original output amount is recorded only while slow filling has not become possible or when the relay has no slow-fill window, so `Filled` uniquely implies an exact fast fill.
 2. **Per-route adapter trust.** Only attestations owned by a program in `allowed_adapters` are honored; any other `VerifiedFill` is inert.
 3. **Replay-once at two layers.** `VerifiedFill` (`init` per adapter+relay_hash) and `FillReceipt` (`init` per route+fill_id, never closeable).
 4. **Custody moves are PDA-signed.** Every token move is signed by a handler-controlled PDA (route / execution authority / scratch authority). Relayers supply accounts, never signing authority.
@@ -211,7 +211,7 @@ These are the properties the security of the destination side rests on. Each is 
 6. **Redirect resistance.** Static transfers must exact-match `ATA(recipient, expected_mint)`. Verified-CPI outputs are pinned to the owner's ATA.
 7. **CPI containment.** Verified-CPI input is bounded to the scratch account (`input_bps` of the vault), the inner CPI is signed only by the scratch authority (never the execution authority), the output is pinned to the owner's ATA, `min_out` is enforced by post-fee balance diff, and the scratch is swept empty afterward.
 8. **Quote integrity.** `min_out` is quoter-signed over a context hash (route ‖ fill_id ‖ action_index), the chain ID, and an expiry — no cross- fill, cross-action, or cross-chain replay.
-9. **No-strand guarantee.** Every non-terminal state has an exit path, and a committed action config must consume exactly 100% of the staged snapshot, so terminal success leaves at most floor-division dust (swept by any later fill's execution or a sibling receipt's recovery). Funds are never permanently locked by a failed action. Delivered route-vault funds also retain an owner-driven exit when Across has reclaimed the pre-verification fill-status proof.
+9. **Post-verification no-strand guarantee.** Every non-terminal state after `VerifiedFill` creation has an exit path, and a committed action config must consume exactly 100% of the staged snapshot, so terminal success leaves at most floor-division dust (swept by any later fill's execution or a sibling receipt's recovery). Funds are never permanently locked by a failed action. Ambiguous fills rejected before verification are outside this guarantee.
 
 ---
 
@@ -282,11 +282,12 @@ Flagged proactively so they are not mistaken for findings. Some are deliberate S
 - **`initialize_fee_config` is first-caller-wins.** The singleton `FeeConfig` PDA records whatever `admin` signs the first (and only possible) initialization — there is no compiled-in governance key or upgrade-authority check. An attacker who front-runs deployment claims global fee governance permanently: fee recipient, fees up to 10%, sponsorship policy. They cannot alter already-signed deposits (the exact fee is recomputed and matched), but the role is captured. Mitigation is operational: `scripts/initialize-fee-config.ts` must be run immediately after (ideally atomically with) program deployment, and the deployer must verify the resulting `FeeConfig.admin` before any announcement or use. Deployment ordering — not on-chain logic — is the security boundary here.
 
 - **No Across integrator/referral ID** on the source deposit (EVM appends one).
+- **Across slow fills are not verifiable.** A permissionless cranker should call `verify_across_fill` immediately after `Filled` appears and no later than `exclusivity_deadline`. Later verification fails closed unless `exclusivity_deadline >= fill_deadline`. Future deposits that require late verification must set equal deadlines, which disables slow fills and nonexclusive-relayer fallback; if the exclusive relayer fails, the deposit expires instead.
 - **No oracle fallback** for `min_out` (signed quote is the only path; oracle configs are refused at `create_route`).
 - **Shared execution vault per route.** Concurrent in-flight fills of the same route share one execution vault; recovery always drains the full balance safely, but per-fill accounting can be ambiguous if two fills overlap. The design assumes single-tenant routes (owner == route controller); a pooled/ multi-tenant vault would make the generic verified-CPI action unsafe.
 - **Restricted Token-2022 output** may be frozen, clawed back, vetoed by a transfer hook, or non-transferable; routes must opt in explicitly to accept such mints.
 - **CPI depth.** Solana's ~4–5 level CPI stack is a hard ceiling; deep swap routes plus token-hook accounts can exhaust it.
-- **Closed fill-status fallback trust.** Across permits the recorded relayer to close a `FillStatusAccount` after its deadline. Once closed, current account state cannot prove the historical fill, so `verify_across_fill_after_close` deliberately substitutes the affected route owner's signature. The fallback is unavailable before the deadline or while any live/nonempty status account exists, remains bound to the canonical relay hash and route, and creates the ordinary non-closeable `VerifiedFill`. This trust downgrade is scoped to the owner's own route and cannot move funds directly or bypass `finalize_fill`.
+- **Closed fill-status fallback trust.** Across permits the recorded relayer to close a `FillStatusAccount` after its deadline. Once closed, current account state cannot prove the historical fill, so `verify_across_fill_after_close` deliberately substitutes the affected route owner's signature. The fallback is unavailable before the deadline or while any live/nonempty status account exists, remains bound to the canonical relay hash and route, accepts only relays whose slow-fill window was empty, and creates the ordinary non-closeable `VerifiedFill`. This trust downgrade is scoped to the owner's own route and cannot move funds directly or bypass `finalize_fill`.
 - **ALT-mandatory source tx.** The source transaction requires an Address Lookup Table to fit the packet size (CI-enforced).
 
 ---
@@ -323,7 +324,7 @@ The Rust LiteSVM tests are the source of truth for behaviour; the TS suite is a 
 
 ## 14. Suggested audit focus, in priority order
 
-1. **`VerifiedFill` production and consumption.** `verify_across_fill` in the adapter (relay-hash re-derivation, fill-status pinning, field cross-checks) and `finalize_fill`'s raw-bytes deserialization + adapter-allowlist + full-field re-validation. This is the money boundary.
+1. **`VerifiedFill` production and consumption.** `verify_across_fill` in the adapter (relay-hash re-derivation, fill-status pinning, executed-amount evidence window, field cross-checks) and `finalize_fill`'s raw-bytes deserialization + adapter-allowlist + full-field re-validation. This is the money boundary.
 2. **The verified-CPI engine** (`execute_actions` / `verified_engine`): scratch bounding, authority separation, destination pinning, `min_out` balance-diff, account-template resolution of Free vs Fixed slots, and signed-quote verification. Try to smuggle value out via a hostile account set.
 3. **Replay and state machine.** `FillReceipt` transitions, `init`-not- `init_if_needed`, the no-strand exit paths, and the pause gate coverage.
 4. **Paired-instruction attestation** on the source side — can either half run in isolation, or with a substituted counterpart?
