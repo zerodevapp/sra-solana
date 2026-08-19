@@ -364,6 +364,12 @@ pub(crate) fn mint_is_permissioned(mint_info: &AccountInfo) -> Result<bool> {
 fn mint_data_is_permissioned(data: &[u8]) -> Result<bool> {
     let mint = StateWithExtensions::<Mint>::unpack(data)
         .map_err(|_| error!(SraError::ActionAccountMismatch))?;
+    let expected_len = mint
+        .try_get_account_len()
+        .map_err(|_| error!(SraError::ActionAccountMismatch))?;
+    if expected_len != data.len() {
+        return Err(error!(SraError::ActionAccountMismatch));
+    }
     for ext in mint
         .get_extension_types()
         .map_err(|_| error!(SraError::ActionAccountMismatch))?
@@ -596,6 +602,7 @@ mod tests {
     // ---- mint_is_permissioned (Token-2022 extension scan) ----
 
     use anchor_lang::solana_program::program_option::COption;
+    use anchor_lang::solana_program::program_pack::Pack;
     use anchor_spl::token_2022::spl_token_2022::extension::non_transferable::NonTransferable;
     use anchor_spl::token_2022::spl_token_2022::extension::pausable::PausableConfig;
     use anchor_spl::token_2022::spl_token_2022::extension::permanent_delegate::PermanentDelegate;
@@ -659,6 +666,18 @@ mod tests {
             m.init_extension::<TransferHook>(true).unwrap();
         });
         assert!(mint_data_is_permissioned(&data).unwrap());
+    }
+
+    #[test]
+    fn early_uninitialized_mint_terminator_is_rejected() {
+        let mut data = packed_mint(&[ExtensionType::TransferHook], |m| {
+            m.init_extension::<TransferHook>(true).unwrap();
+        });
+        data[TokenAccountState::LEN + 1..TokenAccountState::LEN + 3].fill(0);
+        assert_eq!(
+            mint_data_is_permissioned(&data).unwrap_err(),
+            error!(SraError::ActionAccountMismatch)
+        );
     }
 
     #[test]
