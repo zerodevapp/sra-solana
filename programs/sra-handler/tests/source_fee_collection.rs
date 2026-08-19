@@ -4,8 +4,7 @@
 //! equality-checked against the attested
 //! `params.protocol_fee_amount` (`FeeMismatch`), collected from the SRA vault
 //! into the canonical recipient ATA, and the NET (input - fee) is forwarded
-//! into adapter custody and bridged. Slippage keeps flooring on the GROSS
-//! input (EVM parity).
+//! into adapter custody and bridged.
 
 mod common;
 
@@ -472,23 +471,24 @@ fn fee_config_pda_substitution_rejected() {
 }
 
 #[test]
-fn slippage_floors_on_gross_with_fee() {
+fn slippage_floors_on_net_with_fee() {
     let mut svm = setup_svm();
     let fx = ValidatePrepareFixture::new(&mut svm);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
-    // Gross floor at 50 bps slippage = 995_000. Net (997_000) would floor at
-    // 992_015 — an output of 994_000 discriminates: it clears the net-derived
-    // floor but NOT the gross floor. EVM applies slippage to the
-    // gross deposit, so this must reject.
     let mut params = fee_params(&fx, DEFAULT_FEE);
-    params.output_amount = u256_from_u64(994_000);
+    params.output_amount = u256_from_u64(992_014);
 
     expect_custom_error(
-        fx.invoke_with_fee_ata(&mut svm, params, Some(fee_ata)),
+        fx.invoke_with_fee_ata(&mut svm, params.clone(), Some(fee_ata)),
         SraError::SlippageExceeded.into(),
-        "slippage must floor on the gross input, not the net",
+        "output below the post-fee floor must reject",
     );
+    assert_deposit_state_untouched(&svm, &fx, &fee_ata);
+
+    params.output_amount = u256_from_u64(992_015);
+    fx.invoke_with_fee_ata(&mut svm, params, Some(fee_ata))
+        .expect("output at the post-fee floor must succeed");
 }
 
 #[test]
