@@ -12,10 +12,12 @@
 
 mod common;
 
+use anchor_lang::solana_program::program_option::COption;
 use anchor_spl::token::ID as TOKEN_PROGRAM_ID;
 use common::*;
 use solana_sdk::{
     instruction::{AccountMeta, InstructionError},
+    program_pack::Pack,
     pubkey::Pubkey,
     signature::Keypair,
     signer::Signer,
@@ -291,6 +293,51 @@ fn verified_cpi_swap_succeeds() {
         status(&svm, &s.fill_receipt),
         ExecutionStatus::ActionsSucceeded
     );
+}
+
+#[test]
+fn verified_cpi_rejects_scratch_control_mutations() {
+    for mutation in [
+        mock_swap::ScratchMutation::Owner,
+        mock_swap::ScratchMutation::CloseAuthority,
+        mock_swap::ScratchMutation::Delegate,
+    ] {
+        let mut svm = setup_svm();
+        let quoter = Keypair::new();
+        let s = staged_single(&mut svm, &quoter);
+        let out_amount = 3_000_000;
+        let expiry = now(&svm) + 3_600;
+        let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, out_amount, expiry));
+        let exec = execute_actions_ix_full(
+            &s.payer.pubkey(),
+            &s.route,
+            FILL_ID,
+            vec![runtime(
+                swap_with_mutation_data(VAULT, out_amount, mutation),
+                out_amount,
+                expiry,
+            )],
+            &s.input_mint,
+            s.verified_metas(s.destination),
+        );
+
+        let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+        assert_eq!(
+            err,
+            exec_error(SraError::ScratchControlChanged),
+            "scratch mutation {mutation:?}"
+        );
+
+        let scratch = svm.get_account(&s.scratch).expect("scratch exists");
+        let scratch = anchor_spl::token::spl_token::state::Account::unpack(&scratch.data)
+            .expect("valid scratch token account");
+        assert_eq!(scratch.owner, s.scratch_authority);
+        assert_eq!(scratch.delegate, COption::None);
+        assert_eq!(scratch.close_authority, COption::None);
+        assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
+        assert_eq!(fetch_token_balance(&svm, &s.destination), 0);
+        assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+    }
 }
 
 /// A callee that consumes only part of the staged input while still clearing

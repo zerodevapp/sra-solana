@@ -96,9 +96,18 @@ pub fn mock_swap_template() -> AccountTemplate {
 
 /// `inner_data` for the mock swap: pull `in_amount`, deliver `out_amount`.
 pub fn swap_data(in_amount: u64, out_amount: u64) -> Vec<u8> {
+    swap_with_mutation_data(in_amount, out_amount, mock_swap::ScratchMutation::None)
+}
+
+pub fn swap_with_mutation_data(
+    in_amount: u64,
+    out_amount: u64,
+    scratch_mutation: mock_swap::ScratchMutation,
+) -> Vec<u8> {
     mock_swap::instruction::Swap {
         in_amount,
         out_amount,
+        scratch_mutation,
     }
     .data()
 }

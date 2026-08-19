@@ -33,9 +33,9 @@ use sra_common::types::{
 };
 
 use super::verified_engine::{
-    execute_verified, fixed_slot, mint_is_permissioned, token_account_usable,
-    validate_pinned_program, validate_template_slots, verify_signed_quote, TokenBalanceCheck,
-    VerifiedCpiCall,
+    execute_verified, fixed_slot, mint_is_permissioned, scratch_account_usable,
+    token_account_usable, validate_pinned_program, validate_template_slots, verify_signed_quote,
+    TokenBalanceCheck, VerifiedCpiCall,
 };
 use crate::events::{ActionsExecuted, ActionsFailed};
 
@@ -320,7 +320,12 @@ pub(crate) fn run_committed_actions<'info>(
                 // Soft-fail on handler-pinned-account state (recoverable), like SplTransfer.
                 let scratch_info = fixed_slot(slots, account_template, FixedRole::Source)?;
                 let dest_info = fixed_slot(slots, account_template, FixedRole::Destination)?;
-                let scratch_ok = token_account_usable(scratch_info, &token_program, &expected_mint);
+                let scratch_ok = scratch_account_usable(
+                    scratch_info,
+                    &token_program,
+                    &expected_mint,
+                    &scratch_auth,
+                );
                 let dest_ok = token_account_usable(dest_info, &output_token_program, output_mint);
                 if source_frozen || !scratch_ok || !dest_ok {
                     any_action_would_fail = true;

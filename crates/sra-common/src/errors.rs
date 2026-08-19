@@ -173,4 +173,7 @@ pub enum SraError {
     // -- Destination: verified-CPI (appended to keep existing error codes stable) --
     #[msg("Verified-CPI callee did not consume the full staged input")]
     InputNotConsumed,
+
+    #[msg("Verified-CPI callee changed scratch token-account control")]
+    ScratchControlChanged,
 }
