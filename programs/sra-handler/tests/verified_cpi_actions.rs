@@ -66,6 +66,7 @@ impl OutKind {
 fn verified_cpi(
     input_mint: Pubkey,
     output_mint: Pubkey,
+    output_token_program: Pubkey,
     input_bps: u16,
     min_out: MinOut,
 ) -> SolanaAction {
@@ -73,7 +74,7 @@ fn verified_cpi(
         program_id: mock_swap::ID,
         input_mint,
         input_bps,
-        account_template: mock_swap_template(),
+        account_template: mock_swap_template_for_output_program(output_token_program),
         output_mint,
         min_out,
         allow_permissioned_output: false,
@@ -109,7 +110,7 @@ fn stage(
     svm: &mut litesvm::LiteSVM,
     quoter: &Keypair,
     out_kind: OutKind,
-    make_actions: impl FnOnce(Pubkey, Pubkey, Pubkey) -> Vec<SolanaAction>,
+    make_actions: impl FnOnce(Pubkey, Pubkey, Pubkey, Pubkey) -> Vec<SolanaAction>,
     create_destination: bool,
 ) -> Staged {
     let payer = funded_keypair(svm, 100 * SOL);
@@ -127,7 +128,12 @@ fn stage(
             create_permissioned_mint_2022(svm, &payer, &payer.pubkey(), DECIMALS)
         }
     };
-    let action_config = make_actions(input_mint, output_mint, quoter.pubkey());
+    let action_config = make_actions(
+        input_mint,
+        output_mint,
+        output_token_program,
+        quoter.pubkey(),
+    );
     let salt = [2u8; 32];
 
     let params = CreateRouteParams {
@@ -206,7 +212,7 @@ fn staged_single(svm: &mut litesvm::LiteSVM, quoter: &Keypair) -> Staged {
         svm,
         quoter,
         OutKind::Legacy,
-        |input, output, q| vec![verified_cpi(input, output, 10_000, signed(q))],
+        |input, output, program, q| vec![verified_cpi(input, output, program, 10_000, signed(q))],
         true,
     )
 }
@@ -477,6 +483,36 @@ fn verified_cpi_destination_redirect_rejected() {
 }
 
 #[test]
+fn verified_cpi_free_slot_aliasing_output_mint_rejected() {
+    let mut svm = setup_svm();
+    let quoter = Keypair::new();
+    let s = stage(
+        &mut svm,
+        &quoter,
+        OutKind::Token2022,
+        |input, output, program, q| vec![verified_cpi(input, output, program, 10_000, signed(q))],
+        true,
+    );
+    let mut metas = s.verified_metas(s.destination);
+    metas[6] = AccountMeta::new(s.output_mint, false);
+    let expiry = now(&svm) + 3_600;
+    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
+    let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+        &s.input_mint,
+        metas,
+    );
+
+    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    assert_eq!(err, exec_error(SraError::ActionAccountMismatch));
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
+    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+}
+
+#[test]
 fn verified_cpi_program_substitution_rejected() {
     let mut svm = setup_svm();
     let quoter = Keypair::new();
@@ -614,7 +650,7 @@ fn verified_cpi_missing_destination_ata_soft_fails() {
         &mut svm,
         &quoter,
         OutKind::Legacy,
-        |input, output, q| vec![verified_cpi(input, output, 10_000, signed(q))],
+        |input, output, program, q| vec![verified_cpi(input, output, program, 10_000, signed(q))],
         false,
     );
     let expiry = now(&svm) + 3_600;
@@ -652,10 +688,10 @@ fn spl_and_verified_cpi_compose() {
         &mut svm,
         &quoter,
         OutKind::Legacy,
-        |input, output, q| {
+        |input, output, program, q| {
             vec![
                 spl(recipient, 3_000),
-                verified_cpi(input, output, 7_000, signed(q)),
+                verified_cpi(input, output, program, 7_000, signed(q)),
             ]
         },
         true,
@@ -715,7 +751,7 @@ fn verified_cpi_token_2022_output_succeeds() {
         &mut svm,
         &quoter,
         OutKind::Token2022,
-        |input, output, q| vec![verified_cpi(input, output, 10_000, signed(q))],
+        |input, output, program, q| vec![verified_cpi(input, output, program, 10_000, signed(q))],
         true,
     );
 
@@ -761,7 +797,7 @@ fn verified_cpi_transfer_fee_output_uses_post_fee_balance() {
             fee_bps: 100, // 1%
             max_fee: 1_000_000_000,
         },
-        |input, output, q| vec![verified_cpi(input, output, 10_000, signed(q))],
+        |input, output, program, q| vec![verified_cpi(input, output, program, 10_000, signed(q))],
         true,
     );
 
@@ -804,7 +840,7 @@ fn verified_cpi_transfer_fee_min_out_against_post_fee_reverts() {
             fee_bps: 100,
             max_fee: 1_000_000_000,
         },
-        |input, output, q| vec![verified_cpi(input, output, 10_000, signed(q))],
+        |input, output, program, q| vec![verified_cpi(input, output, program, 10_000, signed(q))],
         true,
     );
 
@@ -837,7 +873,7 @@ fn verified_cpi_permissioned_output_requires_optin() {
         &mut svm,
         &quoter,
         OutKind::Token2022Permissioned,
-        |input, output, q| vec![verified_cpi(input, output, 10_000, signed(q))],
+        |input, output, program, q| vec![verified_cpi(input, output, program, 10_000, signed(q))],
         true,
     );
 
@@ -869,12 +905,12 @@ fn verified_cpi_permissioned_output_optin_succeeds() {
         &mut svm,
         &quoter,
         OutKind::Token2022Permissioned,
-        |input, output, q| {
+        |input, output, program, q| {
             vec![SolanaAction::VerifiedCpi {
                 program_id: mock_swap::ID,
                 input_mint: input,
                 input_bps: 10_000,
-                account_template: mock_swap_template(),
+                account_template: mock_swap_template_for_output_program(program),
                 output_mint: output,
                 min_out: signed(q),
                 allow_permissioned_output: true,

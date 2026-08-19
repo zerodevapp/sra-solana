@@ -254,7 +254,12 @@ pub(crate) fn validate_template_slots(
             SlotRole::Fixed(FixedRole::OutputMint) => {
                 require_keys_eq!(info.key(), *output_mint, SraError::ActionAccountMismatch);
             }
-            SlotRole::Free => {}
+            SlotRole::Free => require!(
+                !template.slots.iter().zip(slots).any(|(role, fixed)| {
+                    matches!(role, SlotRole::Fixed(_)) && fixed.key == info.key
+                }),
+                SraError::ActionAccountMismatch
+            ),
         }
     }
     Ok(())
