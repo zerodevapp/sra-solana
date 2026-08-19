@@ -62,7 +62,9 @@ fn setup_filled_route_with_exclusivity_gap(
     let fill_deadline = u32::try_from(now(svm) + 10).expect("LiteSVM timestamp fits u32");
     let mut relay_data = sample_relay_data(route, mint, SOURCE_CHAIN_ID, OUTPUT_AMOUNT);
     relay_data.fill_deadline = fill_deadline;
-    relay_data.exclusivity_deadline = fill_deadline - exclusivity_gap;
+    relay_data.exclusivity_deadline = fill_deadline
+        .checked_sub(exclusivity_gap)
+        .expect("exclusivity gap must not exceed fill deadline");
     let relay_hash = relay_hash_for(&relay_data);
 
     send_ix(
@@ -128,6 +130,13 @@ impl FilledRoute {
             &self.mint,
         )
     }
+}
+
+#[test]
+#[should_panic(expected = "exclusivity gap must not exceed fill deadline")]
+fn setup_rejects_exclusivity_gap_larger_than_fill_deadline() {
+    let mut svm = setup_svm();
+    setup_filled_route_with_exclusivity_gap(&mut svm, u32::MAX);
 }
 
 #[test]
