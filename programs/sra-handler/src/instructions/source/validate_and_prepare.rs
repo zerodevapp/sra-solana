@@ -319,7 +319,7 @@ pub(crate) fn handler(
     // overflowing intermediates.
     require!(
         output_satisfies_slippage_floor(
-            params.input_amount,
+            bridged_amount,
             ctx.accounts.source_mint.decimals,
             decode_output_amount(params.output_amount)?,
             ctx.accounts.address_book_entry.target_decimals,
