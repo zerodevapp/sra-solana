@@ -68,6 +68,7 @@ const INNER_DATA_LEN: usize = 256;
 
 struct Dest {
     payer: Keypair,
+    owner: Keypair,
     route: Pubkey,
     route_config_hash: [u8; 32],
     mint: Pubkey,
@@ -77,13 +78,15 @@ struct Dest {
 /// submitted): every instruction PDA hangs off `route` + `mint`, and the size of
 /// the resulting transaction is independent of the route's on-chain existence.
 fn dest() -> Dest {
-    let owner = Pubkey::new_unique();
+    let payer = Keypair::new();
+    let owner = Keypair::new();
     let mint = Pubkey::new_unique();
     let params = sample_create_route_params(mint, [7u8; 32]);
-    let route_config_hash = route_config_hash_for(&owner, &params);
-    let (route, _) = derive_route_pda(&owner, &route_config_hash, &params.salt);
+    let route_config_hash = route_config_hash_for(&owner.pubkey(), &params);
+    let (route, _) = derive_route_pda(&owner.pubkey(), &route_config_hash, &params.salt);
     Dest {
-        payer: Keypair::new(),
+        payer,
+        owner,
         route,
         route_config_hash,
         mint,
@@ -102,6 +105,19 @@ fn compile_v0(
     VersionedTransaction::try_new(VersionedMessage::V0(msg), &[payer]).expect("sign versioned tx")
 }
 
+/// Compile `ixs` into a v0 transaction signed by both the payer and the route
+/// owner — the owner-attested fallback shape's signer set.
+fn compile_v0_with_owner(
+    d: &Dest,
+    ixs: &[Instruction],
+    lookup_tables: &[AddressLookupTableAccount],
+) -> VersionedTransaction {
+    let msg = v0::Message::try_compile(&d.payer.pubkey(), ixs, lookup_tables, Hash::default())
+        .expect("compile owner-signed v0 message");
+    VersionedTransaction::try_new(VersionedMessage::V0(msg), &[&d.payer, &d.owner])
+        .expect("sign owner-signed versioned tx")
+}
+
 fn serialized_len(tx: &VersionedTransaction) -> usize {
     bincode::serialize(tx).expect("bincode serialize tx").len()
 }
@@ -115,6 +131,31 @@ fn verify_finalize_ixs(d: &Dest) -> Vec<Instruction> {
     let (verified_fill, _) = derive_verified_fill_pda(&relay_hash);
     vec![
         verify_across_fill_ix(&d.payer.pubkey(), &d.route, relay_hash, relay_data),
+        finalize_fill_ix(
+            &d.payer.pubkey(),
+            &d.route,
+            d.route_config_hash,
+            &verified_fill,
+            relay_hash,
+            &d.mint,
+        ),
+    ]
+}
+
+/// The owner-attested `verify_across_fill_after_close` + `finalize_fill` pair —
+/// the recovery shape used after Across reclaims the fill-status PDA.
+fn fallback_finalize_ixs(d: &Dest) -> Vec<Instruction> {
+    let relay_data = sample_relay_data(d.route, d.mint, SOURCE_CHAIN_ID, AMOUNT);
+    let relay_hash = relay_hash_for(&relay_data);
+    let verified_fill = derive_verified_fill_pda(&relay_hash).0;
+    vec![
+        verify_across_fill_after_close_ix(
+            &d.payer.pubkey(),
+            &d.owner.pubkey(),
+            &d.route,
+            relay_hash,
+            relay_data,
+        ),
         finalize_fill_ix(
             &d.payer.pubkey(),
             &d.route,
@@ -236,6 +277,20 @@ fn dest_verify_finalize_2ix_fits_without_alt() {
     assert!(
         size <= PACKET_DATA_SIZE,
         "verify+finalize without ALT is {size} bytes, exceeds {PACKET_DATA_SIZE}-byte packet limit",
+    );
+}
+
+#[test]
+fn dest_owner_fallback_finalize_2ix_fits_with_alt() {
+    let d = dest();
+    let ixs = fallback_finalize_ixs(&d);
+    let alt = representative_lookup_table(&ixs);
+    let size = serialized_len(&compile_v0_with_owner(&d, &ixs, &[alt]));
+
+    println!("dest owner fallback+finalize 2-IX with ALT: {size} / {PACKET_DATA_SIZE} bytes");
+    assert!(
+        size <= PACKET_DATA_SIZE,
+        "owner fallback+finalize with ALT is {size} bytes, exceeds {PACKET_DATA_SIZE}-byte packet limit",
     );
 }
 
