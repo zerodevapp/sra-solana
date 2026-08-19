@@ -80,8 +80,16 @@ pub fn spl(recipient: Pubkey, amount_bps: u16) -> SolanaAction {
     }
 }
 
-/// The mock-swap account template: five pinned slots then relayer routing.
 pub fn mock_swap_template() -> AccountTemplate {
+    mock_swap_template_for_output_program(TOKEN_PROGRAM_ID)
+}
+
+pub fn mock_swap_template_for_output_program(output_token_program: Pubkey) -> AccountTemplate {
+    let output_token_program_role = if output_token_program == TOKEN_PROGRAM_ID {
+        SlotRole::Fixed(FixedRole::TokenProgram)
+    } else {
+        SlotRole::Free
+    };
     AccountTemplate {
         slots: vec![
             SlotRole::Fixed(FixedRole::TokenProgram), // input token program
@@ -89,7 +97,7 @@ pub fn mock_swap_template() -> AccountTemplate {
             SlotRole::Fixed(FixedRole::Source),
             SlotRole::Fixed(FixedRole::Destination),
             SlotRole::Fixed(FixedRole::OutputMint),
-            SlotRole::Free, // output_token_program
+            output_token_program_role,
             SlotRole::Free, // input_mint
             SlotRole::Free, // pool_authority
             SlotRole::Free, // pool_input
