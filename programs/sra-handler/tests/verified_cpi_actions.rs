@@ -637,8 +637,12 @@ fn verified_cpi_missing_quote_rejected() {
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
 }
 
+// --------------------------------------------------------------------------
+// Soft fail (recoverable) and deferred-feature gates
+// --------------------------------------------------------------------------
+
 #[test]
-fn verified_cpi_missing_quote_with_missing_destination_rejected() {
+fn verified_cpi_quote_precedes_missing_destination_soft_failure() {
     let mut svm = setup_svm();
     let quoter = Keypair::new();
     let s = stage(
@@ -649,18 +653,20 @@ fn verified_cpi_missing_quote_with_missing_destination_rejected() {
         false,
     );
     let expiry = now(&svm) + 3_600;
-    let exec = execute_actions_ix_full(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
-        &s.input_mint,
-        s.verified_metas(s.destination),
-    );
+    let exec = || {
+        execute_actions_ix_full(
+            &s.payer.pubkey(),
+            &s.route,
+            FILL_ID,
+            vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+            &s.input_mint,
+            s.verified_metas(s.destination),
+        )
+    };
 
     let err = send_ix_expect_err(
         &mut svm,
-        exec,
+        exec(),
         &s.payer,
         &[],
         "missing signed quote rejected before pinned-account soft failure",
@@ -668,37 +674,9 @@ fn verified_cpi_missing_quote_with_missing_destination_rejected() {
     assert_eq!(err, custom_error_at(0, SraError::InvalidPriceSignature));
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
     assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
-}
 
-// --------------------------------------------------------------------------
-// Soft fail (recoverable) and deferred-feature gates
-// --------------------------------------------------------------------------
-
-#[test]
-fn verified_cpi_missing_destination_ata_soft_fails() {
-    let mut svm = setup_svm();
-    let quoter = Keypair::new();
-    // Destination ATA NOT created.
-    let s = stage(
-        &mut svm,
-        &quoter,
-        OutKind::Legacy,
-        |input, output, program, q| vec![verified_cpi(input, output, program, 10_000, signed(q))],
-        false,
-    );
-    let expiry = now(&svm) + 3_600;
     let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
-    let exec = execute_actions_ix_full(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
-        &s.input_mint,
-        s.verified_metas(s.destination),
-    );
-
-    // Soft fail returns Ok and persists ActionsFailed; funds stay staged.
-    send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[])
+    send_instructions(&mut svm, &[ed_ix, exec()], &s.payer, &[])
         .expect("missing destination ATA -> ActionsFailed, not abort");
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
     assert_eq!(
