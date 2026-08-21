@@ -113,6 +113,24 @@ fn stage(
     make_actions: impl FnOnce(Pubkey, Pubkey, Pubkey, Pubkey) -> Vec<SolanaAction>,
     create_destination: bool,
 ) -> Staged {
+    stage_with_vault_amount(
+        svm,
+        quoter,
+        out_kind,
+        VAULT,
+        make_actions,
+        create_destination,
+    )
+}
+
+fn stage_with_vault_amount(
+    svm: &mut litesvm::LiteSVM,
+    quoter: &Keypair,
+    out_kind: OutKind,
+    vault_amount: u64,
+    make_actions: impl FnOnce(Pubkey, Pubkey, Pubkey, Pubkey) -> Vec<SolanaAction>,
+    create_destination: bool,
+) -> Staged {
     let payer = funded_keypair(svm, 100 * SOL);
     let owner = funded_keypair(svm, 100 * SOL);
     // The bridged input is always legacy SPL (`expected_mint`).
@@ -157,7 +175,14 @@ fn stage(
 
     let (execution_authority, _) = derive_execution_authority_pda(&route);
     let execution_vault = derive_ata(&execution_authority, &input_mint);
-    mint_to(svm, &payer, &payer, &input_mint, &execution_vault, VAULT);
+    mint_to(
+        svm,
+        &payer,
+        &payer,
+        &input_mint,
+        &execution_vault,
+        vault_amount,
+    );
 
     let (scratch_authority, _) = derive_scratch_authority_pda(&route);
     let scratch = create_ata(svm, &payer, &scratch_authority, &input_mint);
@@ -185,8 +210,13 @@ fn stage(
         ata
     };
 
-    let fill_receipt =
-        seed_fill_receipt_with_status(svm, &route, FILL_ID, VAULT, ExecutionStatus::Finalized);
+    let fill_receipt = seed_fill_receipt_with_status(
+        svm,
+        &route,
+        FILL_ID,
+        vault_amount,
+        ExecutionStatus::Finalized,
+    );
 
     Staged {
         payer,
@@ -344,6 +374,61 @@ fn verified_cpi_rejects_scratch_control_mutations() {
         assert_eq!(fetch_token_balance(&svm, &s.destination), 0);
         assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
     }
+}
+
+fn assert_zero_input_scratch_mutation_reverts(mutation: mock_swap::ScratchMutation) {
+    let mut svm = setup_svm();
+    let quoter = Keypair::new();
+    let recipient = Pubkey::new_unique();
+    let s = stage_with_vault_amount(
+        &mut svm,
+        &quoter,
+        OutKind::Legacy,
+        1,
+        |input, output, program, q| {
+            vec![
+                spl(recipient, 9_999),
+                verified_cpi(input, output, program, 1, signed(q)),
+            ]
+        },
+        true,
+    );
+    let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.input_mint);
+    let expiry = now(&svm) + 3_600;
+    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message_at(1, 0, 0, expiry));
+    let mut remaining = vec![AccountMeta::new(recipient_ata, false)];
+    remaining.extend(s.verified_metas(s.destination));
+    let exec = execute_actions_ix_full(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        vec![runtime(swap_with_mutation_data(0, 0, mutation), 0, expiry)],
+        &s.input_mint,
+        remaining,
+    );
+
+    let err = send_instructions_expect_err(&mut svm, &[ed_ix, exec], &s.payer, &[]);
+    assert_eq!(err, exec_error(SraError::ScratchControlChanged));
+
+    let scratch = svm.get_account(&s.scratch).expect("scratch exists");
+    let scratch = anchor_spl::token::spl_token::state::Account::unpack(&scratch.data)
+        .expect("valid scratch token account");
+    assert_eq!(scratch.owner, s.scratch_authority);
+    assert_eq!(scratch.close_authority, COption::None);
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), 1);
+    assert_eq!(fetch_token_balance(&svm, &recipient_ata), 0);
+    assert_eq!(fetch_token_balance(&svm, &s.destination), 0);
+    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+}
+
+#[test]
+fn verified_cpi_zero_input_owner_change_reverts() {
+    assert_zero_input_scratch_mutation_reverts(mock_swap::ScratchMutation::Owner);
+}
+
+#[test]
+fn verified_cpi_zero_input_close_authority_change_reverts() {
+    assert_zero_input_scratch_mutation_reverts(mock_swap::ScratchMutation::CloseAuthority);
 }
 
 /// A callee that consumes only part of the staged input while still clearing
@@ -642,10 +727,9 @@ fn verified_cpi_missing_quote_rejected() {
 // --------------------------------------------------------------------------
 
 #[test]
-fn verified_cpi_missing_destination_ata_soft_fails() {
+fn verified_cpi_quote_precedes_missing_destination_soft_failure() {
     let mut svm = setup_svm();
     let quoter = Keypair::new();
-    // Destination ATA NOT created.
     let s = stage(
         &mut svm,
         &quoter,
@@ -654,18 +738,30 @@ fn verified_cpi_missing_destination_ata_soft_fails() {
         false,
     );
     let expiry = now(&svm) + 3_600;
-    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
-    let exec = execute_actions_ix_full(
-        &s.payer.pubkey(),
-        &s.route,
-        FILL_ID,
-        vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
-        &s.input_mint,
-        s.verified_metas(s.destination),
-    );
+    let exec = || {
+        execute_actions_ix_full(
+            &s.payer.pubkey(),
+            &s.route,
+            FILL_ID,
+            vec![runtime(swap_data(VAULT, 1_000_000), 1_000_000, expiry)],
+            &s.input_mint,
+            s.verified_metas(s.destination),
+        )
+    };
 
-    // Soft fail returns Ok and persists ActionsFailed; funds stay staged.
-    send_instructions(&mut svm, &[ed_ix, exec], &s.payer, &[])
+    let err = send_ix_expect_err(
+        &mut svm,
+        exec(),
+        &s.payer,
+        &[],
+        "missing signed quote rejected before pinned-account soft failure",
+    );
+    assert_eq!(err, custom_error_at(0, SraError::InvalidPriceSignature));
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
+    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+
+    let ed_ix = ed25519_quote_ix(&quoter, &s.quote_message(VAULT, 1_000_000, expiry));
+    send_instructions(&mut svm, &[ed_ix, exec()], &s.payer, &[])
         .expect("missing destination ATA -> ActionsFailed, not abort");
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
     assert_eq!(

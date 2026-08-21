@@ -314,22 +314,6 @@ pub(crate) fn run_committed_actions<'info>(
                     .ok_or(SraError::ActionAccountMismatch)?;
                 runtime_index += 1;
 
-                // Soft-fail on handler-pinned-account state (recoverable), like SplTransfer.
-                let scratch_info = fixed_slot(slots, account_template, FixedRole::Source)?;
-                let dest_info = fixed_slot(slots, account_template, FixedRole::Destination)?;
-                let scratch_ok = scratch_account_usable(
-                    scratch_info,
-                    &token_program,
-                    &expected_mint,
-                    &scratch_auth,
-                );
-                let dest_ok = token_account_usable(dest_info, &output_token_program, output_mint);
-                if source_frozen || !scratch_ok || !dest_ok {
-                    any_action_would_fail = true;
-                    cursor = end;
-                    continue;
-                }
-
                 // Verify the authorized, unexpired signed quote (hard reject).
                 let input_amount = vault_amount_for_bps(vault_snapshot, *input_bps);
                 let context_hash = action_context_hash(&route_key, &fill_id, action_index as u8);
@@ -349,16 +333,30 @@ pub(crate) fn run_committed_actions<'info>(
                     now,
                 )?;
 
-                plan.push(Planned::Verified {
-                    action_index,
-                    program_index,
-                    slots_start,
-                    slots_len,
-                    input_amount,
-                    min_out: runtime.min_amount_out,
-                    runtime_index: runtime_index - 1,
-                    output_token_program,
-                });
+                // Soft-fail on handler-pinned-account state (recoverable), like SplTransfer.
+                let scratch_info = fixed_slot(slots, account_template, FixedRole::Source)?;
+                let dest_info = fixed_slot(slots, account_template, FixedRole::Destination)?;
+                let scratch_ok = scratch_account_usable(
+                    scratch_info,
+                    &token_program,
+                    &expected_mint,
+                    &scratch_auth,
+                );
+                let dest_ok = token_account_usable(dest_info, &output_token_program, output_mint);
+                if source_frozen || !scratch_ok || !dest_ok {
+                    any_action_would_fail = true;
+                } else {
+                    plan.push(Planned::Verified {
+                        action_index,
+                        program_index,
+                        slots_start,
+                        slots_len,
+                        input_amount,
+                        min_out: runtime.min_amount_out,
+                        runtime_index: runtime_index - 1,
+                        output_token_program,
+                    });
+                }
                 cursor = end;
             }
         }
