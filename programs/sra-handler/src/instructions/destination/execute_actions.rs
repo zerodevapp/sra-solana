@@ -110,7 +110,6 @@ pub(crate) enum ActionOutcome {
 /// `ExecuteActions` and `RetryActions`.
 pub(crate) struct ActionAccounts<'a, 'info> {
     pub route: &'a Account<'info, SolanaSraRoute>,
-    pub fill_amount: u64,
     pub expected_mint: &'a Account<'info, Mint>,
     pub execution_authority: &'a UncheckedAccount<'info>,
     pub execution_vault: &'a Account<'info, TokenAccount>,
@@ -143,7 +142,6 @@ pub(crate) fn handler<'info>(
     let route = ctx.accounts.route.key();
     let accounts = ActionAccounts {
         route: &ctx.accounts.route,
-        fill_amount: ctx.accounts.fill_receipt.amount,
         expected_mint: &ctx.accounts.expected_mint,
         execution_authority: &ctx.accounts.execution_authority,
         execution_vault: &ctx.accounts.execution_vault,
@@ -153,7 +151,7 @@ pub(crate) fn handler<'info>(
         execution_authority_bump: ctx.bumps.execution_authority,
     };
 
-    match run_committed_actions(&accounts, fill_id, &verified_runtimes)? {
+    match run_committed_actions(&accounts, &ctx.accounts.fill_receipt, &verified_runtimes)? {
         ActionOutcome::Succeeded => {
             ctx.accounts.fill_receipt.execution_status = ExecutionStatus::ActionsSucceeded;
             emit!(ActionsExecuted { route, fill_id });
@@ -172,7 +170,7 @@ pub(crate) fn handler<'info>(
 /// after the whole batch; hard-rejects return `Err`. Caller sets the receipt status.
 pub(crate) fn run_committed_actions<'info>(
     accounts: &ActionAccounts<'_, 'info>,
-    fill_id: [u8; 32],
+    fill_receipt: &FillReceipt,
     verified_runtimes: &[VerifiedCpiRuntime],
 ) -> Result<ActionOutcome> {
     let action_config: &[SolanaAction] = &accounts.route.action_config;
@@ -183,10 +181,10 @@ pub(crate) fn run_committed_actions<'info>(
     let token_program = accounts.token_program.key();
     let decimals = accounts.expected_mint.decimals;
     require!(
-        accounts.execution_vault.amount >= accounts.fill_amount,
+        accounts.execution_vault.amount >= fill_receipt.amount,
         SraError::InsufficientVaultBalance
     );
-    let fill_amount = accounts.fill_amount;
+    let fill_amount = fill_receipt.amount;
     // A frozen source vault would abort every movement — fail soft, not hard-abort.
     let source_frozen = accounts.execution_vault.state == AccountState::Frozen;
 
@@ -320,7 +318,8 @@ pub(crate) fn run_committed_actions<'info>(
 
                 // Verify the authorized, unexpired signed quote (hard reject).
                 let input_amount = fill_amount_for_bps(fill_amount, *input_bps);
-                let context_hash = action_context_hash(&route_key, &fill_id, action_index as u8);
+                let context_hash =
+                    action_context_hash(&route_key, &fill_receipt.fill_id, action_index as u8);
                 let message = signed_quote_message(
                     &context_hash,
                     input_mint,
@@ -468,6 +467,8 @@ pub(crate) fn run_committed_actions<'info>(
     Ok(ActionOutcome::Succeeded)
 }
 
+/// Every accepted plan has `amount_bps <= BPS_DENOMINATOR`, so the quotient is
+/// `<= fill_amount` and the `u64` cast is lossless. Division floors and can leave dust.
 fn fill_amount_for_bps(fill_amount: u64, amount_bps: u16) -> u64 {
     ((fill_amount as u128 * amount_bps as u128) / BPS_DENOMINATOR as u128) as u64
 }

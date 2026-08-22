@@ -8,22 +8,22 @@ use crate::types::actions::{AccountTemplate, MinOut};
 /// `VerifiedCpi` (dynamic accounts, outcome-verified).
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Debug, InitSpace)]
 pub enum SolanaAction {
-    /// Transfer a percentage of execution vault balance to a recipient.
+    /// Transfer a percentage of the finalized fill amount to a recipient.
     SplTransfer {
         recipient: Pubkey,
-        /// Basis points of the execution vault balance to transfer (e.g., 10000 = 100%).
+        /// Basis points of the finalized fill amount to transfer (e.g., 10000 = 100%).
         amount_bps: u16,
     },
-    /// Spend a fraction of the vault through a pinned program, verifying the
-    /// post-fee output by balance-diff against `min_out`. Routing accounts are
-    /// relayer-supplied (`Free` slots); the value-bearing slots are pinned by
-    /// `account_template`.
+    /// Spend a fraction of the finalized fill amount through a pinned program,
+    /// verifying the post-fee output by balance-diff against `min_out`. Routing
+    /// accounts are relayer-supplied (`Free` slots); the value-bearing slots are
+    /// pinned by `account_template`.
     VerifiedCpi {
         /// Pinned program — checked loader-owned-executable + exact pubkey at execution.
         program_id: Pubkey,
         /// Token spent from the vault (usually `expected_mint`).
         input_mint: Pubkey,
-        /// Basis points of the vault moved into the scratch source — the input bound.
+        /// Basis points of the finalized fill amount moved into the scratch source.
         input_bps: u16,
         account_template: AccountTemplate,
         /// Fungible receipt the engine balance-diffs (swap output, vault share, LST, …).

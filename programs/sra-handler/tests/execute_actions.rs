@@ -221,8 +221,6 @@ fn execute_actions_full_bps_sum_floor_dust_stays_staged() {
     let mut svm = setup_svm();
     let r1 = Pubkey::new_unique();
     let r2 = Pubkey::new_unique();
-    // A 100%-summing split that floors on both legs: the dust unit stays
-    // staged past terminal success, swept by any later fill or sibling recovery.
     let s = stage(&mut svm, vec![spl(r1, 6_000), spl(r2, 4_000)], AMOUNT + 1);
     let a1 = create_ata(&mut svm, &s.payer, &r1, &s.mint);
     let a2 = create_ata(&mut svm, &s.payer, &r2, &s.mint);
