@@ -72,7 +72,7 @@ pub fn status(svm: &LiteSVM, fill_receipt: &Pubkey) -> ExecutionStatus {
     fetch_fill_receipt(svm, fill_receipt).execution_status
 }
 
-/// A `SplTransfer` action sending `amount_bps` of the vault snapshot to `recipient`.
+/// A `SplTransfer` action sending `amount_bps` of the fill amount to `recipient`.
 pub fn spl(recipient: Pubkey, amount_bps: u16) -> SolanaAction {
     SolanaAction::SplTransfer {
         recipient,

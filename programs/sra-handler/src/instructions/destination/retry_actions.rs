@@ -63,6 +63,7 @@ pub(crate) fn handler<'info>(
     let route = ctx.accounts.route.key();
     let accounts = ActionAccounts {
         route: &ctx.accounts.route,
+        fill_amount: ctx.accounts.fill_receipt.amount,
         expected_mint: &ctx.accounts.expected_mint,
         execution_authority: &ctx.accounts.execution_authority,
         execution_vault: &ctx.accounts.execution_vault,

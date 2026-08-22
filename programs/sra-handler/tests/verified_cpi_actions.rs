@@ -235,7 +235,7 @@ fn stage_with_vault_amount(
     }
 }
 
-/// One signed-quote VerifiedCpi action spending the whole vault, legacy output,
+/// One signed-quote VerifiedCpi action spending the whole fill amount, legacy output,
 /// destination created.
 fn staged_single(svm: &mut litesvm::LiteSVM, quoter: &Keypair) -> Staged {
     stage(
@@ -779,7 +779,7 @@ fn spl_and_verified_cpi_compose() {
     let mut svm = setup_svm();
     let quoter = Keypair::new();
     let recipient = Pubkey::new_unique();
-    // 30% straight transfer + 70% swapped — both off the start-of-run snapshot.
+    // 30% straight transfer + 70% swapped from the fill amount.
     let s = stage(
         &mut svm,
         &quoter,

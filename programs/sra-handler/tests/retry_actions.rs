@@ -123,6 +123,52 @@ fn retry_actions_after_fix_succeeds() {
 }
 
 #[test]
+fn retry_actions_limits_spending_to_fill_receipt_amount() {
+    let mut svm = setup_svm();
+    let recipient = Pubkey::new_unique();
+    let s = stage(
+        &mut svm,
+        vec![spl(recipient, 10_000)],
+        1,
+        ExecutionStatus::ActionsFailed,
+    );
+    let sibling_fill_id = [8u8; 32];
+    let sibling_receipt = seed_fill_receipt_with_status(
+        &mut svm,
+        &s.route,
+        sibling_fill_id,
+        AMOUNT,
+        ExecutionStatus::Finalized,
+    );
+    mint_to(
+        &mut svm,
+        &s.payer,
+        &s.payer,
+        &s.mint,
+        &s.execution_vault,
+        AMOUNT,
+    );
+    let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
+
+    let retry = retry_actions_ix(
+        &s.owner.pubkey(),
+        &s.route,
+        FILL_ID,
+        &s.mint,
+        &[recipient_ata],
+    );
+    send_ix(&mut svm, retry, &s.payer, &[&s.owner]).expect("retry should succeed");
+
+    assert_eq!(fetch_token_balance(&svm, &recipient_ata), 1);
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
+    assert_eq!(
+        status(&svm, &s.fill_receipt),
+        ExecutionStatus::ActionsSucceeded
+    );
+    assert_eq!(status(&svm, &sibling_receipt), ExecutionStatus::Finalized);
+}
+
+#[test]
 fn retry_actions_emits_actions_retried() {
     let mut svm = setup_svm();
     let recipient = Pubkey::new_unique();
