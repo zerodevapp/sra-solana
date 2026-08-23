@@ -1578,7 +1578,7 @@
               {
                 "name": "amount_bps",
                 "docs": [
-                  "Basis points of the execution vault balance to transfer (e.g., 10000 = 100%)."
+                  "Basis points of the finalized fill amount to transfer (e.g., 10000 = 100%)."
                 ],
                 "type": "u16"
               }
@@ -1604,7 +1604,7 @@
               {
                 "name": "input_bps",
                 "docs": [
-                  "Basis points of the vault moved into the scratch source — the input bound."
+                  "Basis points of the finalized fill amount moved into the scratch source."
                 ],
                 "type": "u16"
               },

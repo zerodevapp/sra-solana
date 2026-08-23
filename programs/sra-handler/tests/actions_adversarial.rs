@@ -5,8 +5,8 @@
 //! the *attack* angles into one place and pins the two properties an attacker cares
 //! about: every rejection (1) preserves the staged funds and (2) leaves the receipt
 //! in a recoverable/retryable state. It also pins the fund-safety invariants that
-//! span instructions — the bps drain bound, snapshot determinism under an
-//! unsolicited top-up, the scratch isolation that bounds a relayer-supplied account
+//! span instructions — the receipt-scoped bps drain bound, unsolicited top-up
+//! isolation, the scratch isolation that bounds a relayer-supplied account
 //! set, and the stranded-funds inventory (every PDA-owned token account has an
 //! owner-reachable exit from every pre-terminal state).
 //!
@@ -144,11 +144,11 @@ fn finalize_route(
 // SplTransfer adversarial — drain bound, commitment defense, soft-fail recovery
 // ==========================================================================
 
-/// Each `SplTransfer` amount is a fraction of one start-of-run vault snapshot,
+/// Each `SplTransfer` amount is a fraction of the finalized fill amount,
 /// and `create_route` requires the committed bps (both variants) to sum to
-/// exactly 100% — so a full-allocation route distributes exactly the snapshot
+/// exactly 100% — so a full-allocation route distributes exactly the fill amount
 /// (minus floor dust), never more. Serves the same over-draw-safety goal as the
-/// EVM cap-to-balance, by a snapshot×bps mechanism.
+/// EVM cap-to-balance.
 #[test]
 fn action_drain_at_full_bps_drains_vault_without_overflow() {
     let mut svm = setup_svm();
@@ -156,7 +156,7 @@ fn action_drain_at_full_bps_drains_vault_without_overflow() {
     let owner = funded_keypair(&mut svm, 100 * SOL);
     let mint = create_mint(&mut svm, &payer, &payer.pubkey(), DECIMALS);
 
-    // Four recipients splitting the whole vault: 2500 + 2500 + 2500 + 2500 = 10000.
+    // Four recipients splitting the fill amount: 2500 + 2500 + 2500 + 2500 = 10000.
     let recipients: Vec<Keypair> = (0..4).map(|_| Keypair::new()).collect();
     let atas: Vec<Pubkey> = recipients
         .iter()
@@ -331,13 +331,8 @@ fn recipient_ata_frozen_soft_fails_then_recovers() {
     assert_eq!(fetch_token_balance(&svm, &fr.execution_vault), 0);
 }
 
-/// bps amounts are a fraction of a single start-of-run snapshot of the *current*
-/// vault balance — so an unsolicited top-up (tokens donated to the execution vault
-/// after finalize) is folded into the snapshot deterministically: a Σbps == 100%
-/// config distributes the donation along with the bridged amount, never strands it
-/// and never miscomputes.
 #[test]
-fn unsolicited_topup_of_execution_vault_distributed_deterministically() {
+fn unsolicited_topup_does_not_expand_fill_spend() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 100 * SOL);
     let owner = funded_keypair(&mut svm, 100 * SOL);
@@ -383,15 +378,10 @@ fn unsolicited_topup_of_execution_vault_distributed_deterministically() {
         &payer,
         &[],
     )
-    .expect("execute over the topped-up snapshot should succeed");
+    .expect("execute with excess vault balance should succeed");
 
-    // The whole snapshot (bridged + donation) is distributed at Σbps == 100%.
-    assert_eq!(
-        fetch_token_balance(&svm, &recipient_ata),
-        VAULT + donation,
-        "donation distributed deterministically with the snapshot"
-    );
-    assert_eq!(fetch_token_balance(&svm, &fr.execution_vault), 0);
+    assert_eq!(fetch_token_balance(&svm, &recipient_ata), VAULT);
+    assert_eq!(fetch_token_balance(&svm, &fr.execution_vault), donation);
     assert_eq!(
         status(&svm, &fr.fill_receipt),
         ExecutionStatus::ActionsSucceeded
@@ -928,7 +918,7 @@ fn verified_cpi_signing_authority_substitution_rejected() {
     assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
 }
 
-/// The scratch bound caps the spend at `input_bps` of the vault no matter how
+/// The scratch bound caps the spend at `input_bps` of the fill amount no matter how
 /// greedy the inner program: here it pulls the full scratch (50%), yet the
 /// SplTransfer running AFTER it still pays its 50% in full — the other half was
 /// never reachable from inside the CPI.
@@ -941,7 +931,7 @@ fn verified_cpi_hostile_account_set_bounded_by_input_bps() {
         vec![verified_cpi(i, o, 5_000, q), spl(sink.pubkey(), 5_000)]
     });
     let sink_ata = create_ata(&mut svm, &s.payer, &sink.pubkey(), &s.input_mint);
-    let input_amount = VAULT / 2; // 50% of the snapshot is moved into scratch.
+    let input_amount = VAULT / 2; // 50% of the fill amount is moved into scratch.
 
     let expiry = now(&svm) + 3_600;
     let out_amount = 1_000_000;
@@ -967,7 +957,7 @@ fn verified_cpi_hostile_account_set_bounded_by_input_bps() {
     assert_eq!(
         fetch_token_balance(&svm, &sink_ata),
         VAULT - input_amount,
-        "at most input_bps of the vault is ever exposed to the CPI"
+        "at most input_bps of the fill amount is ever exposed to the CPI"
     );
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), 0);
     assert_eq!(
@@ -1039,7 +1029,7 @@ fn verified_cpi_prefunded_scratch_swept_to_vault() {
 }
 
 /// A combined over-commitment spanning variants (`SplTransfer{100%}` +
-/// `VerifiedCpi{100%}` of one snapshot) can never execute; the create-time bps
+/// `VerifiedCpi{100%}` of one fill amount) can never execute; the create-time bps
 /// sum covers BOTH variants, so it is refused before funds can stage.
 #[test]
 fn mixed_variant_combined_draw_over_100pct_rejected_at_create() {
@@ -1051,7 +1041,7 @@ fn mixed_variant_combined_draw_over_100pct_rejected_at_create() {
     let recipient = Keypair::new();
     let quoter = Keypair::new();
 
-    // [ SplTransfer 100%, VerifiedCpi input 100% ] = 200% of the snapshot.
+    // [ SplTransfer 100%, VerifiedCpi input 100% ] = 200% of the fill amount.
     let over = vec![
         spl(recipient.pubkey(), 10_000),
         verified_cpi(input_mint, output_mint, 10_000, quoter.pubkey()),

@@ -72,7 +72,7 @@ pub(crate) fn handler<'info>(
         execution_authority_bump: ctx.bumps.execution_authority,
     };
 
-    match run_committed_actions(&accounts, fill_id, &verified_runtimes)? {
+    match run_committed_actions(&accounts, &ctx.accounts.fill_receipt, &verified_runtimes)? {
         ActionOutcome::Succeeded => {
             // The re-run applied. ActionsRetried is the retry-path success event
             // (the counterpart of execute_actions' ActionsExecuted), not a re-attempt.

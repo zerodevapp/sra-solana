@@ -60,7 +60,7 @@ const ORIGIN_CHAIN_ID: u64 = 42_161;
 /// How far past the fork's current time the fill deadline sits.
 const FILL_DEADLINE_WINDOW_SECS: i64 = 3_600;
 /// The route commits a 60/40 SplTransfer split. Distinct per-recipient
-/// amounts keep "pay bps of the snapshot" distinguishable from "pay the whole
+/// amounts keep "pay bps of the fill amount" distinguishable from "pay the whole
 /// vault" (with a single 100% action every correct and incorrect amount
 /// formula produces the same number).
 const SPLIT_A_BPS: u16 = 6_000;
