@@ -3,7 +3,7 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 use sra_common::{
     constants::{
         cctp_domain_for_chain, CCTP_MESSAGE_TRANSMITTER_V2_ID, CCTP_TOKEN_MESSENGER_MINTER_V2_ID,
-        FINALITY_THRESHOLD_FINALIZED,
+        FINALITY_THRESHOLD_FAST, FINALITY_THRESHOLD_FINALIZED,
     },
     seeds::{SEED_ADAPTER_AUTHORITY, SEED_MINT_NONCE},
     source_deposit::{decode_output_amount, CctpDepositParams, PrepareParams},
@@ -22,9 +22,12 @@ fn prepared_nonce(mint_nonce: &MintNonce) -> Result<u64> {
         .ok_or(error!(CctpAdapterError::PreparedNonceUnavailable))
 }
 
-fn validate_finality_threshold(min_finality_threshold: u32) -> Result<()> {
+pub(crate) fn validate_finality_threshold(min_finality_threshold: u32) -> Result<()> {
     require!(
-        (1..=FINALITY_THRESHOLD_FINALIZED).contains(&min_finality_threshold),
+        matches!(
+            min_finality_threshold,
+            FINALITY_THRESHOLD_FAST | FINALITY_THRESHOLD_FINALIZED
+        ),
         CctpAdapterError::InvalidFinalityThreshold
     );
     Ok(())
@@ -229,7 +232,9 @@ mod tests {
     fn finality_threshold_bounds() {
         let err = validate_finality_threshold(0).expect_err("0 must reject");
         assert_eq!(err, error!(CctpAdapterError::InvalidFinalityThreshold));
-        validate_finality_threshold(1).expect("1 is the lower bound");
+        for value in [1, 999, 1001, 1999] {
+            assert!(validate_finality_threshold(value).is_err());
+        }
         validate_finality_threshold(FINALITY_THRESHOLD_FAST).expect("fast is canonical");
         validate_finality_threshold(FINALITY_THRESHOLD_FINALIZED).expect("2000 is the upper bound");
         let err = validate_finality_threshold(2001).expect_err("2001 must reject");

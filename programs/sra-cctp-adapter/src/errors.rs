@@ -11,7 +11,7 @@ pub enum CctpAdapterError {
     #[msg("Target chain has no CCTP domain mapping")]
     UnsupportedChain,
 
-    #[msg("CCTP finality threshold must be within 1..=2000")]
+    #[msg("CCTP finality threshold must be 1000 or 2000")]
     InvalidFinalityThreshold,
 
     #[msg("Committed output exceeds the net input after the CCTP max fee")]
@@ -48,4 +48,13 @@ pub enum CctpAdapterError {
 
     #[msg("Executed fee exceeds max fee, or max fee is not below the amount")]
     FeeExceedsMaxFee,
+
+    #[msg("Invalid managed policy configuration")]
+    InvalidPolicyConfiguration,
+    #[msg("Managed policy arithmetic overflow")]
+    ArithmeticOverflow,
+    #[msg("Invalid or enrolled execution lane")]
+    InvalidExecutionLane,
+    #[msg("Initial enrollment must immediately follow creation of the handler route")]
+    FreshRouteRequired,
 }

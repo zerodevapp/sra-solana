@@ -594,3 +594,98 @@ fn verify_cctp_mint_paused_route_allowed() {
     assert_eq!(vf.route, dest.route);
     assert_eq!(vf.amount, AMOUNT);
 }
+
+#[test]
+fn verify_cctp_mint_canonical_finality_pairs() {
+    for (requested, executed, accepted) in [
+        (1000, 1000, true),
+        (1000, 2000, true),
+        (2000, 2000, true),
+        (2000, 1000, false),
+        (0, 2000, false),
+        (1, 2000, false),
+        (999, 2000, false),
+        (1001, 2000, false),
+        (1999, 2000, false),
+        (2001, 2001, false),
+        (1000, 1001, false),
+        (1000, 2001, false),
+    ] {
+        let mut svm = setup_svm();
+        let dest = setup(&mut svm);
+        plant_used_nonce(&mut svm, NONCE, true);
+        let mut message = dest.canonical();
+        message.min_finality_threshold = requested;
+        message.finality_threshold_executed = executed;
+        assert_eq!(
+            dest.verify(&mut svm, &message).is_ok(),
+            accepted,
+            "{requested}/{executed}"
+        );
+    }
+}
+
+#[test]
+fn verify_cctp_mint_requires_unenrolled_canonical_lane() {
+    for case in [
+        "missing",
+        "wrong",
+        "system_data",
+        "wrong_owner",
+        "enrolled_empty",
+        "enrolled_occupied",
+    ] {
+        let mut svm = setup_svm();
+        let dest = setup(&mut svm);
+        plant_used_nonce(&mut svm, NONCE, true);
+        let bytes = dest.canonical().encode();
+        let signature = sign_attestation(&bytes, &[&dest.attester]);
+        let mut ix =
+            verify_cctp_mint_ix(&dest.payer.pubkey(), &dest.route, NONCE, bytes, signature);
+        let lane = derive_execution_lane(&dest.route);
+        match case {
+            "missing" => {
+                ix.accounts.pop();
+            }
+            "wrong" => {
+                ix.accounts.last_mut().unwrap().pubkey = Pubkey::new_unique();
+            }
+            _ => {
+                let owner = match case {
+                    "system_data" => solana_system_interface::program::ID,
+                    "wrong_owner" => PROGRAM_ID,
+                    _ => CCTP_ADAPTER_PROGRAM_ID,
+                };
+                let mut data =
+                    solana_sdk::hash::hash(b"account:ExecutionLane").to_bytes()[..8].to_vec();
+                data.extend_from_slice(PROGRAM_ID.as_ref());
+                data.extend_from_slice(dest.route.as_ref());
+                data.push(u8::from(case == "enrolled_occupied"));
+                if case == "enrolled_occupied" {
+                    data.extend_from_slice(&[42; 96]);
+                }
+                if case == "wrong_owner" {
+                    data.clear();
+                }
+                svm.set_account(
+                    lane,
+                    solana_sdk::account::Account {
+                        lamports: svm.minimum_balance_for_rent_exemption(data.len()),
+                        data,
+                        owner,
+                        executable: false,
+                        rent_epoch: 0,
+                    },
+                )
+                .unwrap();
+            }
+        }
+        assert!(
+            send_ix(&mut svm, ix, &dest.payer, &[]).is_err(),
+            "{case} lane must reject"
+        );
+        assert!(svm
+            .get_account(&derive_cctp_verified_fill_pda(&NONCE).0)
+            .is_none());
+    }
+}

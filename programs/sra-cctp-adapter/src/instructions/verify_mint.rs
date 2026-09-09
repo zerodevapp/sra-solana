@@ -36,7 +36,7 @@ use sra_common::{
 };
 
 use crate::events::CctpMintVerified;
-use crate::state::VerifiedFill;
+use crate::state::{VerifiedFill, SEED_EXECUTION_LANE};
 use crate::utils::attestation::verify_attestation_signatures;
 use crate::utils::cctp_state::{deserialize_message_transmitter, deserialize_used_nonce};
 use crate::utils::message::{BurnMessage, CctpMessage, BURN_MESSAGE_BODY_VERSION};
@@ -78,6 +78,14 @@ pub struct VerifyCctpMint<'info> {
     )]
     pub verified_fill: Box<Account<'info, VerifiedFill>>,
     pub system_program: Program<'info, System>,
+    /// CHECK: The canonical lane must be system-owned and empty to permit legacy evidence.
+    #[account(
+        seeds = [SEED_EXECUTION_LANE, sra_common::ID.as_ref(), route.key().as_ref()],
+        bump,
+        constraint = execution_lane.owner == &anchor_lang::system_program::ID
+            && execution_lane.data_is_empty() @ CctpAdapterError::InvalidExecutionLane,
+    )]
+    pub execution_lane: UncheckedAccount<'info>,
 }
 
 pub fn handler(
@@ -111,6 +119,12 @@ pub fn handler(
     //    `used_nonce` / seeds `verified_fill`) to the message; recipient ==
     //    TokenMessengerMinter requires the used nonce to be a *burn* message.
     let msg = CctpMessage::parse(&message)?;
+    super::execute_deposit::validate_finality_threshold(msg.min_finality_threshold())?;
+    super::execute_deposit::validate_finality_threshold(msg.finality_threshold_executed())?;
+    require!(
+        msg.finality_threshold_executed() >= msg.min_finality_threshold(),
+        CctpAdapterError::InvalidFinalityThreshold
+    );
     require!(
         msg.version() == state.version,
         CctpAdapterError::MalformedMessage

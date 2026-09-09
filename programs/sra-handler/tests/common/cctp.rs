@@ -170,6 +170,14 @@ pub fn sample_cctp_message(
     }
 }
 
+pub fn derive_execution_lane(route: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"execution_lane", PROGRAM_ID.as_ref(), route.as_ref()],
+        &CCTP_ADAPTER_PROGRAM_ID,
+    )
+    .0
+}
+
 /// Build a `verify_cctp_mint` instruction. The transmitter, used-nonce, and
 /// verified-fill accounts are all derived from the real seeds, exactly as the
 /// on-chain constraints require.
@@ -189,6 +197,7 @@ pub fn verify_cctp_mint_ix(
             route: *route,
             verified_fill: derive_cctp_verified_fill_pda(&nonce).0,
             system_program: system_program::ID,
+            execution_lane: derive_execution_lane(route),
         }
         .to_account_metas(None),
         data: sra_cctp_adapter::instruction::VerifyCctpMint {

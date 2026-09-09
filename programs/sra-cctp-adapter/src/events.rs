@@ -35,3 +35,22 @@ pub struct CustodyRecovered {
     pub owner: Pubkey,
     pub amount: u64,
 }
+
+#[event]
+pub struct SourcePolicyInitialized {
+    pub source_policy: Pubkey,
+    pub sra_config: Pubkey,
+}
+
+#[event]
+pub struct SourcePolicyUpdated {
+    pub source_policy: Pubkey,
+    pub nonce: u64,
+}
+
+#[event]
+pub struct DestinationPolicyInitialized {
+    pub destination_policy: Pubkey,
+    pub handler_route: Pubkey,
+    pub execution_lane: Pubkey,
+}

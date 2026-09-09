@@ -636,7 +636,7 @@ fn execute_deposit_cctp_finality_threshold_bounds() {
     let fx = ValidatePrepareFixture::new(&mut svm);
     let prepare = default_prepare_params(&fx);
 
-    for rejected in [0u32, FINALITY_THRESHOLD_FINALIZED + 1] {
+    for rejected in [0u32, 1, 999, 1001, 1999, 2001] {
         let mut cctp = cctp_params_for(&prepare);
         cctp.min_finality_threshold = rejected;
         let err = invoke_with_cctp_params(&mut svm, &fx, prepare.clone(), cctp)
@@ -646,15 +646,15 @@ fn execute_deposit_cctp_finality_threshold_bounds() {
         adapter_error_at_1(
             err,
             CctpAdapterError::InvalidFinalityThreshold,
-            "threshold outside 1..=2000 must reject",
+            "noncanonical threshold must reject",
         );
     }
 
-    for accepted in [1u32, FINALITY_THRESHOLD_FINALIZED] {
+    for accepted in [FINALITY_THRESHOLD_FAST, FINALITY_THRESHOLD_FINALIZED] {
         let mut cctp = cctp_params_for(&prepare);
         cctp.min_finality_threshold = accepted;
         invoke_with_cctp_params(&mut svm, &fx, prepare.clone(), cctp)
-            .expect("bounds 1 and 2000 must be accepted");
+            .expect("Fast and Standard must be accepted");
     }
 }
 

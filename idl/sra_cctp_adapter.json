@@ -393,6 +393,525 @@
       ]
     },
     {
+      "name": "initialize_destination_policy",
+      "discriminator": [
+        120,
+        65,
+        214,
+        216,
+        175,
+        112,
+        3,
+        83
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "handler_route"
+          ]
+        },
+        {
+          "name": "handler_route"
+        },
+        {
+          "name": "mint",
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        },
+        {
+          "name": "destination_policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  115,
+                  116,
+                  105,
+                  110,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "handler_route"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "salt"
+              }
+            ]
+          }
+        },
+        {
+          "name": "custody",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "destination_policy"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "execution_lane",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  101,
+                  99,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110,
+                  95,
+                  108,
+                  97,
+                  110,
+                  101
+                ]
+              },
+              {
+                "kind": "const",
+                "value": [
+                  92,
+                  4,
+                  188,
+                  181,
+                  107,
+                  183,
+                  243,
+                  190,
+                  62,
+                  5,
+                  91,
+                  94,
+                  2,
+                  252,
+                  137,
+                  8,
+                  124,
+                  142,
+                  6,
+                  233,
+                  158,
+                  155,
+                  223,
+                  111,
+                  134,
+                  251,
+                  227,
+                  254,
+                  49,
+                  214,
+                  172,
+                  92
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "handler_route"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "salt",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "sender",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "source_token",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "finality",
+          "type": "u32"
+        },
+        {
+          "name": "max_fee",
+          "type": "u64"
+        },
+        {
+          "name": "min_burn",
+          "type": "u64"
+        },
+        {
+          "name": "max_burn",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize_source_policy",
+      "discriminator": [
+        79,
+        211,
+        86,
+        179,
+        6,
+        43,
+        212,
+        17
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "sra_config",
+            "address_book_root"
+          ]
+        },
+        {
+          "name": "sra_config"
+        },
+        {
+          "name": "mint",
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        },
+        {
+          "name": "address_book_root",
+          "relations": [
+            "address_book_entry"
+          ]
+        },
+        {
+          "name": "address_book_entry"
+        },
+        {
+          "name": "source_policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  111,
+                  117,
+                  114,
+                  99,
+                  101,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "sra_config"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "salt"
+              }
+            ]
+          }
+        },
+        {
+          "name": "custody",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "source_policy"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "handler_data",
+          "type": {
+            "defined": {
+              "name": "SourceHandlerData"
+            }
+          }
+        },
+        {
+          "name": "salt",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "executor",
+          "type": "pubkey"
+        },
+        {
+          "name": "finality",
+          "type": "u32"
+        },
+        {
+          "name": "min_gross",
+          "type": "u64"
+        },
+        {
+          "name": "max_gross",
+          "type": "u64"
+        },
+        {
+          "name": "max_fee",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "recover_stuck_custody",
       "discriminator": [
         9,
@@ -653,6 +1172,52 @@
       "args": []
     },
     {
+      "name": "set_source_policy",
+      "discriminator": [
+        158,
+        200,
+        248,
+        138,
+        82,
+        24,
+        45,
+        93
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "sra_config"
+          ]
+        },
+        {
+          "name": "sra_config",
+          "relations": [
+            "source_policy"
+          ]
+        },
+        {
+          "name": "source_policy",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "expected_nonce",
+          "type": "u64"
+        },
+        {
+          "name": "executor",
+          "type": "pubkey"
+        },
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
       "name": "verify_cctp_mint",
       "discriminator": [
         179,
@@ -885,6 +1450,73 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "execution_lane",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  101,
+                  99,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110,
+                  95,
+                  108,
+                  97,
+                  110,
+                  101
+                ]
+              },
+              {
+                "kind": "const",
+                "value": [
+                  92,
+                  4,
+                  188,
+                  181,
+                  107,
+                  183,
+                  243,
+                  190,
+                  62,
+                  5,
+                  91,
+                  94,
+                  2,
+                  252,
+                  137,
+                  8,
+                  124,
+                  142,
+                  6,
+                  233,
+                  158,
+                  155,
+                  223,
+                  111,
+                  134,
+                  251,
+                  227,
+                  254,
+                  49,
+                  214,
+                  172,
+                  92
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "route"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -910,6 +1542,58 @@
   ],
   "accounts": [
     {
+      "name": "AddressBookEntry",
+      "discriminator": [
+        233,
+        204,
+        33,
+        29,
+        127,
+        207,
+        142,
+        91
+      ]
+    },
+    {
+      "name": "AddressBookRoot",
+      "discriminator": [
+        144,
+        206,
+        154,
+        225,
+        141,
+        251,
+        36,
+        143
+      ]
+    },
+    {
+      "name": "DestinationPolicy",
+      "discriminator": [
+        142,
+        52,
+        183,
+        43,
+        29,
+        37,
+        34,
+        141
+      ]
+    },
+    {
+      "name": "ExecutionLane",
+      "discriminator": [
+        254,
+        65,
+        142,
+        65,
+        114,
+        169,
+        116,
+        35
+      ]
+    },
+    {
       "name": "MintNonce",
       "discriminator": [
         207,
@@ -933,6 +1617,19 @@
         152,
         16,
         120
+      ]
+    },
+    {
+      "name": "SourcePolicy",
+      "discriminator": [
+        24,
+        217,
+        227,
+        206,
+        105,
+        165,
+        197,
+        91
       ]
     },
     {
@@ -1001,6 +1698,45 @@
         234,
         18
       ]
+    },
+    {
+      "name": "DestinationPolicyInitialized",
+      "discriminator": [
+        191,
+        110,
+        158,
+        229,
+        172,
+        125,
+        253,
+        187
+      ]
+    },
+    {
+      "name": "SourcePolicyInitialized",
+      "discriminator": [
+        114,
+        200,
+        141,
+        22,
+        5,
+        188,
+        102,
+        132
+      ]
+    },
+    {
+      "name": "SourcePolicyUpdated",
+      "discriminator": [
+        140,
+        154,
+        7,
+        77,
+        252,
+        120,
+        161,
+        44
+      ]
     }
   ],
   "errors": [
@@ -1022,7 +1758,7 @@
     {
       "code": 6003,
       "name": "InvalidFinalityThreshold",
-      "msg": "CCTP finality threshold must be within 1..=2000"
+      "msg": "CCTP finality threshold must be 1000 or 2000"
     },
     {
       "code": 6004,
@@ -1078,6 +1814,26 @@
       "code": 6014,
       "name": "FeeExceedsMaxFee",
       "msg": "Executed fee exceeds max fee, or max fee is not below the amount"
+    },
+    {
+      "code": 6015,
+      "name": "InvalidPolicyConfiguration",
+      "msg": "Invalid managed policy configuration"
+    },
+    {
+      "code": 6016,
+      "name": "ArithmeticOverflow",
+      "msg": "Managed policy arithmetic overflow"
+    },
+    {
+      "code": 6017,
+      "name": "InvalidExecutionLane",
+      "msg": "Invalid or enrolled execution lane"
+    },
+    {
+      "code": 6018,
+      "name": "FreshRouteRequired",
+      "msg": "Initial enrollment must immediately follow creation of the handler route"
     }
   ],
   "types": [
@@ -1100,6 +1856,91 @@
                 }
               }
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ActiveFill",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "destination_policy",
+            "type": "pubkey"
+          },
+          {
+            "name": "cctp_receipt",
+            "type": "pubkey"
+          },
+          {
+            "name": "handler_receipt",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AddressBookEntry",
+      "docs": [
+        "Per-address-book-root owner-managed (source_mint, chain, target_token) -> decimals registry.",
+        "`target_decimals = 0` is a tombstone/disabled entry, mirroring zeroed EVM TokenInfo.",
+        "PDA seeds: [\"address_book\", address_book_root, source_mint, chain_id.to_le_bytes(), target_token]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "address_book_root",
+            "type": "pubkey"
+          },
+          {
+            "name": "source_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "target_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "target_token",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_decimals",
+            "docs": [
+              "Decimals of `target_token` on the target chain. Serves three roles:",
+              "(a) canonical record for downstream amount math, (b) EVM-parity",
+              "existence sentinel, (c) tombstone marker when `0`. Tokens with 0",
+              "real decimals are not representable here — not a concern for USDC",
+              "and other bridgeable tokens, but worth knowing."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AddressBookRoot",
+      "docs": [
+        "Owner-managed source address-book namespace. The root account is initialized",
+        "explicitly and then committed inside immutable `SourceHandlerData`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
           }
         ]
       }
@@ -1292,6 +2133,123 @@
           {
             "name": "amount",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DestinationPolicy",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "handler_route",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "salt",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "sender",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "source_token",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "source_domain",
+            "type": "u32"
+          },
+          {
+            "name": "finality",
+            "type": "u32"
+          },
+          {
+            "name": "max_fee",
+            "type": "u64"
+          },
+          {
+            "name": "min_burn",
+            "type": "u64"
+          },
+          {
+            "name": "max_burn",
+            "type": "u64"
+          },
+          {
+            "name": "queued_liability",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DestinationPolicyInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "destination_policy",
+            "type": "pubkey"
+          },
+          {
+            "name": "handler_route",
+            "type": "pubkey"
+          },
+          {
+            "name": "execution_lane",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ExecutionLane",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "handler_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "handler_route",
+            "type": "pubkey"
+          },
+          {
+            "name": "active",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "ActiveFill"
+                }
+              }
+            }
           }
         ]
       }
@@ -1555,6 +2513,151 @@
           {
             "name": "bump",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SourceHandlerData",
+      "docs": [
+        "Owner-installed source policy. Committed at SRA install via",
+        "`handler_data_hash` (folded into the SRA's PDA identity) and re-supplied,",
+        "then re-authenticated, on every deposit. The routing tuple",
+        "(`target_chain_id` / `recipient` / `target_token`) is part of the immutable",
+        "identity, mirroring the",
+        "EVM `RouteConfig` that `trigger()` reads from storage and a caller cannot",
+        "redirect (see `sra-stx/src/handler/SRAHandler.sol`). Every deposit must echo",
+        "this exact routing in `PrepareParams`; `validate_and_prepare` rejects any",
+        "divergence. Changing the route means a new SRA at a new address — the Solana",
+        "analogue of the EVM clone-proxy + `_onInstall` model."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "address_book_root",
+            "type": "pubkey"
+          },
+          {
+            "name": "target_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "recipient",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_token",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "allowed_slippage_bps",
+            "type": "u16"
+          },
+          {
+            "name": "allowed_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SourcePolicy",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sra_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "salt",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "executor",
+            "type": "pubkey"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "finality",
+            "type": "u32"
+          },
+          {
+            "name": "min_gross",
+            "type": "u64"
+          },
+          {
+            "name": "max_gross",
+            "type": "u64"
+          },
+          {
+            "name": "max_fee",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SourcePolicyInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "source_policy",
+            "type": "pubkey"
+          },
+          {
+            "name": "sra_config",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SourcePolicyUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "source_policy",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
           }
         ]
       }
