@@ -185,6 +185,8 @@ impl SurfpoolSourceFixture {
             &sra_config,
             handler_data.clone(),
             salt,
+            owner.pubkey(),
+            USDC_MINT,
         );
         send_legacy_transaction(&rpc, "initialize_sra", &payer, &[&owner], &[initialize_ix])?;
         surfpool_log(format!("bootstrap: initialized SRA config {}", sra_config));

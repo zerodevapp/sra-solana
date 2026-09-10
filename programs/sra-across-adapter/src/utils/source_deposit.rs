@@ -63,8 +63,18 @@ mod tests {
         SraConfig {
             owner: Pubkey::new_unique(),
             final_handler: Pubkey::new_unique(),
-            handler_data_hash: [0x11u8; 32],
+            handler_data: sra_common::types::SourceHandlerData {
+                address_book_root: Pubkey::new_unique(),
+                target_chain_id: 42_161,
+                recipient: evm_bytes32(0x33),
+                target_token: evm_bytes32(0xbb),
+                allowed_slippage_bps: 50,
+                allowed_adapters: vec![crate::ID],
+            },
             salt: [0x55u8; 32],
+            initiator: Pubkey::new_unique(),
+            active: true,
+            deposit_nonce: 0,
             bump: 254,
         }
     }

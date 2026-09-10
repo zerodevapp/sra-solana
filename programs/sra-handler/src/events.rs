@@ -7,6 +7,20 @@ pub struct SraInitialized {
     pub final_handler: Pubkey,
     pub handler_data_hash: [u8; 32],
     pub salt: [u8; 32],
+    pub initiator: Pubkey,
+    pub active: bool,
+    pub deposit_nonce: u64,
+    pub initial_source_mint: Pubkey,
+    pub initial_source_vault: Pubkey,
+}
+
+#[event]
+pub struct SraManaged {
+    pub sra_config: Pubkey,
+    pub owner: Pubkey,
+    pub initiator: Pubkey,
+    pub active: bool,
+    pub deposit_nonce: u64,
 }
 
 #[event]
