@@ -68,6 +68,12 @@ pub struct SraConfig {
     pub bump: u8,
 }
 
+impl SraConfig {
+    pub fn last_triggered_nonce(&self) -> Option<u64> {
+        self.deposit_nonce.checked_sub(1)
+    }
+}
+
 /// Owner-managed source address-book namespace. The root account is initialized
 /// explicitly and then committed inside immutable `SourceHandlerData`.
 #[account]
@@ -107,6 +113,33 @@ impl AddressBookEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sample_sra_config(deposit_nonce: u64) -> SraConfig {
+        SraConfig {
+            owner: Pubkey::new_unique(),
+            final_handler: Pubkey::new_unique(),
+            handler_data: SourceHandlerData {
+                address_book_root: Pubkey::new_unique(),
+                target_chain_id: 42_161,
+                recipient: [0x33; 32],
+                target_token: [0xAB; 32],
+                allowed_slippage_bps: 50,
+                allowed_adapters: vec![Pubkey::new_unique()],
+            },
+            salt: [0x55; 32],
+            initiator: Pubkey::new_unique(),
+            active: true,
+            deposit_nonce,
+            bump: 254,
+        }
+    }
+
+    #[test]
+    fn last_triggered_nonce_handles_zero_and_positive_boundaries() {
+        assert_eq!(sample_sra_config(0).last_triggered_nonce(), None);
+        assert_eq!(sample_sra_config(1).last_triggered_nonce(), Some(0));
+        assert_eq!(sample_sra_config(7).last_triggered_nonce(), Some(6));
+    }
 
     #[test]
     fn source_handler_data_init_space() {

@@ -14,13 +14,6 @@ use crate::events::CctpDepositExecuted;
 use crate::utils::token_messenger_minter_v2::{cpi as cctp_cpi, types::DepositForBurnParams};
 use crate::CctpAdapterError;
 
-fn triggered_nonce(sra_config: &SraConfig) -> Result<u64> {
-    sra_config
-        .deposit_nonce
-        .checked_sub(1)
-        .ok_or(error!(CctpAdapterError::TriggeredNonceUnavailable))
-}
-
 fn validate_finality_threshold(min_finality_threshold: u32) -> Result<()> {
     require!(
         matches!(
@@ -79,11 +72,7 @@ pub struct ExecuteDepositCctp<'info> {
     )]
     pub adapter_custody: Box<Account<'info, TokenAccount>>,
     /// The burn decreases the supply, so the mint is writable.
-    #[account(
-        mut,
-        address = USDC_MINT,
-        constraint = input_mint.decimals == 6 @ CctpAdapterError::InvalidInputMint,
-    )]
+    #[account(mut, address = USDC_MINT)]
     pub input_mint: Box<Account<'info, Mint>>,
     /// CHECK: CCTP burn-signing authority PDA, cheap to pin by seeds.
     #[account(seeds = [b"sender_authority"], bump, seeds::program = cctp_program.key())]
@@ -147,7 +136,11 @@ pub fn handler(ctx: Context<ExecuteDepositCctp>, params: CctpDepositParams) -> R
 
     validate_quote_after_max_fee(&prepare, params.max_fee)?;
 
-    let triggered_nonce = triggered_nonce(&ctx.accounts.sra_config)?;
+    let triggered_nonce = ctx
+        .accounts
+        .sra_config
+        .last_triggered_nonce()
+        .ok_or(error!(CctpAdapterError::TriggeredNonceUnavailable))?;
 
     let sra_config_key = ctx.accounts.sra_config.key();
     let adapter_authority_bump = [ctx.bumps.adapter_authority];
@@ -215,41 +208,6 @@ pub fn handler(ctx: Context<ExecuteDepositCctp>, params: CctpDepositParams) -> R
 mod tests {
     use super::*;
     use sra_common::constants::{FINALITY_THRESHOLD_FAST, NO_FEE_BPS_OVERRIDE};
-
-    fn sample_sra_config() -> SraConfig {
-        SraConfig {
-            owner: Pubkey::new_unique(),
-            final_handler: sra_common::ID,
-            handler_data: sra_common::types::SourceHandlerData {
-                address_book_root: Pubkey::new_unique(),
-                target_chain_id: 42_161,
-                recipient: [0x33; 32],
-                target_token: [0xAB; 32],
-                allowed_slippage_bps: 50,
-                allowed_adapters: vec![crate::ID],
-            },
-            salt: [0x55; 32],
-            initiator: Pubkey::new_unique(),
-            active: true,
-            deposit_nonce: 1,
-            bump: 254,
-        }
-    }
-
-    #[test]
-    fn triggered_nonce_rejects_zero() {
-        let mut sra_config = sample_sra_config();
-        sra_config.deposit_nonce = 0;
-        let err = triggered_nonce(&sra_config).expect_err("zero nonce must reject");
-        assert_eq!(err, error!(CctpAdapterError::TriggeredNonceUnavailable));
-    }
-
-    #[test]
-    fn triggered_nonce_uses_pre_increment_value() {
-        let mut sra_config = sample_sra_config();
-        sra_config.deposit_nonce = 7;
-        assert_eq!(triggered_nonce(&sra_config).unwrap(), 6);
-    }
 
     #[test]
     fn finality_threshold_bounds() {

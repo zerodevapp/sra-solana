@@ -1579,13 +1579,11 @@ pub fn execute_deposit_cctp_ix(
 pub fn execute_deposit_across_ix(
     fee_payer: &Pubkey,
     fx: &PassiveFixture,
-    sra_config: &SraConfig,
     prepare: &PrepareParams,
     params: AcrossDepositParams,
 ) -> Instruction {
     let bundle = sra_across_adapter::utils::build_deposit_now_bundle(
         &fx.accounts.adapter_authority,
-        sra_config,
         &fx.source_mint,
         prepare,
         &params,

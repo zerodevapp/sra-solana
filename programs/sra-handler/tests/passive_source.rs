@@ -13,7 +13,6 @@ use solana_sdk::{
     transaction::{TransactionError, VersionedTransaction},
 };
 use sra_across_adapter::AcrossAdapterError;
-use sra_cctp_adapter::CctpAdapterError;
 use sra_common::{
     abi::u256_from_u64,
     constants::FINALITY_THRESHOLD_FAST,
@@ -295,7 +294,6 @@ fn passive_across_happy_path() {
     let execute_ix = execute_deposit_across_ix(
         &fx.payer.pubkey(),
         &fx,
-        &fetch_sra_config(&svm, &fx.sra_config),
         &params,
         AcrossDepositParams::from_prepare(&params, Pubkey::new_unique(), 600, 120).unwrap(),
     );
@@ -423,7 +421,6 @@ fn passive_sra_nonce_progresses_across_adapters_and_mints() {
     };
     let across_params = sample_prepare_params(across.target_token);
     let (trigger, execute) = across_pair(
-        &svm,
         &across,
         across_params.clone(),
         AcrossDepositParams::from_prepare(&across_params, Pubkey::new_unique(), 600, 120).unwrap(),
@@ -538,19 +535,12 @@ fn cctp_pair(
 }
 
 fn across_pair(
-    svm: &LiteSVM,
     fx: &common::PassiveFixture,
     params: PrepareParams,
     across: AcrossDepositParams,
     fee_ata: Option<Pubkey>,
 ) -> (Instruction, Instruction) {
-    let execute = execute_deposit_across_ix(
-        &fx.payer.pubkey(),
-        fx,
-        &fetch_sra_config(svm, &fx.sra_config),
-        &params,
-        across,
-    );
+    let execute = execute_deposit_across_ix(&fx.payer.pubkey(), fx, &params, across);
     let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let trigger = trigger_ix(
         &fx.payer.pubkey(),
@@ -1082,7 +1072,7 @@ fn passive_cctp_finality_and_quote_matrix() {
 }
 
 #[test]
-fn passive_cctp_rejects_noncanonical_or_non_six_decimal_mint() {
+fn passive_cctp_rejects_noncanonical_mint() {
     let mut svm = setup_svm();
     let base = common::PassiveFixture::new(&mut svm);
     let other_mint = create_mint(&mut svm, &base.payer, &base.payer.pubkey(), 6);
@@ -1136,32 +1126,6 @@ fn passive_cctp_rejects_noncanonical_or_non_six_decimal_mint() {
         &[&other.initiator, &event],
         Some(event.pubkey()),
         "noncanonical CCTP mint must reject",
-    );
-
-    let mut svm = setup_svm();
-    let fx = common::PassiveFixture::new(&mut svm);
-    let mut mint_account = svm.get_account(&fx.source_mint).unwrap();
-    let mut mint = litesvm_token::spl_token::state::Mint::unpack(&mint_account.data).unwrap();
-    mint.decimals = 5;
-    mint.pack_into_slice(&mut mint_account.data);
-    svm.set_account(fx.source_mint, mint_account).unwrap();
-    let mut params = sample_prepare_params(fx.target_token);
-    params.output_amount = u256_from_u64(9_950_000);
-    let (trigger, execute, event) = cctp_pair(&fx, params.clone(), cctp_params_for(&params), None);
-    let error = assert_rejected_unchanged(
-        &mut svm,
-        &fx,
-        &[trigger, execute],
-        &[&fx.initiator, &event],
-        Some(event.pubkey()),
-        "non-six-decimal CCTP mint must reject",
-    );
-    assert_eq!(
-        error,
-        TransactionError::InstructionError(
-            1,
-            InstructionError::Custom(CctpAdapterError::InvalidInputMint.into()),
-        )
     );
 }
 
@@ -1218,7 +1182,7 @@ fn passive_across_rejects_timing_delegate_and_cpi_failure_atomically() {
             exclusivity,
         )
         .unwrap();
-        let (trigger, execute) = across_pair(&svm, &fx, params.clone(), across, None);
+        let (trigger, execute) = across_pair(&fx, params.clone(), across, None);
         assert_rejected_unchanged(
             &mut svm,
             &fx,
@@ -1231,7 +1195,7 @@ fn passive_across_rejects_timing_delegate_and_cpi_failure_atomically() {
 
     let across =
         AcrossDepositParams::from_prepare(&params, Pubkey::new_unique(), 600, 120).unwrap();
-    let (_, mut execute) = across_pair(&svm, &fx, params.clone(), across, None);
+    let (_, mut execute) = across_pair(&fx, params.clone(), across, None);
     execute.accounts[10].pubkey = Pubkey::new_unique();
     let trigger = trigger_ix(
         &fx.payer.pubkey(),
@@ -1265,7 +1229,7 @@ fn passive_across_rejects_timing_delegate_and_cpi_failure_atomically() {
     freeze_token_account(&mut svm, &fx.across_vault);
     let across =
         AcrossDepositParams::from_prepare(&params, Pubkey::new_unique(), 600, 120).unwrap();
-    let (trigger, execute) = across_pair(&svm, &fx, params, across, Some(fee_ata));
+    let (trigger, execute) = across_pair(&fx, params, across, Some(fee_ata));
     assert_rejected_unchanged(
         &mut svm,
         &fx,

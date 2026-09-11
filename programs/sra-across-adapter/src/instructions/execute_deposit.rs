@@ -11,13 +11,6 @@ use sra_common::{
 use crate::events::AcrossDepositExecuted;
 use crate::{utils::source_deposit::build_deposit_now_bundle, AcrossAdapterError};
 
-fn triggered_nonce(sra_config: &SraConfig) -> Result<u64> {
-    sra_config
-        .deposit_nonce
-        .checked_sub(1)
-        .ok_or(error!(AcrossAdapterError::TriggeredNonceUnavailable))
-}
-
 #[derive(Accounts)]
 pub struct ExecuteDepositAcross<'info> {
     #[account(mut)]
@@ -83,10 +76,13 @@ pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) 
         &params,
     )?;
 
-    let triggered_nonce = triggered_nonce(&ctx.accounts.sra_config)?;
+    let triggered_nonce = ctx
+        .accounts
+        .sra_config
+        .last_triggered_nonce()
+        .ok_or(error!(AcrossAdapterError::TriggeredNonceUnavailable))?;
     let deposit = build_deposit_now_bundle(
         &ctx.accounts.adapter_authority.key(),
-        &ctx.accounts.sra_config,
         &ctx.accounts.input_mint.key(),
         &prepare,
         &params,
@@ -163,44 +159,4 @@ pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) 
     });
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn sample_sra_config() -> SraConfig {
-        SraConfig {
-            owner: Pubkey::new_unique(),
-            final_handler: sra_common::ID,
-            handler_data: sra_common::types::SourceHandlerData {
-                address_book_root: Pubkey::new_unique(),
-                target_chain_id: 42_161,
-                recipient: [0x33; 32],
-                target_token: [0xAB; 32],
-                allowed_slippage_bps: 50,
-                allowed_adapters: vec![crate::ID],
-            },
-            salt: [0x55; 32],
-            initiator: Pubkey::new_unique(),
-            active: true,
-            deposit_nonce: 1,
-            bump: 254,
-        }
-    }
-
-    #[test]
-    fn triggered_nonce_rejects_zero() {
-        let mut sra_config = sample_sra_config();
-        sra_config.deposit_nonce = 0;
-        let err = triggered_nonce(&sra_config).expect_err("zero nonce must reject");
-        assert_eq!(err, error!(AcrossAdapterError::TriggeredNonceUnavailable));
-    }
-
-    #[test]
-    fn triggered_nonce_uses_pre_increment_value() {
-        let mut sra_config = sample_sra_config();
-        sra_config.deposit_nonce = 7;
-        assert_eq!(triggered_nonce(&sra_config).unwrap(), 6);
-    }
 }

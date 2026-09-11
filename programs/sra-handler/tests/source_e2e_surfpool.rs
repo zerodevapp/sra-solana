@@ -322,7 +322,6 @@ impl SurfpoolSourceFixture {
         let execute_ix = execute_deposit_across_ix(
             &self.payer.pubkey(),
             &self.passive_fixture(params.target_chain_id),
-            &read_anchor_account::<SraConfig>(&self.rpc, &self.sra_config)?,
             &params,
             AcrossDepositParams::from_prepare(
                 &params,
