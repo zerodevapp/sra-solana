@@ -17,7 +17,7 @@ use solana_sdk::{
 const STRANDED_AMOUNT: u64 = 500_000;
 
 /// Simulate a stranded refund: create the custody ATA and mint into it.
-fn strand_funds(svm: &mut LiteSVM, fx: &ValidatePrepareFixture, amount: u64) {
+fn strand_funds(svm: &mut LiteSVM, fx: &PassiveFixture, amount: u64) {
     create_ata(
         svm,
         &fx.payer,
@@ -36,7 +36,7 @@ fn strand_funds(svm: &mut LiteSVM, fx: &ValidatePrepareFixture, amount: u64) {
     }
 }
 
-fn recover_ix(fx: &ValidatePrepareFixture, owner: &Pubkey, owner_ata: &Pubkey) -> Instruction {
+fn recover_ix(fx: &PassiveFixture, owner: &Pubkey, owner_ata: &Pubkey) -> Instruction {
     recover_stuck_custody_ix(
         &fx.adapter_program,
         &fx.payer.pubkey(),
@@ -52,7 +52,7 @@ fn recover_ix(fx: &ValidatePrepareFixture, owner: &Pubkey, owner_ata: &Pubkey) -
 #[test]
 fn recover_stuck_custody_returns_funds_to_owner() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     strand_funds(&mut svm, &fx, STRANDED_AMOUNT);
 
     let before = fetch_token_balance(&svm, &fx.owner_ata);
@@ -76,7 +76,7 @@ fn recover_stuck_custody_returns_funds_to_owner() {
 #[test]
 fn recover_stuck_custody_nothing_to_recover_rejected() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     strand_funds(&mut svm, &fx, 0);
 
     let ix = recover_ix(&fx, &fx.owner.pubkey(), &fx.owner_ata);
@@ -96,7 +96,7 @@ fn recover_stuck_custody_nothing_to_recover_rejected() {
 #[test]
 fn recover_stuck_custody_non_owner_rejected() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     strand_funds(&mut svm, &fx, STRANDED_AMOUNT);
 
     // A fresh funded keypair that is NOT the SRA owner, with its own ATA so the
@@ -132,7 +132,7 @@ fn recover_stuck_custody_non_owner_rejected() {
 #[test]
 fn across_recover_stuck_custody_returns_funds_to_owner() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new_with_adapter_policy(
+    let fx = PassiveFixture::new_with_adapter_policy(
         &mut svm,
         ADAPTER_PROGRAM_ID,
         50,
@@ -155,7 +155,7 @@ fn across_recover_stuck_custody_returns_funds_to_owner() {
 #[test]
 fn across_recover_stuck_custody_nothing_to_recover_rejected() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new_with_adapter_policy(
+    let fx = PassiveFixture::new_with_adapter_policy(
         &mut svm,
         ADAPTER_PROGRAM_ID,
         50,

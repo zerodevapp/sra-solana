@@ -7,9 +7,9 @@ use sra_common::{errors::SraError, instruction_data::instruction_data_hash};
 // the attestation checks will read the wrong accounts and silently become invalid.
 // Slots relied on below:
 //   - index 2: `sra_config`
-//   - index 6: `input_mint`
+//   - index 5: `input_mint`
 const ADAPTER_ACCT_SRA_CONFIG: usize = 2;
-const ADAPTER_ACCT_INPUT_MINT: usize = 6;
+const ADAPTER_ACCT_INPUT_MINT: usize = 5;
 const MIN_ADAPTER_ACCOUNTS: usize = ADAPTER_ACCT_INPUT_MINT + 1;
 
 pub(crate) fn verify_next_adapter_ix(
@@ -77,7 +77,6 @@ mod tests {
                 ),
                 AccountMeta::new_readonly(sra_config, false),
                 AccountMeta::new_readonly(Pubkey::new_unique(), false),
-                AccountMeta::new_readonly(Pubkey::new_unique(), false),
                 AccountMeta::new(Pubkey::new_unique(), false),
                 AccountMeta::new_readonly(source_mint, false),
             ],
@@ -103,7 +102,6 @@ mod tests {
                     false,
                 ),
                 AccountMeta::new_readonly(sra_config, false),
-                AccountMeta::new_readonly(Pubkey::new_unique(), false),
                 AccountMeta::new_readonly(Pubkey::new_unique(), false),
                 AccountMeta::new(Pubkey::new_unique(), false),
                 AccountMeta::new_readonly(source_mint, false),

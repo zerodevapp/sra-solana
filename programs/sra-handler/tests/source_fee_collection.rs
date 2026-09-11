@@ -1,4 +1,4 @@
-//! Source protocol fee collection through `validate_and_prepare`.
+//! Source protocol fee collection through `trigger`.
 //!
 //! The fee is resolved from the single global admin fee state,
 //! equality-checked against the attested
@@ -33,7 +33,7 @@ const ANCHOR_CONSTRAINT_SEEDS: u32 = ErrorCode::ConstraintSeeds as u32;
 const ANCHOR_CONSTRAINT_TOKEN_OWNER: u32 = ErrorCode::ConstraintTokenOwner as u32;
 const ANCHOR_ACCOUNT_NOT_INITIALIZED: u32 = ErrorCode::AccountNotInitialized as u32;
 
-fn fee_params(fx: &ValidatePrepareFixture, protocol_fee_amount: u64) -> PrepareParams {
+fn fee_params(fx: &PassiveFixture, protocol_fee_amount: u64) -> PrepareParams {
     let mut params = sample_prepare_params(fx.target_token);
     params.protocol_fee_amount = protocol_fee_amount;
     params.output_amount = u256_from_u64(FEE_TEST_OUTPUT);
@@ -58,11 +58,11 @@ fn expect_custom_error(
 
 /// Rejections must not consume the nonce or move any balance (the whole tx
 /// reverts atomically; this pins the fail-closed contract).
-fn assert_deposit_state_untouched(svm: &LiteSVM, fx: &ValidatePrepareFixture, fee_ata: &Pubkey) {
+fn assert_deposit_state_untouched(svm: &LiteSVM, fx: &PassiveFixture, fee_ata: &Pubkey) {
     assert_eq!(
-        fetch_token_balance(svm, &fx.owner_ata),
-        OWNER_STARTING_BALANCE,
-        "owner ATA untouched on rejection",
+        fetch_token_balance(svm, &fx.accounts.sra_vault),
+        SRA_STARTING_BALANCE,
+        "SRA vault untouched on rejection",
     );
     assert_eq!(
         fetch_token_balance(svm, fee_ata),
@@ -71,11 +71,11 @@ fn assert_deposit_state_untouched(svm: &LiteSVM, fx: &ValidatePrepareFixture, fe
     );
     assert_eq!(
         fetch_mint_supply(svm, &fx.source_mint),
-        OWNER_STARTING_BALANCE,
+        SRA_STARTING_BALANCE,
         "nothing burned on rejection",
     );
     assert_eq!(
-        current_nonce(svm, &fx.accounts.mint_nonce),
+        current_nonce(svm, &fx.sra_config),
         0,
         "nonce not consumed on rejection",
     );
@@ -84,7 +84,7 @@ fn assert_deposit_state_untouched(svm: &LiteSVM, fx: &ValidatePrepareFixture, fe
 #[test]
 fn fee_collected_happy_path() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     let params = fee_params(&fx, DEFAULT_FEE);
@@ -93,19 +93,14 @@ fn fee_collected_happy_path() {
         .expect("fee-bearing deposit must succeed");
 
     assert_eq!(
-        fetch_token_balance(&svm, &fx.owner_ata),
-        OWNER_STARTING_BALANCE - INPUT,
-        "owner pays the gross input",
-    );
-    assert_eq!(
         fetch_token_balance(&svm, &fee_ata),
         DEFAULT_FEE,
         "fee recipient ATA receives the protocol fee",
     );
     assert_eq!(
         fetch_token_balance(&svm, &fx.accounts.sra_vault),
-        0,
-        "SRA vault is transient",
+        SRA_STARTING_BALANCE - INPUT,
+        "SRA vault retains the unselected balance",
     );
     assert_eq!(
         fetch_token_balance(&svm, &fx.accounts.adapter_custody),
@@ -114,12 +109,12 @@ fn fee_collected_happy_path() {
     );
     assert_eq!(
         fetch_mint_supply(&svm, &fx.source_mint),
-        OWNER_STARTING_BALANCE - (INPUT - DEFAULT_FEE),
+        SRA_STARTING_BALANCE - (INPUT - DEFAULT_FEE),
         "the NET of the protocol fee is burned",
     );
-    assert_eq!(current_nonce(&svm, &fx.accounts.mint_nonce), 1);
+    assert_eq!(current_nonce(&svm, &fx.sra_config), 1);
 
-    let ev = extract_deposit_prepared(&meta.logs).expect("DepositPrepared event must be emitted");
+    let ev = extract_deposit_triggered(&meta.logs).expect("DepositTriggered event must be emitted");
     assert_eq!(ev.input_amount, INPUT, "event carries the gross input");
     assert_eq!(
         ev.protocol_fee_amount, DEFAULT_FEE,
@@ -131,7 +126,7 @@ fn fee_collected_happy_path() {
 #[test]
 fn fee_mismatch_rejected_preserves_state() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     let result = fx.invoke_with_fee_ata(&mut svm, fee_params(&fx, DEFAULT_FEE - 1), Some(fee_ata));
@@ -150,7 +145,7 @@ fn fee_mismatch_rejected_preserves_state() {
 #[test]
 fn stale_fee_after_admin_update_fails_closed() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     // Client computes against 30 bps...
@@ -181,7 +176,7 @@ fn stale_fee_after_admin_update_fails_closed() {
 #[test]
 fn sponsor_skips_fee_when_admin_allows() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, true);
 
     let mut params = fee_params(&fx, 0);
@@ -192,16 +187,16 @@ fn sponsor_skips_fee_when_admin_allows() {
 
     assert_eq!(
         fetch_mint_supply(&svm, &fx.source_mint),
-        OWNER_STARTING_BALANCE - INPUT,
+        SRA_STARTING_BALANCE - INPUT,
         "sponsored deposit bridges (burns) the full gross input",
     );
 }
 
 #[test]
 fn sponsor_rejected_when_not_admin_allowed() {
-    // A depositor cannot self-declare sponsorship without the admin flag.
+    // An initiator cannot self-declare sponsorship without the admin flag.
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     let mut params = fee_params(&fx, 0);
@@ -220,7 +215,7 @@ fn sponsor_rejected_when_protocol_fee_config_absent() {
     // No ProtocolFeeConfig PDA = sponsorship disallowed (EVM unset storage),
     // even though a non-sponsored deposit would pay zero here anyway.
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
 
     let mut params = fee_params(&fx, 0);
     params.is_sponsor = true;
@@ -235,7 +230,7 @@ fn sponsor_rejected_when_protocol_fee_config_absent() {
 #[test]
 fn override_honored_when_allowed() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, true, false);
 
     let mut params = fee_params(&fx, 5_000); // 1_000_000 * 50 / 10_000
@@ -247,14 +242,14 @@ fn override_honored_when_allowed() {
     assert_eq!(fetch_token_balance(&svm, &fee_ata), 5_000);
     assert_eq!(
         fetch_mint_supply(&svm, &fx.source_mint),
-        OWNER_STARTING_BALANCE - (INPUT - 5_000)
+        SRA_STARTING_BALANCE - (INPUT - 5_000)
     );
 }
 
 #[test]
 fn override_without_flag_silently_ignored() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     // EVM parity: with allowOverride=false the override is ignored, not
@@ -275,7 +270,7 @@ fn override_without_flag_silently_ignored() {
 #[test]
 fn override_above_max_rejected_when_allowed() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, true, false);
 
     let mut params = fee_params(&fx, 0);
@@ -291,7 +286,7 @@ fn override_above_max_rejected_when_allowed() {
 #[test]
 fn asset_tier_applied_over_default() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
     send_instructions(
         &mut svm,
@@ -322,7 +317,7 @@ fn asset_tier_applied_over_default() {
 #[test]
 fn removed_protocol_fee_charges_zero() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
     send_instructions(
         &mut svm,
@@ -340,14 +335,14 @@ fn removed_protocol_fee_charges_zero() {
     assert_eq!(fetch_token_balance(&svm, &fee_ata), 0);
     assert_eq!(
         fetch_mint_supply(&svm, &fx.source_mint),
-        OWNER_STARTING_BALANCE - INPUT
+        SRA_STARTING_BALANCE - INPUT
     );
 }
 
 #[test]
 fn recipient_unset_charges_zero() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     // Protocol fee configured, but the global recipient stays
     // Pubkey::default() (the fixture's initial state) — fees globally off.
     send_instructions(
@@ -369,14 +364,14 @@ fn recipient_unset_charges_zero() {
 
     assert_eq!(
         fetch_mint_supply(&svm, &fx.source_mint),
-        OWNER_STARTING_BALANCE - INPUT
+        SRA_STARTING_BALANCE - INPUT
     );
 }
 
 #[test]
 fn fee_ata_missing_when_fee_positive_rejected() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     expect_custom_error(
@@ -389,7 +384,7 @@ fn fee_ata_missing_when_fee_positive_rejected() {
 #[test]
 fn fee_ata_substitution_rejected() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     // Wrong authority: the owner's own ATA (exists, right mint) — the
@@ -417,7 +412,7 @@ fn fee_ata_substitution_rejected() {
 #[test]
 fn fee_config_pda_substitution_rejected() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     // The three fee accounts are bound to committed state — substitution
@@ -458,7 +453,7 @@ fn fee_config_pda_substitution_rejected() {
 #[test]
 fn slippage_floors_on_gross_with_fee() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     // Gross floor at 50 bps slippage = 995_000. Net (997_000) would floor at
@@ -478,7 +473,7 @@ fn slippage_floors_on_gross_with_fee() {
 #[test]
 fn zero_fee_params_required_when_fee_disabled() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
 
     // No fee state at all (fixture default): a deposit claiming a positive
     // fee must FeeMismatch (the recomputed expectation is 0). No fee ATA is
@@ -493,7 +488,7 @@ fn zero_fee_params_required_when_fee_disabled() {
 #[test]
 fn legacy_zero_fee_params_unchanged() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
 
     let params = fee_params(&fx, 0);
     assert_eq!(params.protocol_fee_amount, 0);
@@ -504,6 +499,6 @@ fn legacy_zero_fee_params_unchanged() {
         .expect("zero-fee deposit flows unchanged");
     assert_eq!(
         fetch_mint_supply(&svm, &fx.source_mint),
-        OWNER_STARTING_BALANCE - INPUT
+        SRA_STARTING_BALANCE - INPUT
     );
 }

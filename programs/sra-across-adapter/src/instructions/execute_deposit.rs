@@ -4,21 +4,18 @@ use anchor_spl::{
     token::{approve_checked, ApproveChecked, Mint, Token, TokenAccount},
 };
 use sra_common::{
-    constants::ACROSS_SPOKE_POOL_ID,
-    seeds::{SEED_ADAPTER_AUTHORITY, SEED_MINT_NONCE},
-    source_deposit::AcrossDepositParams,
-    types::{MintNonce, SraConfig},
+    constants::ACROSS_SPOKE_POOL_ID, seeds::SEED_ADAPTER_AUTHORITY,
+    source_deposit::AcrossDepositParams, types::SraConfig,
 };
 
 use crate::events::AcrossDepositExecuted;
 use crate::{utils::source_deposit::build_deposit_now_bundle, AcrossAdapterError};
 
-// Recover the nonce captured before `validate_and_prepare` increments it.
-fn prepared_nonce(mint_nonce: &MintNonce) -> Result<u64> {
-    mint_nonce
-        .nonce
+fn triggered_nonce(sra_config: &SraConfig) -> Result<u64> {
+    sra_config
+        .deposit_nonce
         .checked_sub(1)
-        .ok_or(error!(AcrossAdapterError::PreparedNonceUnavailable))
+        .ok_or(error!(AcrossAdapterError::TriggeredNonceUnavailable))
 }
 
 #[derive(Accounts)]
@@ -29,12 +26,6 @@ pub struct ExecuteDepositAcross<'info> {
     #[account(address = instructions::ID)]
     pub instructions_sysvar: UncheckedAccount<'info>,
     pub sra_config: Box<Account<'info, SraConfig>>,
-    #[account(
-        seeds = [SEED_MINT_NONCE, sra_config.key().as_ref(), input_mint.key().as_ref()],
-        bump = mint_nonce.bump,
-        seeds::program = sra_common::ID,
-    )]
-    pub mint_nonce: Box<Account<'info, MintNonce>>,
     /// CHECK: adapter authority PDA under this program; the handler derives the
     /// same address via `seeds::program = adapter_program.key()`.
     #[account(
@@ -84,7 +75,7 @@ pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) 
         params.exclusivity_period,
     )?;
 
-    let prepare = sra_common::ix_attestation::verify_previous_handler_ix(
+    let prepare = sra_common::ix_attestation::verify_previous_trigger_ix(
         &ctx.accounts.instructions_sysvar.to_account_info(),
         &ctx.accounts.sra_config.key(),
         &ctx.accounts.input_mint.key(),
@@ -92,7 +83,7 @@ pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) 
         &params,
     )?;
 
-    let prepared_nonce = prepared_nonce(&ctx.accounts.mint_nonce)?;
+    let triggered_nonce = triggered_nonce(&ctx.accounts.sra_config)?;
     let deposit = build_deposit_now_bundle(
         &ctx.accounts.adapter_authority.key(),
         &ctx.accounts.sra_config,
@@ -159,7 +150,7 @@ pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) 
     emit!(AcrossDepositExecuted {
         sra_config: ctx.accounts.sra_config.key(),
         input_mint: ctx.accounts.input_mint.key(),
-        nonce: prepared_nonce,
+        nonce: triggered_nonce,
         delegate: deposit.delegate.pda,
         across_state: ctx.accounts.across_state.key(),
         across_vault: ctx.accounts.across_vault.key(),
@@ -178,16 +169,38 @@ pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) 
 mod tests {
     use super::*;
 
-    #[test]
-    fn prepared_nonce_rejects_zero() {
-        let mint_nonce = MintNonce { nonce: 0, bump: 1 };
-        let err = prepared_nonce(&mint_nonce).expect_err("zero nonce must reject");
-        assert_eq!(err, error!(AcrossAdapterError::PreparedNonceUnavailable));
+    fn sample_sra_config() -> SraConfig {
+        SraConfig {
+            owner: Pubkey::new_unique(),
+            final_handler: sra_common::ID,
+            handler_data: sra_common::types::SourceHandlerData {
+                address_book_root: Pubkey::new_unique(),
+                target_chain_id: 42_161,
+                recipient: [0x33; 32],
+                target_token: [0xAB; 32],
+                allowed_slippage_bps: 50,
+                allowed_adapters: vec![crate::ID],
+            },
+            salt: [0x55; 32],
+            initiator: Pubkey::new_unique(),
+            active: true,
+            deposit_nonce: 1,
+            bump: 254,
+        }
     }
 
     #[test]
-    fn prepared_nonce_uses_pre_increment_value() {
-        let mint_nonce = MintNonce { nonce: 7, bump: 1 };
-        assert_eq!(prepared_nonce(&mint_nonce).unwrap(), 6);
+    fn triggered_nonce_rejects_zero() {
+        let mut sra_config = sample_sra_config();
+        sra_config.deposit_nonce = 0;
+        let err = triggered_nonce(&sra_config).expect_err("zero nonce must reject");
+        assert_eq!(err, error!(AcrossAdapterError::TriggeredNonceUnavailable));
+    }
+
+    #[test]
+    fn triggered_nonce_uses_pre_increment_value() {
+        let mut sra_config = sample_sra_config();
+        sra_config.deposit_nonce = 7;
+        assert_eq!(triggered_nonce(&sra_config).unwrap(), 6);
     }
 }

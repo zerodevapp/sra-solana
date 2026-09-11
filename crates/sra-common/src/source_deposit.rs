@@ -1,8 +1,6 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::SraError;
-use crate::types::SourceHandlerData;
-
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PrepareParams {
     /// Gross deposit; the protocol fee is deducted from this on the source.
@@ -12,20 +10,15 @@ pub struct PrepareParams {
     pub recipient: [u8; 32],
     pub target_token: [u8; 32],
     pub protocol_fee_amount: u64,
-    /// Owner-signed assertion that skips the protocol fee; honored only when
-    /// the fee admin enabled `allow_sponsored`, else `SponsoredNotAllowed`.
+    /// Initiator-supplied assertion that skips the protocol fee; honored only
+    /// when the fee admin enabled `allow_sponsored`, else `SponsoredNotAllowed`.
     pub is_sponsor: bool,
     /// `NO_FEE_BPS_OVERRIDE` (u16::MAX) = no override.
     pub protocol_fee_bps_override: u16,
 }
 
-/// Wire-format mirror of the `validate_and_prepare` instruction args. Handler
-/// and adapter MUST agree on this layout byte-for-byte; sharing one definition
-/// here keeps them coupled. Field order matches the order of the handler's
-/// IX args in `programs/sra-handler/src/lib.rs::validate_and_prepare`.
 #[derive(AnchorSerialize, AnchorDeserialize)]
-pub struct ValidateAndPrepareArgs {
-    pub handler_data: SourceHandlerData,
+pub struct TriggerArgs {
     pub params: PrepareParams,
     pub paired_adapter_ix_data_hash: [u8; 32],
 }
@@ -107,7 +100,7 @@ pub struct CctpDepositParams {
     pub max_fee: u64,
     /// CCTP v2 finality; canonical values are `FINALITY_THRESHOLD_FAST`
     /// (1000) and `FINALITY_THRESHOLD_FINALIZED` (2000), and the adapter
-    /// accepts `1..=2000`.
+    /// accepts only those two values.
     pub min_finality_threshold: u32,
 }
 

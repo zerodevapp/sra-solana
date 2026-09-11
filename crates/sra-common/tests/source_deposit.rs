@@ -25,10 +25,9 @@ fn sample_prepare_params() -> PrepareParams {
 #[test]
 fn decode_prepare_params_round_trips_valid_data() {
     let params = sample_prepare_params();
-    let data = encode_anchor_instruction_data("validate_and_prepare", &params);
+    let data = encode_anchor_instruction_data("trigger", &params);
 
-    let decoded =
-        decode_anchor_instruction_data::<PrepareParams>("validate_and_prepare", &data).unwrap();
+    let decoded = decode_anchor_instruction_data::<PrepareParams>("trigger", &data).unwrap();
     assert_eq!(decoded, params);
 }
 
@@ -55,7 +54,7 @@ fn decode_prepare_params_rejects_wrong_discriminator() {
     let params = sample_prepare_params();
     let data = encode_anchor_instruction_data("wrong_name", &params);
 
-    let err = decode_anchor_instruction_data::<PrepareParams>("validate_and_prepare", &data)
+    let err = decode_anchor_instruction_data::<PrepareParams>("trigger", &data)
         .expect_err("wrong discriminator must reject");
     assert!(format!("{err:?}").contains("InvalidPairedInstruction"));
 }

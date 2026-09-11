@@ -36,73 +36,6 @@
           "name": "sra_config"
         },
         {
-          "name": "mint_nonce",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  105,
-                  110,
-                  116,
-                  95,
-                  110,
-                  111,
-                  110,
-                  99,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "sra_config"
-              },
-              {
-                "kind": "account",
-                "path": "input_mint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                92,
-                4,
-                188,
-                181,
-                107,
-                183,
-                243,
-                190,
-                62,
-                5,
-                91,
-                94,
-                2,
-                252,
-                137,
-                8,
-                124,
-                142,
-                6,
-                233,
-                158,
-                155,
-                223,
-                111,
-                134,
-                251,
-                227,
-                254,
-                49,
-                214,
-                172,
-                92
-              ]
-            }
-          }
-        },
-        {
           "name": "adapter_authority",
           "docs": [
             "the same address via `seeds::program = adapter_program.key()`. Owns",
@@ -234,7 +167,8 @@
           "docs": [
             "The burn decreases the supply, so the mint is writable."
           ],
-          "writable": true
+          "writable": true,
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
         },
         {
           "name": "sender_authority",
@@ -910,19 +844,6 @@
   ],
   "accounts": [
     {
-      "name": "MintNonce",
-      "discriminator": [
-        207,
-        90,
-        192,
-        29,
-        25,
-        162,
-        153,
-        119
-      ]
-    },
-    {
       "name": "SolanaSraRoute",
       "discriminator": [
         134,
@@ -1006,8 +927,8 @@
   "errors": [
     {
       "code": 6000,
-      "name": "PreparedNonceUnavailable",
-      "msg": "Mint nonce does not contain a prepared deposit"
+      "name": "TriggeredNonceUnavailable",
+      "msg": "SRA nonce does not contain a triggered deposit"
     },
     {
       "code": 6001,
@@ -1022,7 +943,7 @@
     {
       "code": 6003,
       "name": "InvalidFinalityThreshold",
-      "msg": "CCTP finality threshold must be within 1..=2000"
+      "msg": "CCTP finality threshold must be 1000 or 2000"
     },
     {
       "code": 6004,
@@ -1078,6 +999,11 @@
       "code": 6014,
       "name": "FeeExceedsMaxFee",
       "msg": "Executed fee exceeds max fee, or max fee is not below the amount"
+    },
+    {
+      "code": 6015,
+      "name": "InvalidInputMint",
+      "msg": "CCTP input mint must be canonical six-decimal Solana USDC"
     }
   ],
   "types": [
@@ -1221,7 +1147,7 @@
             "docs": [
               "CCTP v2 finality; canonical values are `FINALITY_THRESHOLD_FAST`",
               "(1000) and `FINALITY_THRESHOLD_FINALIZED` (2000), and the adapter",
-              "accepts `1..=2000`."
+              "accepts only those two values."
             ],
             "type": "u32"
           }
@@ -1354,27 +1280,6 @@
                 "type": "u16"
               }
             ]
-          }
-        ]
-      }
-    },
-    {
-      "name": "MintNonce",
-      "docs": [
-        "Persistent nonce per `(sra_config, source_mint)`. The owner-signed deposit",
-        "flow will create it lazily and increment it per source-mint deposit.",
-        "PDA seeds: [\"mint_nonce\", sra_config, source_mint]"
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "nonce",
-            "type": "u64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
           }
         ]
       }
@@ -1562,16 +1467,13 @@
     {
       "name": "SourceHandlerData",
       "docs": [
-        "Owner-installed source policy. Committed at SRA install via",
-        "`handler_data_hash` (folded into the SRA's PDA identity) and re-supplied,",
-        "then re-authenticated, on every deposit. The routing tuple",
+        "Owner-installed source policy. Stored in the SRA and committed at install",
+        "via `handler_data_hash`, which is folded into the SRA's PDA identity. The",
+        "routing tuple",
         "(`target_chain_id` / `recipient` / `target_token`) is part of the immutable",
-        "identity, mirroring the",
-        "EVM `RouteConfig` that `trigger()` reads from storage and a caller cannot",
-        "redirect (see `sra-stx/src/handler/SRAHandler.sol`). Every deposit must echo",
-        "this exact routing in `PrepareParams`; `validate_and_prepare` rejects any",
-        "divergence. Changing the route means a new SRA at a new address — the Solana",
-        "analogue of the EVM clone-proxy + `_onInstall` model."
+        "identity, mirroring the EVM `RouteConfig` that `trigger()` reads from",
+        "storage and a caller cannot redirect. Every deposit must echo this exact",
+        "routing in `PrepareParams`; `trigger` rejects any divergence."
       ],
       "type": {
         "kind": "struct",

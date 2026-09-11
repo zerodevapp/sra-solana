@@ -56,18 +56,12 @@ pub mod sra_handler {
         )
     }
 
-    pub fn validate_and_prepare(
-        ctx: Context<ValidateAndPrepare>,
-        handler_data: SourceHandlerData,
+    pub fn trigger(
+        ctx: Context<Trigger>,
         params: PrepareParams,
         paired_adapter_ix_data_hash: [u8; 32],
     ) -> Result<()> {
-        instructions::source::validate_and_prepare::handler(
-            ctx,
-            handler_data,
-            params,
-            paired_adapter_ix_data_hash,
-        )
+        instructions::source::trigger::handler(ctx, params, paired_adapter_ix_data_hash)
     }
 
     pub fn create_route(

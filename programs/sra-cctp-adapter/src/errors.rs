@@ -2,8 +2,8 @@ use anchor_lang::prelude::*;
 
 #[error_code]
 pub enum CctpAdapterError {
-    #[msg("Mint nonce does not contain a prepared deposit")]
-    PreparedNonceUnavailable,
+    #[msg("SRA nonce does not contain a triggered deposit")]
+    TriggeredNonceUnavailable,
 
     #[msg("No tokens in adapter custody to recover")]
     NothingToRecover,
@@ -11,7 +11,7 @@ pub enum CctpAdapterError {
     #[msg("Target chain has no CCTP domain mapping")]
     UnsupportedChain,
 
-    #[msg("CCTP finality threshold must be within 1..=2000")]
+    #[msg("CCTP finality threshold must be 1000 or 2000")]
     InvalidFinalityThreshold,
 
     #[msg("Committed output exceeds the net input after the CCTP max fee")]
@@ -48,4 +48,7 @@ pub enum CctpAdapterError {
 
     #[msg("Executed fee exceeds max fee, or max fee is not below the amount")]
     FeeExceedsMaxFee,
+
+    #[msg("CCTP input mint must be canonical six-decimal Solana USDC")]
+    InvalidInputMint,
 }

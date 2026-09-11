@@ -160,35 +160,17 @@ pub struct ActionsRetried {
     pub fill_id: [u8; 32],
 }
 
-/// Emitted by `validate_and_prepare` after funds reach adapter custody. Carries
-/// the routing inputs needed to build the target-specific bridge message.
 #[event]
-pub struct DepositPrepared {
-    /// SraConfig PDA the deposit was prepared for.
+pub struct DepositTriggered {
     pub sra_config: Pubkey,
-    /// Source mint that was locked.
+    pub initiator: Pubkey,
     pub source_mint: Pubkey,
-    /// Allowlisted adapter program for the prepared deposit.
     pub adapter_program: Pubkey,
-    /// Nonce captured before the prepare handler increments it.
     pub nonce: u64,
-    /// Gross tokens pulled from the owner ATA into the SRA vault. The amount
-    /// forwarded to adapter custody and bridged in the same transaction is
-    /// `input_amount - protocol_fee_amount`.
     pub input_amount: u64,
-    /// Protocol fee collected on the source. Zero when fees are
-    /// disabled globally, no protocol-fee config is set, or the deposit is
-    /// sponsored.
     pub protocol_fee_amount: u64,
-    /// Minimum output amount the destination must honor; enforced here via
-    /// the slippage check (floored from the GROSS input)
-    /// and re-honored by the target-specific adapter flow.
     pub output_amount: [u8; 32],
-    /// Runtime target chain id from `PrepareParams`.
     pub target_chain_id: u64,
-    /// Destination account / recipient identifier.
     pub recipient: [u8; 32],
-    /// Per-deposit target token identifier. Stored as raw bytes32 so Solana
-    /// pubkeys and other non-EVM ids are not truncated.
     pub target_token: [u8; 32],
 }

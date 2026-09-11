@@ -36,18 +36,16 @@ use sra_common::{
         CCTP_TOKEN_MESSENGER_MINTER_V2_ID, FINALITY_THRESHOLD_FINALIZED, SOLANA_CHAIN_ID,
     },
     errors::SraError,
-    instruction_data::encode_anchor_instruction_data,
     seeds::{
         route_config_hash, SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_ASSET_FEE_TIER,
-        SEED_EXECUTION, SEED_FEE_CONFIG, SEED_FILL_RECEIPT, SEED_MINT_NONCE, SEED_PROTOCOL_FEE,
-        SEED_SRA, SEED_SRA_ROUTE, SEED_VERIFIED_FILL,
+        SEED_EXECUTION, SEED_FEE_CONFIG, SEED_FILL_RECEIPT, SEED_PROTOCOL_FEE, SEED_SRA,
+        SEED_SRA_ROUTE, SEED_VERIFIED_FILL,
     },
     source_deposit::{AcrossDepositParams, CctpDepositParams, PrepareParams},
     types::{
         AccountTemplate, AddressBookEntry, AddressBookRoot, AssetFeeTier, CreateRouteParams,
-        ExecutionStatus, FeeConfig, FillReceipt, FixedRole, ManageRouteParams, MintNonce,
-        ProtocolFeeConfig, SlotRole, SolanaAction, SolanaSraRoute, SourceHandlerData, SraConfig,
-        VerifiedCpiRuntime,
+        ExecutionStatus, FeeConfig, FillReceipt, FixedRole, ManageRouteParams, ProtocolFeeConfig,
+        SlotRole, SolanaAction, SolanaSraRoute, SourceHandlerData, SraConfig, VerifiedCpiRuntime,
     },
 };
 use std::{fs, path::PathBuf};
@@ -295,13 +293,6 @@ pub fn derive_address_book_pda(
             &target_chain_id.to_le_bytes(),
             target_token,
         ],
-        &PROGRAM_ID,
-    )
-}
-
-pub fn derive_mint_nonce_pda(sra_config: &Pubkey, source_mint: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &[SEED_MINT_NONCE, sra_config.as_ref(), source_mint.as_ref()],
         &PROGRAM_ID,
     )
 }
@@ -612,11 +603,6 @@ pub fn fetch_address_book_entry(svm: &LiteSVM, pda: &Pubkey) -> AddressBookEntry
     AddressBookEntry::try_deserialize(&mut acct.data.as_slice()).expect("valid AddressBookEntry")
 }
 
-pub fn fetch_mint_nonce(svm: &LiteSVM, pda: &Pubkey) -> MintNonce {
-    let acct = svm.get_account(pda).expect("mint_nonce account exists");
-    MintNonce::try_deserialize(&mut acct.data.as_slice()).expect("valid MintNonce")
-}
-
 // --- Fee admin (shared; will be consumed by the source deposit path) ---
 
 pub fn derive_fee_config_pda() -> (Pubkey, u8) {
@@ -800,7 +786,7 @@ pub fn fetch_asset_fee_tier(svm: &LiteSVM, pda: &Pubkey) -> AssetFeeTier {
 /// returns the canonical recipient fee ATA.
 pub fn enable_protocol_fee(
     svm: &mut LiteSVM,
-    fx: &ValidatePrepareFixture,
+    fx: &PassiveFixture,
     default_fee_bps: u16,
     allow_override: bool,
     allow_sponsored: bool,
@@ -823,20 +809,6 @@ pub fn enable_protocol_fee(
     )
     .expect("fee state setup must succeed");
     create_ata(svm, &fx.payer, &recipient, &fx.source_mint)
-}
-
-pub fn seed_mint_nonce_account(svm: &mut LiteSVM, pda: &Pubkey, nonce: u64, bump: u8) {
-    let mut data = <MintNonce as Discriminator>::DISCRIMINATOR.to_vec();
-    MintNonce { nonce, bump }.serialize(&mut data).unwrap();
-
-    let account = solana_sdk::account::Account {
-        lamports: svm.minimum_balance_for_rent_exemption(data.len()),
-        data,
-        owner: PROGRAM_ID,
-        executable: false,
-        rent_epoch: 0,
-    };
-    svm.set_account(*pda, account).unwrap();
 }
 
 pub fn derive_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
@@ -1148,25 +1120,29 @@ pub fn setup_address_book_entry(
 }
 
 #[derive(Clone)]
-pub struct ValidatePrepareAccounts {
+pub struct TriggerAccounts {
     pub sra_config: Pubkey,
-    pub mint_nonce: Pubkey,
     pub source_mint: Pubkey,
     pub sra_vault: Pubkey,
+    pub address_book_root: Pubkey,
     pub adapter_program: Pubkey,
     pub adapter_authority: Pubkey,
     pub adapter_custody: Pubkey,
 }
 
-impl ValidatePrepareAccounts {
-    pub fn derive(sra_config: &Pubkey, source_mint: &Pubkey, adapter_program: &Pubkey) -> Self {
-        let (mint_nonce, _) = derive_mint_nonce_pda(sra_config, source_mint);
+impl TriggerAccounts {
+    pub fn derive(
+        sra_config: &Pubkey,
+        source_mint: &Pubkey,
+        address_book_root: &Pubkey,
+        adapter_program: &Pubkey,
+    ) -> Self {
         let (adapter_authority, _) = derive_adapter_authority_pda(sra_config, adapter_program);
         Self {
             sra_config: *sra_config,
-            mint_nonce,
             source_mint: *source_mint,
             sra_vault: derive_ata(sra_config, source_mint),
+            address_book_root: *address_book_root,
             adapter_program: *adapter_program,
             adapter_authority,
             adapter_custody: derive_ata(&adapter_authority, source_mint),
@@ -1175,15 +1151,12 @@ impl ValidatePrepareAccounts {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn validate_and_prepare_ix(
+pub fn trigger_ix(
     fee_payer: &Pubkey,
-    owner: &Pubkey,
-    accounts: &ValidatePrepareAccounts,
-    owner_token_account: &Pubkey,
-    address_book_root: &Pubkey,
+    initiator: &Pubkey,
+    accounts: &TriggerAccounts,
     address_book_entry: &Pubkey,
     fee_recipient_token_account: Option<Pubkey>,
-    handler_data: SourceHandlerData,
     params: PrepareParams,
     paired_execute_ix: &Instruction,
 ) -> Instruction {
@@ -1192,18 +1165,16 @@ pub fn validate_and_prepare_ix(
 
     Instruction {
         program_id: PROGRAM_ID,
-        accounts: sra_handler::accounts::ValidateAndPrepare {
+        accounts: sra_handler::accounts::Trigger {
             fee_payer: *fee_payer,
-            owner: *owner,
+            initiator: *initiator,
             sra_config: accounts.sra_config,
-            mint_nonce: accounts.mint_nonce,
             source_mint: accounts.source_mint,
-            owner_token_account: *owner_token_account,
             sra_vault: accounts.sra_vault,
             adapter_authority: accounts.adapter_authority,
             adapter_custody: accounts.adapter_custody,
+            address_book_root: accounts.address_book_root,
             adapter_program: accounts.adapter_program,
-            address_book_root: *address_book_root,
             address_book_entry: *address_book_entry,
             fee_config: derive_fee_config_pda().0,
             protocol_fee_config: derive_protocol_fee_pda().0,
@@ -1215,8 +1186,7 @@ pub fn validate_and_prepare_ix(
             instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
         }
         .to_account_metas(None),
-        data: sra_handler::instruction::ValidateAndPrepare {
-            handler_data,
+        data: sra_handler::instruction::Trigger {
             params,
             paired_adapter_ix_data_hash,
         }
@@ -1224,11 +1194,12 @@ pub fn validate_and_prepare_ix(
     }
 }
 
-pub const OWNER_STARTING_BALANCE: u64 = 10_000_000;
+pub const SRA_STARTING_BALANCE: u64 = 10_000_000;
 
-pub struct ValidatePrepareFixture {
+pub struct PassiveFixture {
     pub payer: Keypair,
     pub owner: Keypair,
+    pub initiator: Keypair,
     /// Admin of the singleton fee config. The fixture initializes the config
     /// with `Pubkey::default()` recipient (fees globally disabled) so the
     /// zero-fee deposit paths run against genesis-like fee state; fee tests
@@ -1241,7 +1212,7 @@ pub struct ValidatePrepareFixture {
     pub target_chain_id: u64,
     pub target_token: [u8; 32],
     pub adapter_program: Pubkey,
-    pub accounts: ValidatePrepareAccounts,
+    pub accounts: TriggerAccounts,
     pub owner_ata: Pubkey,
     /// Across-leg fields consumed by the Surfpool E2E fixture (which drives
     /// the deployed Across program); the LiteSVM source flow currently runs
@@ -1251,7 +1222,7 @@ pub struct ValidatePrepareFixture {
     pub across_vault: Pubkey,
 }
 
-impl ValidatePrepareFixture {
+impl PassiveFixture {
     pub fn new(svm: &mut LiteSVM) -> Self {
         Self::new_with_decimals_and_adapter_policy(
             svm,
@@ -1334,6 +1305,7 @@ impl ValidatePrepareFixture {
     ) -> Self {
         let payer = funded_keypair(svm, 100 * SOL);
         let owner = funded_keypair(svm, SOL);
+        let initiator = funded_keypair(svm, SOL);
 
         let fee_admin = funded_keypair(svm, SOL);
         if svm.get_account(&derive_fee_config_pda().0).is_none() {
@@ -1361,16 +1333,32 @@ impl ValidatePrepareFixture {
             allowed_adapters,
         };
         let salt = [0xABu8; 32];
-        let source_mint = create_mint(svm, &payer, &payer.pubkey(), source_decimals);
-        let sra_config = init_sra_with(
+        let created_mint = create_mint(svm, &payer, &payer.pubkey(), source_decimals);
+        let source_mint = if adapter_program == CCTP_ADAPTER_PROGRAM_ID {
+            let mint_account = svm.get_account(&created_mint).unwrap();
+            svm.set_account(sra_common::constants::USDC_MINT, mint_account)
+                .unwrap();
+            sra_common::constants::USDC_MINT
+        } else {
+            created_mint
+        };
+        let (sra_config, _) = derive_sra_pda(&owner.pubkey(), &handler_data, &salt);
+        send_ix(
             svm,
+            initialize_sra_ix(
+                &payer.pubkey(),
+                &owner.pubkey(),
+                &address_book_root,
+                &sra_config,
+                handler_data.clone(),
+                salt,
+                initiator.pubkey(),
+                source_mint,
+            ),
             &payer,
-            &owner,
-            &address_book_root,
-            handler_data.clone(),
-            salt,
-            source_mint,
-        );
+            &[&owner],
+        )
+        .expect("initialize_sra should succeed");
 
         setup_address_book_entry(
             svm,
@@ -1383,7 +1371,12 @@ impl ValidatePrepareFixture {
             target_decimals,
         );
 
-        let accounts = ValidatePrepareAccounts::derive(&sra_config, &source_mint, &adapter_program);
+        let accounts = TriggerAccounts::derive(
+            &sra_config,
+            &source_mint,
+            &address_book_root,
+            &adapter_program,
+        );
         let owner_ata = create_ata(svm, &payer, &owner.pubkey(), &source_mint);
         let across_state = funded_keypair(svm, SOL).pubkey();
         let across_vault = create_ata(svm, &payer, &across_state, &source_mint);
@@ -1392,13 +1385,14 @@ impl ValidatePrepareFixture {
             &payer,
             &payer,
             &source_mint,
-            &owner_ata,
-            OWNER_STARTING_BALANCE,
+            &accounts.sra_vault,
+            SRA_STARTING_BALANCE,
         );
 
         Self {
             payer,
             owner,
+            initiator,
             fee_admin,
             address_book_root,
             handler_data,
@@ -1439,7 +1433,7 @@ impl ValidatePrepareFixture {
         params: PrepareParams,
     ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
     {
-        self.invoke_full(svm, self.handler_data.clone(), params, vec![], None, None)
+        self.invoke_full(svm, params, vec![], None, None)
     }
 
     pub fn invoke_with(
@@ -1449,25 +1443,7 @@ impl ValidatePrepareFixture {
         between_ixs: Vec<Instruction>,
     ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
     {
-        self.invoke_full(
-            svm,
-            self.handler_data.clone(),
-            params,
-            between_ixs,
-            None,
-            None,
-        )
-    }
-
-    pub fn invoke_with_handler_data(
-        &self,
-        svm: &mut LiteSVM,
-        handler_data: SourceHandlerData,
-        params: PrepareParams,
-        between_ixs: Vec<Instruction>,
-    ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
-    {
-        self.invoke_full(svm, handler_data, params, between_ixs, None, None)
+        self.invoke_full(svm, params, between_ixs, None, None)
     }
 
     pub fn invoke_with_fee_ata(
@@ -1477,18 +1453,11 @@ impl ValidatePrepareFixture {
         fee_recipient_token_account: Option<Pubkey>,
     ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
     {
-        self.invoke_full(
-            svm,
-            self.handler_data.clone(),
-            params,
-            vec![],
-            fee_recipient_token_account,
-            None,
-        )
+        self.invoke_full(svm, params, vec![], fee_recipient_token_account, None)
     }
 
     /// Builds the normal 2-IX flow, then replaces the account-meta holding
-    /// `victim` with `substitute` in the validate instruction — substitution
+    /// `victim` with `substitute` in the trigger instruction — substitution
     /// suites pin that every fee account is constraint-bound, never
     /// caller-chosen.
     pub fn invoke_with_fee_accounts_mutation(
@@ -1502,7 +1471,6 @@ impl ValidatePrepareFixture {
     {
         self.invoke_full(
             svm,
-            self.handler_data.clone(),
             params,
             vec![],
             fee_recipient_token_account,
@@ -1514,42 +1482,38 @@ impl ValidatePrepareFixture {
     fn invoke_full(
         &self,
         svm: &mut LiteSVM,
-        handler_data: SourceHandlerData,
         params: PrepareParams,
         between_ixs: Vec<Instruction>,
         fee_recipient_token_account: Option<Pubkey>,
-        validate_meta_substitution: Option<(Pubkey, Pubkey)>,
+        trigger_meta_substitution: Option<(Pubkey, Pubkey)>,
     ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
     {
         let (execute_ix, event_data) =
             execute_deposit_cctp_ix(&self.payer.pubkey(), self, &cctp_params_for(&params));
         let address_book_entry =
             self.address_book_entry(params.target_chain_id, &params.target_token);
-        let mut validate_ix = validate_and_prepare_ix(
+        let mut trigger_ix = trigger_ix(
             &self.payer.pubkey(),
-            &self.owner.pubkey(),
+            &self.initiator.pubkey(),
             &self.accounts,
-            &self.owner_ata,
-            &self.address_book_root,
             &address_book_entry,
             fee_recipient_token_account,
-            handler_data,
             params.clone(),
             &execute_ix,
         );
-        if let Some((victim, substitute)) = validate_meta_substitution {
-            let slot = validate_ix
+        if let Some((victim, substitute)) = trigger_meta_substitution {
+            let slot = trigger_ix
                 .accounts
                 .iter()
                 .position(|meta| meta.pubkey == victim)
-                .expect("victim account must be present in the validate instruction");
-            validate_ix.accounts[slot].pubkey = substitute;
+                .expect("victim account must be present in the trigger instruction");
+            trigger_ix.accounts[slot].pubkey = substitute;
         }
 
-        let mut ixs = vec![validate_ix];
+        let mut ixs = vec![trigger_ix];
         ixs.extend(between_ixs);
         ixs.push(execute_ix);
-        send_instructions(svm, &ixs, &self.payer, &[&self.owner, &event_data])
+        send_instructions(svm, &ixs, &self.payer, &[&self.initiator, &event_data])
     }
 }
 
@@ -1568,7 +1532,7 @@ pub fn cctp_params_for(params: &PrepareParams) -> CctpDepositParams {
 /// the transaction.
 pub fn execute_deposit_cctp_ix(
     fee_payer: &Pubkey,
-    fx: &ValidatePrepareFixture,
+    fx: &PassiveFixture,
     params: &CctpDepositParams,
 ) -> (Instruction, Keypair) {
     let event_data = Keypair::new();
@@ -1582,7 +1546,6 @@ pub fn execute_deposit_cctp_ix(
             fee_payer: *fee_payer,
             instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
             sra_config: fx.sra_config,
-            mint_nonce: fx.accounts.mint_nonce,
             adapter_authority: fx.accounts.adapter_authority,
             adapter_custody: fx.accounts.adapter_custody,
             input_mint: fx.source_mint,
@@ -1627,7 +1590,7 @@ pub fn execute_deposit_cctp_ix(
 
 pub fn execute_deposit_across_ix(
     fee_payer: &Pubkey,
-    fx: &ValidatePrepareFixture,
+    fx: &PassiveFixture,
     sra_config: &SraConfig,
     prepare: &PrepareParams,
     params: AcrossDepositParams,
@@ -1643,24 +1606,24 @@ pub fn execute_deposit_across_ix(
 
     Instruction {
         program_id: ADAPTER_PROGRAM_ID,
-        accounts: vec![
-            AccountMeta::new(*fee_payer, true),
-            AccountMeta::new_readonly(anchor_lang::solana_program::sysvar::instructions::ID, false),
-            AccountMeta::new_readonly(fx.sra_config, false),
-            AccountMeta::new_readonly(fx.accounts.mint_nonce, false),
-            AccountMeta::new_readonly(fx.accounts.adapter_authority, false),
-            AccountMeta::new(fx.accounts.adapter_custody, false),
-            AccountMeta::new_readonly(fx.source_mint, false),
-            AccountMeta::new_readonly(ACROSS_SPOKE_POOL_ID, false),
-            AccountMeta::new(fx.across_state, false),
-            AccountMeta::new(fx.across_vault, false),
-            AccountMeta::new_readonly(derive_real_across_event_authority_pda().0, false),
-            AccountMeta::new_readonly(bundle.delegate.pda, false),
-            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
-            AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
-            AccountMeta::new_readonly(system_program::ID, false),
-        ],
-        data: encode_anchor_instruction_data("execute_deposit_across", &params),
+        accounts: sra_across_adapter::accounts::ExecuteDepositAcross {
+            fee_payer: *fee_payer,
+            instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
+            sra_config: fx.sra_config,
+            adapter_authority: fx.accounts.adapter_authority,
+            adapter_custody: fx.accounts.adapter_custody,
+            input_mint: fx.source_mint,
+            across_program: ACROSS_SPOKE_POOL_ID,
+            across_state: fx.across_state,
+            across_vault: fx.across_vault,
+            across_event_authority: derive_real_across_event_authority_pda().0,
+            delegate: bundle.delegate.pda,
+            token_program: TOKEN_PROGRAM_ID,
+            associated_token_program: ATA_PROGRAM_ID,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: sra_across_adapter::instruction::ExecuteDepositAcross { params }.data(),
     }
 }
 
@@ -1708,7 +1671,7 @@ pub fn compute_budget_ix() -> Instruction {
 }
 
 pub fn invoke_execute_only(
-    fx: &ValidatePrepareFixture,
+    fx: &PassiveFixture,
     svm: &mut LiteSVM,
     params: &CctpDepositParams,
 ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>> {
@@ -1716,14 +1679,8 @@ pub fn invoke_execute_only(
     send_instructions(svm, &[ix], &fx.payer, &[&event_data])
 }
 
-pub fn current_nonce(svm: &LiteSVM, mint_nonce: &Pubkey) -> u64 {
-    svm.get_account(mint_nonce)
-        .map(|acct| {
-            MintNonce::try_deserialize(&mut acct.data.as_slice())
-                .expect("valid MintNonce")
-                .nonce
-        })
-        .unwrap_or(0)
+pub fn current_nonce(svm: &LiteSVM, sra_config: &Pubkey) -> u64 {
+    fetch_sra_config(svm, sra_config).deposit_nonce
 }
 
 pub fn extract_anchor_event<T>(logs: &[String]) -> Option<T>
@@ -1753,7 +1710,7 @@ where
     None
 }
 
-pub fn extract_deposit_prepared(logs: &[String]) -> Option<sra_handler::events::DepositPrepared> {
+pub fn extract_deposit_triggered(logs: &[String]) -> Option<sra_handler::events::DepositTriggered> {
     extract_anchor_event(logs)
 }
 
@@ -1963,7 +1920,6 @@ pub fn derive_fill_receipt_pda(route: &Pubkey, fill_id: &[u8; 32]) -> (Pubkey, u
 /// Plant a `FillReceipt` in the given lifecycle state via `set_account` to reach
 /// states no instruction produces yet. Not a layout-exact replica of a
 /// `finalize_fill` receipt — `finalized_at` is 0 and `expected_amount == amount`.
-/// Mirrors `seed_mint_nonce_account`.
 /// Raw-seed a route account, bypassing `create_route`'s validation — models a
 /// route committed before a create-time rule existed. `execute_actions` does
 /// not seed-bind the route, so an arbitrary program-owned address suffices.

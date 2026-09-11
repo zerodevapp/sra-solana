@@ -5,16 +5,13 @@ use crate::{
     errors::SraError,
 };
 
-/// Owner-installed source policy. Committed at SRA install via
-/// `handler_data_hash` (folded into the SRA's PDA identity) and re-supplied,
-/// then re-authenticated, on every deposit. The routing tuple
+/// Owner-installed source policy. Stored in the SRA and committed at install
+/// via `handler_data_hash`, which is folded into the SRA's PDA identity. The
+/// routing tuple
 /// (`target_chain_id` / `recipient` / `target_token`) is part of the immutable
-/// identity, mirroring the
-/// EVM `RouteConfig` that `trigger()` reads from storage and a caller cannot
-/// redirect (see `sra-stx/src/handler/SRAHandler.sol`). Every deposit must echo
-/// this exact routing in `PrepareParams`; `validate_and_prepare` rejects any
-/// divergence. Changing the route means a new SRA at a new address — the Solana
-/// analogue of the EVM clone-proxy + `_onInstall` model.
+/// identity, mirroring the EVM `RouteConfig` that `trigger()` reads from
+/// storage and a caller cannot redirect. Every deposit must echo this exact
+/// routing in `PrepareParams`; `trigger` rejects any divergence.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq, InitSpace)]
 pub struct SourceHandlerData {
     pub address_book_root: Pubkey,
@@ -79,16 +76,6 @@ pub struct AddressBookRoot {
     pub owner: Pubkey,
 }
 
-/// Persistent nonce per `(sra_config, source_mint)`. The owner-signed deposit
-/// flow will create it lazily and increment it per source-mint deposit.
-/// PDA seeds: ["mint_nonce", sra_config, source_mint]
-#[account]
-#[derive(InitSpace)]
-pub struct MintNonce {
-    pub nonce: u64,
-    pub bump: u8,
-}
-
 /// Per-address-book-root owner-managed (source_mint, chain, target_token) -> decimals registry.
 /// `target_decimals = 0` is a tombstone/disabled entry, mirroring zeroed EVM TokenInfo.
 /// PDA seeds: ["address_book", address_book_root, source_mint, chain_id.to_le_bytes(), target_token]
@@ -140,12 +127,6 @@ mod tests {
     fn address_book_root_init_space() {
         // 32 owner
         assert_eq!(AddressBookRoot::INIT_SPACE, 32);
-    }
-
-    #[test]
-    fn mint_nonce_init_space() {
-        // 8 nonce + 1 bump = 9
-        assert_eq!(MintNonce::INIT_SPACE, 9);
     }
 
     #[test]
