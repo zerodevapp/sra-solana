@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 
+use crate::constants::BPS_DENOMINATOR;
 use crate::errors::SraError;
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PrepareParams {
@@ -130,6 +131,38 @@ pub fn decode_output_amount(output_amount: [u8; 32]) -> Result<u128> {
     Ok(u128::from_be_bytes(output_amount[16..].try_into().unwrap()))
 }
 
+pub fn output_satisfies_slippage_floor(
+    input_amount: u64,
+    input_decimals: u8,
+    output_amount: u128,
+    output_decimals: u8,
+    slippage_bps: u16,
+) -> Result<bool> {
+    let denominator = BPS_DENOMINATOR as u128;
+    let slippage_numerator = (BPS_DENOMINATOR - slippage_bps) as u128;
+    let minimum_source = (input_amount as u128)
+        .checked_mul(slippage_numerator)
+        .ok_or(SraError::ArithmeticOverflow)?
+        .div_ceil(denominator);
+    if input_decimals >= output_decimals {
+        let exponent = (input_decimals - output_decimals) as u32;
+        let output = 10u128
+            .checked_pow(exponent)
+            .and_then(|scale| output_amount.checked_mul(scale));
+        Ok(output
+            .map(|scaled| scaled >= minimum_source)
+            .unwrap_or(output_amount > 0 || minimum_source == 0))
+    } else {
+        let exponent = (output_decimals - input_decimals) as u32;
+        let minimum = 10u128
+            .checked_pow(exponent)
+            .and_then(|scale| minimum_source.checked_mul(scale));
+        Ok(minimum
+            .map(|scaled| output_amount >= scaled)
+            .unwrap_or(minimum_source == 0))
+    }
+}
+
 /// Bound user-supplied Across timing: a too-short `fill_deadline_offset` forces
 /// instant expiry and strands the refund in `adapter_custody`.
 pub fn validate_across_timing(
@@ -187,6 +220,53 @@ mod tests {
             }
             other => panic!("expected OutputAmountOverflow, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn slippage_floor_rounds_up_at_equal_decimals() {
+        assert!(!output_satisfies_slippage_floor(1_000_001, 6, 995_000, 6, 50).unwrap());
+        assert!(output_satisfies_slippage_floor(1_000_001, 6, 995_001, 6, 50).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_rounds_up_when_target_is_more_precise() {
+        assert!(!output_satisfies_slippage_floor(1_000_001, 6, 9_950_009, 7, 50).unwrap());
+        assert!(output_satisfies_slippage_floor(1_000_001, 6, 9_950_010, 7, 50).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_rounds_up_when_source_is_more_precise() {
+        assert!(!output_satisfies_slippage_floor(10_051, 7, 1_000, 6, 50).unwrap());
+        assert!(output_satisfies_slippage_floor(10_051, 7, 1_001, 6, 50).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_rejects_unrepresentable_target_scale() {
+        assert!(!output_satisfies_slippage_floor(1, 6, u128::MAX, 45, 50).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_accepts_unrepresentable_positive_output_scale() {
+        assert!(output_satisfies_slippage_floor(1, 45, 1, 6, 50).unwrap());
+        assert!(!output_satisfies_slippage_floor(1, 45, 0, 6, 50).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_zero_minimum_survives_unrepresentable_scales() {
+        assert!(output_satisfies_slippage_floor(1, 6, 0, 45, 10_000).unwrap());
+        assert!(output_satisfies_slippage_floor(1, 45, 0, 6, 10_000).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_exact_division_boundary_unchanged() {
+        assert!(output_satisfies_slippage_floor(1_000_000, 6, 995_000, 6, 50).unwrap());
+        assert!(!output_satisfies_slippage_floor(1_000_000, 6, 994_999, 6, 50).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_zero_slippage_requires_full_amount() {
+        assert!(output_satisfies_slippage_floor(1_000_000, 6, 1_000_000, 6, 0).unwrap());
+        assert!(!output_satisfies_slippage_floor(1_000_000, 6, 999_999, 6, 0).unwrap());
     }
 
     fn fee_prepare(input_amount: u64, protocol_fee_amount: u64) -> PrepareParams {

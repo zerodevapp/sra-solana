@@ -4,14 +4,13 @@ use anchor_spl::{
     token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked},
 };
 use sra_common::{
-    constants::BPS_DENOMINATOR,
     errors::SraError,
     fees::compute_protocol_fee,
     seeds::{
         SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_ASSET_FEE_TIER, SEED_FEE_CONFIG,
         SEED_PROTOCOL_FEE, SEED_SRA,
     },
-    source_deposit::{decode_output_amount, PrepareParams},
+    source_deposit::{decode_output_amount, output_satisfies_slippage_floor, PrepareParams},
     types::{
         AddressBookEntry, AddressBookRoot, AssetFeeTier, FeeConfig, ProtocolFeeConfig, SraConfig,
     },
@@ -20,38 +19,6 @@ use sra_common::{
 use crate::events::DepositTriggered;
 use crate::utils::adapter::validate_adapter_program;
 use crate::utils::ix_attestation::verify_next_adapter_ix;
-
-fn output_satisfies_slippage_floor(
-    input_amount: u64,
-    input_decimals: u8,
-    output_amount: u128,
-    output_decimals: u8,
-    slippage_bps: u16,
-) -> Result<bool> {
-    let denominator = BPS_DENOMINATOR as u128;
-    let slippage_numerator = (BPS_DENOMINATOR - slippage_bps) as u128;
-    let minimum_source = (input_amount as u128)
-        .checked_mul(slippage_numerator)
-        .ok_or(SraError::ArithmeticOverflow)?
-        .div_ceil(denominator);
-    if input_decimals >= output_decimals {
-        let exponent = (input_decimals - output_decimals) as u32;
-        let output = 10u128
-            .checked_pow(exponent)
-            .and_then(|scale| output_amount.checked_mul(scale));
-        Ok(output
-            .map(|scaled| scaled >= minimum_source)
-            .unwrap_or(output_amount > 0 || minimum_source == 0))
-    } else {
-        let exponent = (output_decimals - input_decimals) as u32;
-        let minimum = 10u128
-            .checked_pow(exponent)
-            .and_then(|scale| minimum_source.checked_mul(scale));
-        Ok(minimum
-            .map(|scaled| output_amount >= scaled)
-            .unwrap_or(minimum_source == 0))
-    }
-}
 
 #[derive(Accounts)]
 #[instruction(params: PrepareParams)]
@@ -299,44 +266,4 @@ pub fn handler(
         target_token: params.target_token,
     });
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn slippage_floor_rounds_up_at_equal_decimals() {
-        assert!(!output_satisfies_slippage_floor(1_000_001, 6, 995_000, 6, 50).unwrap());
-        assert!(output_satisfies_slippage_floor(1_000_001, 6, 995_001, 6, 50).unwrap());
-    }
-
-    #[test]
-    fn slippage_floor_rounds_up_when_target_is_more_precise() {
-        assert!(!output_satisfies_slippage_floor(1_000_001, 6, 9_950_009, 7, 50).unwrap());
-        assert!(output_satisfies_slippage_floor(1_000_001, 6, 9_950_010, 7, 50).unwrap());
-    }
-
-    #[test]
-    fn slippage_floor_rounds_up_when_source_is_more_precise() {
-        assert!(!output_satisfies_slippage_floor(10_051, 7, 1_000, 6, 50).unwrap());
-        assert!(output_satisfies_slippage_floor(10_051, 7, 1_001, 6, 50).unwrap());
-    }
-
-    #[test]
-    fn slippage_floor_rejects_unrepresentable_target_scale() {
-        assert!(!output_satisfies_slippage_floor(1, 6, u128::MAX, 45, 50).unwrap());
-    }
-
-    #[test]
-    fn slippage_floor_accepts_unrepresentable_positive_output_scale() {
-        assert!(output_satisfies_slippage_floor(1, 45, 1, 6, 50).unwrap());
-        assert!(!output_satisfies_slippage_floor(1, 45, 0, 6, 50).unwrap());
-    }
-
-    #[test]
-    fn slippage_floor_zero_minimum_survives_unrepresentable_scales() {
-        assert!(output_satisfies_slippage_floor(1, 6, 0, 45, 10_000).unwrap());
-        assert!(output_satisfies_slippage_floor(1, 45, 0, 6, 10_000).unwrap());
-    }
 }
