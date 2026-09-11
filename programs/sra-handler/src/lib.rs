@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use sra_common::{
-    source_deposit::PrepareParams,
+    source_deposit::TriggerArgs,
     types::{CreateRouteParams, ManageRouteParams, SourceHandlerData, VerifiedCpiRuntime},
 };
 
@@ -56,12 +56,8 @@ pub mod sra_handler {
         )
     }
 
-    pub fn trigger(
-        ctx: Context<Trigger>,
-        params: PrepareParams,
-        paired_adapter_ix_data_hash: [u8; 32],
-    ) -> Result<()> {
-        instructions::source::trigger::handler(ctx, params, paired_adapter_ix_data_hash)
+    pub fn trigger(ctx: Context<Trigger>, args: TriggerArgs) -> Result<()> {
+        instructions::source::trigger::handler(ctx, args)
     }
 
     pub fn create_route(

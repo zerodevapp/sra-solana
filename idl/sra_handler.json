@@ -2502,9 +2502,6 @@
           }
         },
         {
-          "name": "address_book_root"
-        },
-        {
           "name": "adapter_program"
         },
         {
@@ -2697,20 +2694,11 @@
       ],
       "args": [
         {
-          "name": "params",
+          "name": "args",
           "type": {
             "defined": {
-              "name": "PrepareParams"
+              "name": "TriggerArgs"
             }
-          }
-        },
-        {
-          "name": "paired_adapter_ix_data_hash",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
           }
         }
       ]
@@ -4451,6 +4439,31 @@
           {
             "name": "deposit_nonce",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TriggerArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "PrepareParams"
+              }
+            }
+          },
+          {
+            "name": "paired_adapter_ix_data_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }

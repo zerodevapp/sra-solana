@@ -14,8 +14,8 @@ use crate::source_deposit::{AcrossDepositParams, CctpDepositParams, PrepareParam
 // account order.
 const HANDLER_ACCT_SRA_CONFIG: usize = 2;
 const HANDLER_ACCT_SOURCE_MINT: usize = 3;
-const HANDLER_ACCT_ADAPTER_PROGRAM: usize = 8;
-const MIN_HANDLER_ACCOUNTS: usize = HANDLER_ACCT_ADAPTER_PROGRAM + 1;
+const HANDLER_ACCT_ADAPTER_PROGRAM: usize = 7;
+const MIN_HANDLER_ACCOUNTS: usize = 8;
 
 /// An adapter's deposit params, pairable with the handler's
 /// `trigger` through instruction-data attestation.
@@ -126,9 +126,8 @@ mod tests {
             accounts: vec![
                 AccountMeta::new(Pubkey::new_unique(), true),
                 AccountMeta::new_readonly(Pubkey::new_unique(), true),
-                AccountMeta::new_readonly(sra_config, false),
+                AccountMeta::new(sra_config, false),
                 AccountMeta::new_readonly(source_mint, false),
-                AccountMeta::new(Pubkey::new_unique(), false),
                 AccountMeta::new(Pubkey::new_unique(), false),
                 AccountMeta::new_readonly(Pubkey::new_unique(), false),
                 AccountMeta::new(Pubkey::new_unique(), false),

@@ -41,7 +41,7 @@ use sra_common::{
         SEED_EXECUTION, SEED_FEE_CONFIG, SEED_FILL_RECEIPT, SEED_PROTOCOL_FEE, SEED_SRA,
         SEED_SRA_ROUTE, SEED_VERIFIED_FILL,
     },
-    source_deposit::{AcrossDepositParams, CctpDepositParams, PrepareParams},
+    source_deposit::{AcrossDepositParams, CctpDepositParams, PrepareParams, TriggerArgs},
     types::{
         AccountTemplate, AddressBookEntry, AddressBookRoot, AssetFeeTier, CreateRouteParams,
         ExecutionStatus, FeeConfig, FillReceipt, FixedRole, ManageRouteParams, ProtocolFeeConfig,
@@ -1124,25 +1124,18 @@ pub struct TriggerAccounts {
     pub sra_config: Pubkey,
     pub source_mint: Pubkey,
     pub sra_vault: Pubkey,
-    pub address_book_root: Pubkey,
     pub adapter_program: Pubkey,
     pub adapter_authority: Pubkey,
     pub adapter_custody: Pubkey,
 }
 
 impl TriggerAccounts {
-    pub fn derive(
-        sra_config: &Pubkey,
-        source_mint: &Pubkey,
-        address_book_root: &Pubkey,
-        adapter_program: &Pubkey,
-    ) -> Self {
+    pub fn derive(sra_config: &Pubkey, source_mint: &Pubkey, adapter_program: &Pubkey) -> Self {
         let (adapter_authority, _) = derive_adapter_authority_pda(sra_config, adapter_program);
         Self {
             sra_config: *sra_config,
             source_mint: *source_mint,
             sra_vault: derive_ata(sra_config, source_mint),
-            address_book_root: *address_book_root,
             adapter_program: *adapter_program,
             adapter_authority,
             adapter_custody: derive_ata(&adapter_authority, source_mint),
@@ -1173,7 +1166,6 @@ pub fn trigger_ix(
             sra_vault: accounts.sra_vault,
             adapter_authority: accounts.adapter_authority,
             adapter_custody: accounts.adapter_custody,
-            address_book_root: accounts.address_book_root,
             adapter_program: accounts.adapter_program,
             address_book_entry: *address_book_entry,
             fee_config: derive_fee_config_pda().0,
@@ -1187,8 +1179,10 @@ pub fn trigger_ix(
         }
         .to_account_metas(None),
         data: sra_handler::instruction::Trigger {
-            params,
-            paired_adapter_ix_data_hash,
+            args: TriggerArgs {
+                params,
+                paired_adapter_ix_data_hash,
+            },
         }
         .data(),
     }
@@ -1371,12 +1365,7 @@ impl PassiveFixture {
             target_decimals,
         );
 
-        let accounts = TriggerAccounts::derive(
-            &sra_config,
-            &source_mint,
-            &address_book_root,
-            &adapter_program,
-        );
+        let accounts = TriggerAccounts::derive(&sra_config, &source_mint, &adapter_program);
         let owner_ata = create_ata(svm, &payer, &owner.pubkey(), &source_mint);
         let across_state = funded_keypair(svm, SOL).pubkey();
         let across_vault = create_ata(svm, &payer, &across_state, &source_mint);
@@ -1490,8 +1479,7 @@ impl PassiveFixture {
     {
         let (execute_ix, event_data) =
             execute_deposit_cctp_ix(&self.payer.pubkey(), self, &cctp_params_for(&params));
-        let address_book_entry =
-            self.address_book_entry(params.target_chain_id, &params.target_token);
+        let address_book_entry = self.address_book_entry(self.target_chain_id, &self.target_token);
         let mut trigger_ix = trigger_ix(
             &self.payer.pubkey(),
             &self.initiator.pubkey(),

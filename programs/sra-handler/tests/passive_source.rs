@@ -228,7 +228,7 @@ fn passive_cctp_happy_path() {
         &fx.payer.pubkey(),
         &fx.initiator.pubkey(),
         &fx.accounts,
-        &fx.address_book_entry(params.target_chain_id, &params.target_token),
+        &fx.address_book_entry(fx.target_chain_id, &fx.target_token),
         Some(fee_ata),
         params.clone(),
         &execute_ix,
@@ -303,7 +303,7 @@ fn passive_across_happy_path() {
         &fx.payer.pubkey(),
         &fx.initiator.pubkey(),
         &fx.accounts,
-        &fx.address_book_entry(params.target_chain_id, &params.target_token),
+        &fx.address_book_entry(fx.target_chain_id, &fx.target_token),
         Some(fee_ata),
         params.clone(),
         &execute_ix,
@@ -401,12 +401,8 @@ fn passive_sra_nonce_progresses_across_adapters_and_mints() {
         cctp.target_token,
         6,
     );
-    let across_accounts = TriggerAccounts::derive(
-        &cctp.sra_config,
-        &across_mint,
-        &cctp.address_book_root,
-        &ADAPTER_PROGRAM_ID,
-    );
+    let across_accounts =
+        TriggerAccounts::derive(&cctp.sra_config, &across_mint, &ADAPTER_PROGRAM_ID);
     let across_vault = create_ata(&mut svm, &cctp.payer, &cctp.across_state, &across_mint);
     let across = common::PassiveFixture {
         payer: cctp.payer.insecure_clone(),
@@ -528,7 +524,7 @@ fn cctp_pair(
     fee_ata: Option<Pubkey>,
 ) -> (Instruction, Instruction, Keypair) {
     let (execute, event) = execute_deposit_cctp_ix(&fx.payer.pubkey(), fx, &cctp);
-    let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
+    let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let trigger = trigger_ix(
         &fx.payer.pubkey(),
         &fx.initiator.pubkey(),
@@ -555,7 +551,7 @@ fn across_pair(
         &params,
         across,
     );
-    let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
+    let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let trigger = trigger_ix(
         &fx.payer.pubkey(),
         &fx.initiator.pubkey(),
@@ -698,7 +694,7 @@ fn passive_trigger_pins_sra_mint_vault_authority_custody_and_adapter() {
         (4, fx.owner_ata),
         (5, Pubkey::new_unique()),
         (6, fx.owner_ata),
-        (8, PROGRAM_ID),
+        (7, PROGRAM_ID),
     ];
     for (slot, substitute) in substitutes {
         let (mut trigger, execute, event) =
@@ -720,7 +716,6 @@ fn passive_trigger_pins_address_book_and_rejects_disabled_entry() {
     let mut svm = setup_svm();
     let fx = common::PassiveFixture::new(&mut svm);
     let params = sample_prepare_params(fx.target_token);
-    let wrong_root = init_address_book_root(&mut svm, &fx.payer, &fx.owner);
     let wrong_entry = setup_address_book_entry(
         &mut svm,
         &fx.payer,
@@ -731,32 +726,28 @@ fn passive_trigger_pins_address_book_and_rejects_disabled_entry() {
         fx.target_token,
         6,
     );
-    for (slot, substitute) in [(7, wrong_root), (9, wrong_entry)] {
-        let (mut trigger, execute, event) =
-            cctp_pair(&fx, params.clone(), cctp_params_for(&params), None);
-        trigger.accounts[slot].pubkey = substitute;
-        assert_rejected_unchanged(
-            &mut svm,
-            &fx,
-            &[trigger, execute],
-            &[&fx.initiator, &event],
-            Some(event.pubkey()),
-            "wrong address-book account must reject",
-        );
-    }
-    for slot in [7, 9] {
-        let (mut trigger, execute, event) =
-            cctp_pair(&fx, params.clone(), cctp_params_for(&params), None);
-        trigger.accounts.remove(slot);
-        assert_rejected_unchanged(
-            &mut svm,
-            &fx,
-            &[trigger, execute],
-            &[&fx.initiator, &event],
-            Some(event.pubkey()),
-            "missing address-book account must reject",
-        );
-    }
+    let (mut trigger, execute, event) =
+        cctp_pair(&fx, params.clone(), cctp_params_for(&params), None);
+    trigger.accounts[8].pubkey = wrong_entry;
+    assert_rejected_unchanged(
+        &mut svm,
+        &fx,
+        &[trigger, execute],
+        &[&fx.initiator, &event],
+        Some(event.pubkey()),
+        "wrong address-book entry must reject",
+    );
+    let (mut trigger, execute, event) =
+        cctp_pair(&fx, params.clone(), cctp_params_for(&params), None);
+    trigger.accounts.remove(8);
+    assert_rejected_unchanged(
+        &mut svm,
+        &fx,
+        &[trigger, execute],
+        &[&fx.initiator, &event],
+        Some(event.pubkey()),
+        "missing address-book entry must reject",
+    );
 
     setup_address_book_entry(
         &mut svm,
@@ -935,7 +926,7 @@ fn passive_trigger_rejects_fee_slippage_and_pairing_mismatches_atomically() {
 
     let (mut trigger, execute, event) =
         cctp_pair(&fx, params.clone(), cctp_params_for(&params), Some(fee_ata));
-    trigger.accounts[13].pubkey = fx.owner_ata;
+    trigger.accounts[12].pubkey = fx.owner_ata;
     assert_rejected_unchanged(
         &mut svm,
         &fx,
@@ -1114,12 +1105,8 @@ fn passive_cctp_rejects_noncanonical_or_non_six_decimal_mint() {
         base.target_token,
         6,
     );
-    let other_accounts = TriggerAccounts::derive(
-        &base.sra_config,
-        &other_mint,
-        &base.address_book_root,
-        &CCTP_ADAPTER_PROGRAM_ID,
-    );
+    let other_accounts =
+        TriggerAccounts::derive(&base.sra_config, &other_mint, &CCTP_ADAPTER_PROGRAM_ID);
     let across_state = funded_keypair(&mut svm, SOL).pubkey();
     let across_vault = create_ata(&mut svm, &base.payer, &across_state, &other_mint);
     let other = common::PassiveFixture {

@@ -43,7 +43,7 @@ fn measure_source_2ix_cu(
 ) -> u64 {
     let (execute_ix, event_data) =
         execute_deposit_cctp_ix(&fx.payer.pubkey(), fx, &cctp_params_for(&params));
-    let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
+    let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let trigger = trigger_ix(
         &fx.payer.pubkey(),
         &fx.initiator.pubkey(),

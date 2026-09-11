@@ -101,12 +101,7 @@ impl SurfpoolSourceFixture {
         let target_chain_id = sample_prepare_params(target_token).target_chain_id;
         let salt = [0xAB; 32];
         let (sra_config, _) = derive_sra_pda(&owner.pubkey(), &handler_data, &salt);
-        let accounts = TriggerAccounts::derive(
-            &sra_config,
-            &USDC_MINT,
-            &address_book_root_pubkey,
-            &adapter_program,
-        );
+        let accounts = TriggerAccounts::derive(&sra_config, &USDC_MINT, &adapter_program);
         let (across_state, _) = derive_real_across_state_pda();
         let across_vault = derive_ata(&across_state, &USDC_MINT);
 

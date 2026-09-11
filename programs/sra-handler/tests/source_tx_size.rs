@@ -25,7 +25,7 @@ fn build_source_versioned_tx_with_lookup_tables(
     params: PrepareParams,
     lookup_tables: &[AddressLookupTableAccount],
 ) -> VersionedTransaction {
-    let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
+    let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let (execute_ix, event_data) =
         execute_deposit_cctp_ix(&fx.payer.pubkey(), fx, &cctp_params_for(&params));
     let trigger = trigger_ix(
@@ -59,7 +59,7 @@ fn build_source_versioned_tx(
     fx: &PassiveFixture,
     params: PrepareParams,
 ) -> VersionedTransaction {
-    let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
+    let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
     let (execute_ix, _event_data) =
         execute_deposit_cctp_ix(&fx.payer.pubkey(), fx, &cctp_params_for(&params));
     let trigger = trigger_ix(

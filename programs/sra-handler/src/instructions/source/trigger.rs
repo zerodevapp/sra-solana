@@ -10,18 +10,16 @@ use sra_common::{
         SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_ASSET_FEE_TIER, SEED_FEE_CONFIG,
         SEED_PROTOCOL_FEE, SEED_SRA,
     },
-    source_deposit::{decode_output_amount, output_satisfies_slippage_floor, PrepareParams},
-    types::{
-        AddressBookEntry, AddressBookRoot, AssetFeeTier, FeeConfig, ProtocolFeeConfig, SraConfig,
-    },
+    source_deposit::{decode_output_amount, output_satisfies_slippage_floor, TriggerArgs},
+    types::{AddressBookEntry, AssetFeeTier, FeeConfig, ProtocolFeeConfig, SraConfig},
 };
 
 use crate::events::DepositTriggered;
 use crate::utils::adapter::validate_adapter_program;
 use crate::utils::ix_attestation::verify_next_adapter_ix;
+use crate::utils::read_optional_program_account;
 
 #[derive(Accounts)]
-#[instruction(params: PrepareParams)]
 pub struct Trigger<'info> {
     #[account(mut)]
     pub fee_payer: Signer<'info>,
@@ -49,17 +47,15 @@ pub struct Trigger<'info> {
         associated_token::authority = adapter_authority,
     )]
     pub adapter_custody: Box<Account<'info, TokenAccount>>,
-    #[account(address = sra_config.handler_data.address_book_root)]
-    pub address_book_root: Box<Account<'info, AddressBookRoot>>,
     /// CHECK: validated as an executable allowlisted adapter program.
     pub adapter_program: UncheckedAccount<'info>,
     #[account(
         seeds = [
             SEED_ADDRESS_BOOK,
-            address_book_root.key().as_ref(),
+            sra_config.handler_data.address_book_root.as_ref(),
             source_mint.key().as_ref(),
-            &params.target_chain_id.to_le_bytes(),
-            &params.target_token,
+            &sra_config.handler_data.target_chain_id.to_le_bytes(),
+            &sra_config.handler_data.target_token,
         ],
         bump = address_book_entry.bump,
     )]
@@ -86,36 +82,17 @@ pub struct Trigger<'info> {
     pub instructions_sysvar: UncheckedAccount<'info>,
 }
 
-fn read_optional_program_account<T: AccountDeserialize + Owner>(
-    info: AccountInfo,
-) -> Result<Option<T>> {
-    if info.data_is_empty() {
-        return Ok(None);
-    }
-    require_keys_eq!(
-        *info.owner,
-        T::owner(),
-        ErrorCode::AccountOwnedByWrongProgram
-    );
-    let data = info.try_borrow_data()?;
-    T::try_deserialize(&mut data.as_ref()).map(Some)
-}
-
-pub fn handler(
-    ctx: Context<Trigger>,
-    params: PrepareParams,
-    paired_adapter_ix_data_hash: [u8; 32],
-) -> Result<()> {
+pub fn handler(ctx: Context<Trigger>, args: TriggerArgs) -> Result<()> {
+    let TriggerArgs {
+        params,
+        paired_adapter_ix_data_hash,
+    } = args;
     let sra_config = &ctx.accounts.sra_config;
     require!(sra_config.active, SraError::SraInactive);
     require_keys_eq!(
         ctx.accounts.initiator.key(),
         sra_config.initiator,
         SraError::InitiatorNotAllowed
-    );
-    require!(
-        sra_config.final_handler == crate::ID,
-        SraError::InvalidHandlerData
     );
     require!(params.input_amount > 0, SraError::ZeroInputAmount);
     require!(
@@ -126,24 +103,6 @@ pub fn handler(
     let config_hash = sra_config
         .handler_data
         .config_hash(&sra_config.owner, &sra_config.final_handler);
-    let (expected_sra, expected_bump) = Pubkey::find_program_address(
-        &[
-            SEED_SRA,
-            sra_config.owner.as_ref(),
-            config_hash.as_ref(),
-            sra_config.salt.as_ref(),
-        ],
-        &crate::ID,
-    );
-    require_keys_eq!(
-        ctx.accounts.sra_config.key(),
-        expected_sra,
-        SraError::InvalidHandlerData
-    );
-    require!(
-        sra_config.bump == expected_bump,
-        SraError::InvalidHandlerData
-    );
     require!(
         sra_config.handler_data.target_chain_id == params.target_chain_id
             && sra_config.handler_data.recipient == params.recipient
