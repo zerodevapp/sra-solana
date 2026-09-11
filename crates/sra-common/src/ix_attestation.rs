@@ -269,6 +269,21 @@ mod tests {
         .expect_err("mutated shared deposit field must reject");
         assert_eq!(err, error!(SraError::PairedInstructionMismatch));
 
+        let deposit = sample(&prepare);
+        let mut mismatched_prepare = prepare.clone();
+        mismatched_prepare.output_amount[31] = mismatched_prepare.output_amount[31].wrapping_add(1);
+        let previous = matching_previous(&mismatched_prepare, &deposit);
+        let mut sysvar = InstructionsSysvarFixture::new(1, &[previous, empty_instruction()]);
+        let err = verify_previous_trigger_ix(
+            &sysvar.account_info(),
+            &sra_config,
+            &source_mint,
+            &adapter_program,
+            &deposit,
+        )
+        .expect_err("recomputed deposit must equal the supplied deposit");
+        assert_eq!(err, error!(SraError::PairedInstructionMismatch));
+
         // A handler payload whose attested fee exceeds the input can never
         // have executed, but the verifier must keep its error surface closed:
         // conversion failure is a pairing mismatch, not a leaked overflow.

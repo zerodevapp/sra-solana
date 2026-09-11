@@ -34,20 +34,23 @@ fn output_satisfies_slippage_floor(
         .checked_mul(slippage_numerator)
         .ok_or(SraError::ArithmeticOverflow)?
         .div_ceil(denominator);
-    let (output, minimum) = if input_decimals >= output_decimals {
+    if input_decimals >= output_decimals {
         let exponent = (input_decimals - output_decimals) as u32;
-        (
-            output_amount.saturating_mul(10u128.saturating_pow(exponent)),
-            minimum_source,
-        )
+        let output = 10u128
+            .checked_pow(exponent)
+            .and_then(|scale| output_amount.checked_mul(scale));
+        Ok(output
+            .map(|scaled| scaled >= minimum_source)
+            .unwrap_or(output_amount > 0 || minimum_source == 0))
     } else {
         let exponent = (output_decimals - input_decimals) as u32;
-        (
-            output_amount,
-            minimum_source.saturating_mul(10u128.saturating_pow(exponent)),
-        )
-    };
-    Ok(output >= minimum)
+        let minimum = 10u128
+            .checked_pow(exponent)
+            .and_then(|scale| minimum_source.checked_mul(scale));
+        Ok(minimum
+            .map(|scaled| output_amount >= scaled)
+            .unwrap_or(minimum_source == 0))
+    }
 }
 
 #[derive(Accounts)]
@@ -296,4 +299,44 @@ pub fn handler(
         target_token: params.target_token,
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slippage_floor_rounds_up_at_equal_decimals() {
+        assert!(!output_satisfies_slippage_floor(1_000_001, 6, 995_000, 6, 50).unwrap());
+        assert!(output_satisfies_slippage_floor(1_000_001, 6, 995_001, 6, 50).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_rounds_up_when_target_is_more_precise() {
+        assert!(!output_satisfies_slippage_floor(1_000_001, 6, 9_950_009, 7, 50).unwrap());
+        assert!(output_satisfies_slippage_floor(1_000_001, 6, 9_950_010, 7, 50).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_rounds_up_when_source_is_more_precise() {
+        assert!(!output_satisfies_slippage_floor(10_051, 7, 1_000, 6, 50).unwrap());
+        assert!(output_satisfies_slippage_floor(10_051, 7, 1_001, 6, 50).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_rejects_unrepresentable_target_scale() {
+        assert!(!output_satisfies_slippage_floor(1, 6, u128::MAX, 45, 50).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_accepts_unrepresentable_positive_output_scale() {
+        assert!(output_satisfies_slippage_floor(1, 45, 1, 6, 50).unwrap());
+        assert!(!output_satisfies_slippage_floor(1, 45, 0, 6, 50).unwrap());
+    }
+
+    #[test]
+    fn slippage_floor_zero_minimum_survives_unrepresentable_scales() {
+        assert!(output_satisfies_slippage_floor(1, 6, 0, 45, 10_000).unwrap());
+        assert!(output_satisfies_slippage_floor(1, 45, 0, 6, 10_000).unwrap());
+    }
 }

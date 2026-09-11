@@ -12,6 +12,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::{TransactionError, VersionedTransaction},
 };
+use sra_cctp_adapter::CctpAdapterError;
 use sra_common::{
     abi::u256_from_u64,
     constants::FINALITY_THRESHOLD_FAST,
@@ -1033,15 +1034,23 @@ fn passive_cctp_rejects_noncanonical_or_non_six_decimal_mint() {
     mint.decimals = 5;
     mint.pack_into_slice(&mut mint_account.data);
     svm.set_account(fx.source_mint, mint_account).unwrap();
-    let params = sample_prepare_params(fx.target_token);
+    let mut params = sample_prepare_params(fx.target_token);
+    params.output_amount = u256_from_u64(9_950_000);
     let (trigger, execute, event) = cctp_pair(&fx, params.clone(), cctp_params_for(&params), None);
-    assert_rejected_unchanged(
+    let error = assert_rejected_unchanged(
         &mut svm,
         &fx,
         &[trigger, execute],
         &[&fx.initiator, &event],
         Some(event.pubkey()),
         "non-six-decimal CCTP mint must reject",
+    );
+    assert_eq!(
+        error,
+        TransactionError::InstructionError(
+            1,
+            InstructionError::Custom(CctpAdapterError::InvalidInputMint.into()),
+        )
     );
 }
 
