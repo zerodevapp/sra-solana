@@ -12,6 +12,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::{TransactionError, VersionedTransaction},
 };
+use sra_across_adapter::AcrossAdapterError;
 use sra_cctp_adapter::CctpAdapterError;
 use sra_common::{
     abi::u256_from_u64,
@@ -346,6 +347,129 @@ fn passive_across_happy_path() {
         extract_anchor_event::<sra_across_adapter::events::AcrossDepositExecuted>(&metadata.logs)
             .unwrap();
     assert_eq!(executed.nonce, 0);
+}
+
+#[test]
+fn passive_sra_nonce_progresses_across_adapters_and_mints() {
+    let mut svm = setup_svm();
+    let cctp = common::PassiveFixture::new_with_adapter_policy(
+        &mut svm,
+        CCTP_ADAPTER_PROGRAM_ID,
+        50,
+        vec![CCTP_ADAPTER_PROGRAM_ID, ADAPTER_PROGRAM_ID],
+    );
+    let cctp_params = sample_prepare_params(cctp.target_token);
+    let (trigger, execute, event) = cctp_pair(
+        &cctp,
+        cctp_params.clone(),
+        cctp_params_for(&cctp_params),
+        None,
+    );
+    let metadata = send_instructions(
+        &mut svm,
+        &[trigger, execute],
+        &cctp.payer,
+        &[&cctp.initiator, &event],
+    )
+    .unwrap();
+    assert_eq!(fetch_sra_config(&svm, &cctp.sra_config).deposit_nonce, 1);
+    assert_eq!(extract_deposit_triggered(&metadata.logs).unwrap().nonce, 0);
+    assert_eq!(
+        extract_anchor_event::<sra_cctp_adapter::events::CctpDepositExecuted>(&metadata.logs)
+            .unwrap()
+            .nonce,
+        0
+    );
+
+    let across_mint = create_mint(&mut svm, &cctp.payer, &cctp.payer.pubkey(), 6);
+    let across_sra_vault = create_ata(&mut svm, &cctp.payer, &cctp.sra_config, &across_mint);
+    mint_to(
+        &mut svm,
+        &cctp.payer,
+        &cctp.payer,
+        &across_mint,
+        &across_sra_vault,
+        SRA_STARTING_BALANCE,
+    );
+    setup_address_book_entry(
+        &mut svm,
+        &cctp.payer,
+        &cctp.owner,
+        &cctp.address_book_root,
+        &across_mint,
+        cctp.target_chain_id,
+        cctp.target_token,
+        6,
+    );
+    let across_accounts = TriggerAccounts::derive(
+        &cctp.sra_config,
+        &across_mint,
+        &cctp.address_book_root,
+        &ADAPTER_PROGRAM_ID,
+    );
+    let across_vault = create_ata(&mut svm, &cctp.payer, &cctp.across_state, &across_mint);
+    let across = common::PassiveFixture {
+        payer: cctp.payer.insecure_clone(),
+        owner: cctp.owner.insecure_clone(),
+        initiator: cctp.initiator.insecure_clone(),
+        fee_admin: cctp.fee_admin.insecure_clone(),
+        address_book_root: cctp.address_book_root,
+        handler_data: cctp.handler_data.clone(),
+        sra_config: cctp.sra_config,
+        source_mint: across_mint,
+        target_chain_id: cctp.target_chain_id,
+        target_token: cctp.target_token,
+        adapter_program: ADAPTER_PROGRAM_ID,
+        accounts: across_accounts,
+        owner_ata: create_ata(&mut svm, &cctp.payer, &cctp.owner.pubkey(), &across_mint),
+        across_state: cctp.across_state,
+        across_vault,
+    };
+    let across_params = sample_prepare_params(across.target_token);
+    let (trigger, execute) = across_pair(
+        &svm,
+        &across,
+        across_params.clone(),
+        AcrossDepositParams::from_prepare(&across_params, Pubkey::new_unique(), 600, 120).unwrap(),
+        None,
+    );
+    let metadata = send_instructions(
+        &mut svm,
+        &[trigger, execute],
+        &across.payer,
+        &[&across.initiator],
+    )
+    .unwrap();
+    assert_eq!(fetch_sra_config(&svm, &across.sra_config).deposit_nonce, 2);
+    assert_eq!(extract_deposit_triggered(&metadata.logs).unwrap().nonce, 1);
+    assert_eq!(
+        extract_anchor_event::<sra_across_adapter::events::AcrossDepositExecuted>(&metadata.logs)
+            .unwrap()
+            .nonce,
+        1
+    );
+
+    let (trigger, execute, event) = cctp_pair(
+        &cctp,
+        cctp_params.clone(),
+        cctp_params_for(&cctp_params),
+        None,
+    );
+    let metadata = send_instructions(
+        &mut svm,
+        &[trigger, execute],
+        &cctp.payer,
+        &[&cctp.initiator, &event],
+    )
+    .unwrap();
+    assert_eq!(fetch_sra_config(&svm, &cctp.sra_config).deposit_nonce, 3);
+    assert_eq!(extract_deposit_triggered(&metadata.logs).unwrap().nonce, 2);
+    assert_eq!(
+        extract_anchor_event::<sra_cctp_adapter::events::CctpDepositExecuted>(&metadata.logs)
+            .unwrap()
+            .nonce,
+        2
+    );
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1131,13 +1255,20 @@ fn passive_across_rejects_timing_delegate_and_cpi_failure_atomically() {
         params.clone(),
         &execute,
     );
-    assert_rejected_unchanged(
+    let error = assert_rejected_unchanged(
         &mut svm,
         &fx,
         &[trigger, execute],
         &[&fx.initiator],
         None,
         "wrong Across delegate must reject",
+    );
+    assert_eq!(
+        error,
+        TransactionError::InstructionError(
+            1,
+            InstructionError::Custom(AcrossAdapterError::InvalidDelegateAccount.into()),
+        )
     );
 
     let fee_ata = enable_protocol_fee(&mut svm, &fx, 30, false, false);
