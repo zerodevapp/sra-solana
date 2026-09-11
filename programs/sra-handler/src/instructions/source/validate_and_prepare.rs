@@ -199,7 +199,7 @@ pub(crate) fn handler(
         SraError::InvalidHandlerData
     );
     require!(
-        handler_data.hash() == ctx.accounts.sra_config.handler_data_hash,
+        handler_data == ctx.accounts.sra_config.handler_data,
         SraError::InvalidHandlerData
     );
     require!(

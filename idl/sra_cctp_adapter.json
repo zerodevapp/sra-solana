@@ -1560,6 +1560,62 @@
       }
     },
     {
+      "name": "SourceHandlerData",
+      "docs": [
+        "Owner-installed source policy. Committed at SRA install via",
+        "`handler_data_hash` (folded into the SRA's PDA identity) and re-supplied,",
+        "then re-authenticated, on every deposit. The routing tuple",
+        "(`target_chain_id` / `recipient` / `target_token`) is part of the immutable",
+        "identity, mirroring the",
+        "EVM `RouteConfig` that `trigger()` reads from storage and a caller cannot",
+        "redirect (see `sra-stx/src/handler/SRAHandler.sol`). Every deposit must echo",
+        "this exact routing in `PrepareParams`; `validate_and_prepare` rejects any",
+        "divergence. Changing the route means a new SRA at a new address — the Solana",
+        "analogue of the EVM clone-proxy + `_onInstall` model."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "address_book_root",
+            "type": "pubkey"
+          },
+          {
+            "name": "target_chain_id",
+            "type": "u64"
+          },
+          {
+            "name": "recipient",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_token",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "allowed_slippage_bps",
+            "type": "u16"
+          },
+          {
+            "name": "allowed_adapters",
+            "type": {
+              "vec": "pubkey"
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "SraConfig",
       "docs": [
         "One source-side SRA per `(owner, final_handler, handler_data_hash, salt)`.",
@@ -1578,12 +1634,11 @@
             "type": "pubkey"
           },
           {
-            "name": "handler_data_hash",
+            "name": "handler_data",
             "type": {
-              "array": [
-                "u8",
-                32
-              ]
+              "defined": {
+                "name": "SourceHandlerData"
+              }
             }
           },
           {
@@ -1594,6 +1649,18 @@
                 32
               ]
             }
+          },
+          {
+            "name": "initiator",
+            "type": "pubkey"
+          },
+          {
+            "name": "active",
+            "type": "bool"
+          },
+          {
+            "name": "deposit_nonce",
+            "type": "u64"
           },
           {
             "name": "bump",

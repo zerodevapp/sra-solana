@@ -21,8 +21,19 @@ pub mod sra_handler {
         config_hash: [u8; 32],
         handler_data: SourceHandlerData,
         salt: [u8; 32],
+        initiator: Pubkey,
     ) -> Result<()> {
-        instructions::source::initialize_sra::handler(ctx, config_hash, handler_data, salt)
+        instructions::source::initialize_sra::handler(
+            ctx,
+            config_hash,
+            handler_data,
+            salt,
+            initiator,
+        )
+    }
+
+    pub fn manage_sra(ctx: Context<ManageSra>, initiator: Pubkey, active: bool) -> Result<()> {
+        instructions::source::manage_sra::handler(ctx, initiator, active)
     }
 
     pub fn initialize_address_book_root(ctx: Context<InitializeAddressBookRoot>) -> Result<()> {

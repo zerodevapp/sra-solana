@@ -426,6 +426,8 @@ pub fn initialize_sra_ix(
     sra_config: &Pubkey,
     handler_data: SourceHandlerData,
     salt: [u8; 32],
+    initiator: Pubkey,
+    initial_source_mint: Pubkey,
 ) -> Instruction {
     let config_hash = handler_data.config_hash(owner, &PROGRAM_ID);
     Instruction {
@@ -436,12 +438,17 @@ pub fn initialize_sra_ix(
             address_book_root: *address_book_root,
             sra_config: *sra_config,
             system_program: system_program::ID,
+            initial_source_mint,
+            initial_source_vault: derive_ata(sra_config, &initial_source_mint),
+            token_program: TOKEN_PROGRAM_ID,
+            associated_token_program: ATA_PROGRAM_ID,
         }
         .to_account_metas(None),
         data: sra_handler::instruction::InitializeSra {
             config_hash,
             handler_data,
             salt,
+            initiator,
         }
         .data(),
     }
@@ -506,6 +513,7 @@ pub fn init_sra_with(
     address_book_root: &Pubkey,
     handler_data: SourceHandlerData,
     salt: [u8; 32],
+    initial_source_mint: Pubkey,
 ) -> Pubkey {
     let (pda, _) = derive_sra_pda(&owner.pubkey(), &handler_data, &salt);
     let ix = initialize_sra_ix(
@@ -515,6 +523,8 @@ pub fn init_sra_with(
         &pda,
         handler_data,
         salt,
+        owner.pubkey(),
+        initial_source_mint,
     );
     send_ix(svm, ix, payer, &[owner]).expect("initialize_sra should succeed");
     pda
@@ -831,6 +841,23 @@ pub fn seed_mint_nonce_account(svm: &mut LiteSVM, pda: &Pubkey, nonce: u64, bump
 
 pub fn derive_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
     get_associated_token_address(owner, mint)
+}
+
+pub fn assert_token_account(
+    svm: &LiteSVM,
+    address: &Pubkey,
+    mint: Pubkey,
+    owner: Pubkey,
+    amount: u64,
+) {
+    use solana_sdk::program_pack::Pack;
+
+    let account = svm.get_account(address).expect("token account exists");
+    assert_eq!(account.owner, TOKEN_PROGRAM_ID);
+    let token = SplTokenAccount::unpack(&account.data).expect("initialized SPL token account");
+    assert_eq!(token.mint, mint);
+    assert_eq!(token.owner, owner);
+    assert_eq!(token.amount, amount);
 }
 
 pub const TOKEN_2022_PROGRAM_ID: Pubkey =
@@ -1334,6 +1361,7 @@ impl ValidatePrepareFixture {
             allowed_adapters,
         };
         let salt = [0xABu8; 32];
+        let source_mint = create_mint(svm, &payer, &payer.pubkey(), source_decimals);
         let sra_config = init_sra_with(
             svm,
             &payer,
@@ -1341,9 +1369,9 @@ impl ValidatePrepareFixture {
             &address_book_root,
             handler_data.clone(),
             salt,
+            source_mint,
         );
 
-        let source_mint = create_mint(svm, &payer, &payer.pubkey(), source_decimals);
         setup_address_book_entry(
             svm,
             &payer,

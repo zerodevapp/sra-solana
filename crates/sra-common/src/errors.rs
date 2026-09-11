@@ -173,4 +173,7 @@ pub enum SraError {
     // -- Destination: verified-CPI (appended to keep existing error codes stable) --
     #[msg("Verified-CPI callee did not consume the full staged input")]
     InputNotConsumed,
+
+    #[msg("Initiator pubkey must be non-zero")]
+    InvalidInitiator,
 }

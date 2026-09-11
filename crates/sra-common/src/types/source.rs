@@ -63,8 +63,11 @@ impl SourceHandlerData {
 pub struct SraConfig {
     pub owner: Pubkey,
     pub final_handler: Pubkey,
-    pub handler_data_hash: [u8; 32],
+    pub handler_data: SourceHandlerData,
     pub salt: [u8; 32],
+    pub initiator: Pubkey,
+    pub active: bool,
+    pub deposit_nonce: u64,
     pub bump: u8,
 }
 
@@ -127,8 +130,10 @@ mod tests {
 
     #[test]
     fn sra_config_init_space() {
-        // 32 owner + 32 final_handler + 32 handler_data_hash + 32 salt + 1 bump = 129
-        assert_eq!(SraConfig::INIT_SPACE, 129);
+        assert_eq!(
+            SraConfig::INIT_SPACE,
+            32 + 32 + SourceHandlerData::INIT_SPACE + 32 + 32 + 1 + 8 + 1,
+        );
     }
 
     #[test]
