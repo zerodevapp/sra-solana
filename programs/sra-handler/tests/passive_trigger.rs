@@ -146,7 +146,18 @@ fn passive_trigger_rejects_wrong_missing_and_non_signing_initiator_atomically() 
 fn passive_trigger_rejects_inactive_sra_and_replaced_initiator_atomically() {
     let mut svm = setup_svm();
     let fx = PassiveFixture::new(&mut svm);
-    set_sra_config(&mut svm, &fx.sra_config, |state| state.active = false);
+    send_ix(
+        &mut svm,
+        manage_sra_ix(
+            fx.owner.pubkey(),
+            fx.sra_config,
+            fx.initiator.pubkey(),
+            false,
+        ),
+        &fx.payer,
+        &[&fx.owner],
+    )
+    .unwrap();
     let params = sample_prepare_params(fx.target_token);
     let (trigger, execute, event) = cctp_pair(&fx, params.clone(), cctp_params_for(&params), None);
     let error = assert_rejected_unchanged(
@@ -160,10 +171,13 @@ fn passive_trigger_rejects_inactive_sra_and_replaced_initiator_atomically() {
     assert_sra_error(error, 0, SraError::SraInactive);
 
     let replacement = funded_keypair(&mut svm, SOL);
-    set_sra_config(&mut svm, &fx.sra_config, |state| {
-        state.active = true;
-        state.initiator = replacement.pubkey();
-    });
+    send_ix(
+        &mut svm,
+        manage_sra_ix(fx.owner.pubkey(), fx.sra_config, replacement.pubkey(), true),
+        &fx.payer,
+        &[&fx.owner],
+    )
+    .unwrap();
     let (trigger, execute, event) = cctp_pair(&fx, params.clone(), cctp_params_for(&params), None);
     let error = assert_rejected_unchanged(
         &mut svm,

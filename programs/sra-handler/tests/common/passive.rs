@@ -1,5 +1,5 @@
 use super::*;
-use anchor_lang::AccountSerialize;
+use anchor_lang::{AccountSerialize, InstructionData, ToAccountMetas};
 use litesvm_token::spl_token::state::{Account, Mint};
 use solana_sdk::{
     instruction::{Instruction, InstructionError},
@@ -92,6 +92,18 @@ impl PassiveFixture {
             across_state,
             across_vault,
         }
+    }
+}
+
+pub fn manage_sra_ix(owner: Pubkey, sra: Pubkey, initiator: Pubkey, active: bool) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::ManageSra {
+            owner,
+            sra_config: sra,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::ManageSra { initiator, active }.data(),
     }
 }
 

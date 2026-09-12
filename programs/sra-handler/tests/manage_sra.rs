@@ -1,22 +1,10 @@
 mod common;
 
-use anchor_lang::{error::ErrorCode, AccountSerialize, InstructionData, ToAccountMetas};
+use anchor_lang::{error::ErrorCode, AccountSerialize};
 use common::*;
 use litesvm::LiteSVM;
-use solana_sdk::{instruction::Instruction, pubkey::Pubkey, signer::Signer};
+use solana_sdk::{pubkey::Pubkey, signer::Signer};
 use sra_common::errors::SraError;
-
-fn manage_sra_ix(owner: Pubkey, sra: Pubkey, initiator: Pubkey, active: bool) -> Instruction {
-    Instruction {
-        program_id: PROGRAM_ID,
-        accounts: sra_handler::accounts::ManageSra {
-            owner,
-            sra_config: sra,
-        }
-        .to_account_metas(None),
-        data: sra_handler::instruction::ManageSra { initiator, active }.data(),
-    }
-}
 
 fn manage_sra(
     svm: &mut LiteSVM,
