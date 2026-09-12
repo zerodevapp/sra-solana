@@ -3,7 +3,11 @@
 
 pub mod cctp;
 pub mod dest_e2e;
+pub mod passive;
 pub mod surfpool;
+
+#[allow(unused_imports)]
+pub use passive::*;
 
 use anchor_lang::{
     error::ErrorCode, AccountDeserialize, AnchorSerialize, Discriminator, InstructionData,
@@ -867,6 +871,14 @@ pub fn create_mint(
         .expect("create_mint should succeed")
 }
 
+fn create_canonical_cctp_mint(svm: &mut LiteSVM, payer: &Keypair, decimals: u8) -> Pubkey {
+    let mint = create_mint(svm, payer, &payer.pubkey(), decimals);
+    let mint_account = svm.get_account(&mint).unwrap();
+    svm.set_account(sra_common::constants::USDC_MINT, mint_account)
+        .unwrap();
+    sra_common::constants::USDC_MINT
+}
+
 pub fn create_ata(svm: &mut LiteSVM, payer: &Keypair, owner: &Pubkey, mint: &Pubkey) -> Pubkey {
     CreateAssociatedTokenAccount::new(svm, payer, mint)
         .owner(owner)
@@ -1208,45 +1220,33 @@ pub struct PassiveFixture {
     pub adapter_program: Pubkey,
     pub accounts: TriggerAccounts,
     pub owner_ata: Pubkey,
-    /// Across-leg fields consumed by the Surfpool E2E fixture (which drives
-    /// the deployed Across program); the LiteSVM source flow currently runs
-    /// against the CCTP adapter. Both adapters ship and stay — Across
-    /// LiteSVM source coverage is restored by the dual-adapter suites.
     pub across_state: Pubkey,
     pub across_vault: Pubkey,
 }
 
 impl PassiveFixture {
     pub fn new(svm: &mut LiteSVM) -> Self {
-        Self::new_with_decimals_and_adapter_policy(
-            svm,
-            6,
-            6,
-            CCTP_ADAPTER_PROGRAM_ID,
-            50,
-            vec![CCTP_ADAPTER_PROGRAM_ID],
-        )
+        Self::build_cctp(svm, 6, 6, 50, vec![CCTP_ADAPTER_PROGRAM_ID], 42_161)
     }
 
     pub fn new_with(svm: &mut LiteSVM, allowed_slippage_bps: u16) -> Self {
-        Self::new_with_decimals_and_adapter_policy(
+        Self::build_cctp(
             svm,
             6,
             6,
-            CCTP_ADAPTER_PROGRAM_ID,
             allowed_slippage_bps,
             vec![CCTP_ADAPTER_PROGRAM_ID],
+            42_161,
         )
     }
 
     /// Default CCTP fixture whose SRA commits to `target_chain_id` — e.g. a
     /// chain with no CCTP domain mapping, to exercise `UnsupportedChain`.
     pub fn new_with_target_chain(svm: &mut LiteSVM, target_chain_id: u64) -> Self {
-        Self::build(
+        Self::build_cctp(
             svm,
             6,
             6,
-            CCTP_ADAPTER_PROGRAM_ID,
             50,
             vec![CCTP_ADAPTER_PROGRAM_ID],
             target_chain_id,
@@ -1267,6 +1267,14 @@ impl PassiveFixture {
             allowed_slippage_bps,
             allowed_adapters,
         )
+    }
+
+    pub fn new_cctp_with_adapter_policy(
+        svm: &mut LiteSVM,
+        allowed_slippage_bps: u16,
+        allowed_adapters: Vec<Pubkey>,
+    ) -> Self {
+        Self::build_cctp(svm, 6, 6, allowed_slippage_bps, allowed_adapters, 42_161)
     }
 
     pub fn new_with_decimals_and_adapter_policy(
@@ -1298,6 +1306,51 @@ impl PassiveFixture {
         target_chain_id: u64,
     ) -> Self {
         let payer = funded_keypair(svm, 100 * SOL);
+        let source_mint = create_mint(svm, &payer, &payer.pubkey(), source_decimals);
+        Self::build_with_mint(
+            svm,
+            payer,
+            source_mint,
+            target_decimals,
+            adapter_program,
+            allowed_slippage_bps,
+            allowed_adapters,
+            target_chain_id,
+        )
+    }
+
+    fn build_cctp(
+        svm: &mut LiteSVM,
+        source_decimals: u8,
+        target_decimals: u8,
+        allowed_slippage_bps: u16,
+        allowed_adapters: Vec<Pubkey>,
+        target_chain_id: u64,
+    ) -> Self {
+        let payer = funded_keypair(svm, 100 * SOL);
+        let source_mint = create_canonical_cctp_mint(svm, &payer, source_decimals);
+        Self::build_with_mint(
+            svm,
+            payer,
+            source_mint,
+            target_decimals,
+            CCTP_ADAPTER_PROGRAM_ID,
+            allowed_slippage_bps,
+            allowed_adapters,
+            target_chain_id,
+        )
+    }
+
+    fn build_with_mint(
+        svm: &mut LiteSVM,
+        payer: Keypair,
+        source_mint: Pubkey,
+        target_decimals: u8,
+        adapter_program: Pubkey,
+        allowed_slippage_bps: u16,
+        allowed_adapters: Vec<Pubkey>,
+        target_chain_id: u64,
+    ) -> Self {
         let owner = funded_keypair(svm, SOL);
         let initiator = funded_keypair(svm, SOL);
 
@@ -1327,15 +1380,6 @@ impl PassiveFixture {
             allowed_adapters,
         };
         let salt = [0xABu8; 32];
-        let created_mint = create_mint(svm, &payer, &payer.pubkey(), source_decimals);
-        let source_mint = if adapter_program == CCTP_ADAPTER_PROGRAM_ID {
-            let mint_account = svm.get_account(&created_mint).unwrap();
-            svm.set_account(sra_common::constants::USDC_MINT, mint_account)
-                .unwrap();
-            sra_common::constants::USDC_MINT
-        } else {
-            created_mint
-        };
         let (sra_config, _) = derive_sra_pda(&owner.pubkey(), &handler_data, &salt);
         send_ix(
             svm,

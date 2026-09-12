@@ -76,6 +76,14 @@ fn build_source_versioned_tx(
     build_source_versioned_tx_with_lookup_tables(svm, fx, params, &[lookup_table])
 }
 
+fn build_source_versioned_tx_without_alt(
+    svm: &mut litesvm::LiteSVM,
+    fx: &PassiveFixture,
+    params: PrepareParams,
+) -> VersionedTransaction {
+    build_source_versioned_tx_with_lookup_tables(svm, fx, params, &[])
+}
+
 #[test]
 fn source_2ix_versioned_tx_fits_within_packet_limit() {
     let mut svm = setup_svm();
@@ -98,4 +106,19 @@ fn source_2ix_versioned_tx_fits_within_packet_limit() {
         size <= PACKET_DATA_SIZE,
         "source 2-IX versioned tx is {size} bytes, exceeds {PACKET_DATA_SIZE}-byte packet limit",
     );
+}
+
+#[test]
+fn source_2ix_versioned_tx_exceeds_packet_limit_without_alt() {
+    let mut svm = setup_svm();
+    let fx = PassiveFixture::new(&mut svm);
+    let params = PrepareParams {
+        input_amount: INPUT,
+        output_amount: u256_from_u64(OUTPUT_WITHIN_SLIPPAGE),
+        ..sample_prepare_params(fx.target_token)
+    };
+    let tx = build_source_versioned_tx_without_alt(&mut svm, &fx, params);
+    let size = bincode::serialize(&tx).expect("bincode serialize tx").len();
+    println!("source 2-IX versioned tx without ALT: {size} / {PACKET_DATA_SIZE} bytes");
+    assert!(size > PACKET_DATA_SIZE);
 }

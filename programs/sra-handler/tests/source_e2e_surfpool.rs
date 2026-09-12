@@ -241,25 +241,19 @@ impl SurfpoolSourceFixture {
         Ok(())
     }
 
-    /// The account/keypair view the shared instruction builders take.
     fn passive_fixture(&self, target_chain_id: u64) -> PassiveFixture {
-        PassiveFixture {
-            payer: self.payer.insecure_clone(),
-            owner: self.owner.insecure_clone(),
-            initiator: self.initiator.insecure_clone(),
-            fee_admin: Keypair::new(),
-            address_book_root: self.address_book_root,
-            handler_data: self.handler_data.clone(),
-            sra_config: self.sra_config,
-            source_mint: USDC_MINT,
+        PassiveFixture::from_existing_accounts(
+            &self.payer,
+            &self.owner,
+            &self.initiator,
+            self.handler_data.clone(),
+            self.sra_config,
+            USDC_MINT,
             target_chain_id,
-            target_token: self.target_token,
-            adapter_program: self.adapter_program,
-            accounts: self.accounts.clone(),
-            owner_ata: derive_ata(&self.owner.pubkey(), &USDC_MINT),
-            across_state: self.across_state,
-            across_vault: self.across_vault,
-        }
+            self.adapter_program,
+            self.across_state,
+            self.across_vault,
+        )
     }
 
     /// Pair `trigger` with the given adapter leg and submit the
