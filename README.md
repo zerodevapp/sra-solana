@@ -11,31 +11,36 @@ Solana programs for **Smart Routing Accounts (SRA)** — deterministic-address s
 
 ## SRA on Solana
 
-An SRA is a deterministic per-(owner, app, target) PDA that:
+An SRA is a deterministic PDA whose address commits to its owner, handler, immutable source routing policy, and salt. It:
 
-- Receives tokens on Solana and routes them to a target chain via a pluggable bridge adapter (Across in v1).
+- Receives tokens passively in handler-owned Solana vaults and lets the configured initiator route them through an allow-listed bridge adapter (Across or CCTP v2).
 - Receives bridged-in tokens on Solana via a fill verifier and runs pre-registered actions on the user's behalf. Protocol fees are taken once on the source side, not on arrival.
 - Stays bridge-agnostic and target-agnostic at the handler layer — bridge- and EVM-specific encoding lives in adapter programs.
 
 ## Architecture
 
-Two core on-chain programs plus a shared crate, plus test-only mocks:
+Three core on-chain programs plus a shared crate, plus test-only mocks:
 
 | Crate / Program          | Role                                                                                                   |
 | ------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `sra-handler`            | Bridge- and target-agnostic. Source: validation, vault custody handoff, raw routing-event emission. Destination: fill finalization, action execution, recovery. Also hosts fee administration. |
+| `sra-handler`            | Bridge- and target-agnostic. Source: passive-vault policy validation, fee collection, adapter custody handoff, and routing-event emission. Destination: fill finalization, action execution, recovery. Also hosts fee administration. |
 | `sra-across-adapter`     | Across-specific. Source: builds the canonical EVM ABI message + CPIs into Across `deposit_now`. Destination: reads `FillStatusAccount` and produces a `VerifiedFill`. |
-| `sra-common`             | Shared types, PDA seeds, constants, errors, and the manual ABI encoder. `declare_id!` matches `sra-handler`'s ID so handler-owned `#[account]` types deserialize correctly across both programs. |
+| `sra-cctp-adapter`       | CCTP v2-specific. Source: validates the CCTP quote/domain/finality contract and burns canonical USDC through `deposit_for_burn`. |
+| `sra-common`             | Shared types, trigger/adapter wire contracts, PDA seeds, constants, errors, and the manual ABI encoder. `declare_id!` matches `sra-handler`'s ID so handler-owned `#[account]` types deserialize correctly across programs. |
+| `mock-cctp`              | Test-only CCTP v2 stand-in used by the LiteSVM source tests. |
 | `mock-spoke-pool`        | Test-only minimal Across SVM SpokePool mock used by the LiteSVM/Surfpool tests. |
 | `mock-swap`              | Test-only swap target used to exercise the destination verified-CPI engine. |
 
-A source-side deposit currently ships as a 2-IX versioned transaction (`validate_and_prepare` + `execute_deposit_across`) and now requires an ALT-backed transaction path to stay within Solana's packet limit. The paired source instructions are bound together via the Instructions sysvar so neither can execute in isolation. The destination-side fill follows the same two-instruction pattern (`verify_across_fill` + `finalize_fill`), after which `execute_actions` runs the route's committed actions.
+A source-side deposit is a 2-IX versioned transaction: handler `trigger` followed by either `execute_deposit_across` or `execute_deposit_cctp`. The configured initiator authorizes `trigger`; the owner does not sign. `trigger` spends tokens already held in the SRA vault, and the paired instructions bind each other through the Instructions sysvar so neither can execute in isolation. The transaction requires an ALT-backed path to stay within Solana's packet limit. The destination-side fill follows the same two-instruction pattern (`verify_across_fill` + `finalize_fill`), after which `execute_actions` runs the route's committed actions.
+
+The source route tuple and adapter allow-list are immutable in `SraConfig.handler_data`; the owner can rotate the initiator or toggle the SRA active state with `manage_sra`. Each successful trigger increments one `deposit_nonce` stored on the SRA, shared across source mints and adapters. The protocol fee is deducted from the gross input, while the handler's decimal-normalized slippage floor is evaluated against that gross input. CCTP additionally checks that the worst-case post-CCTP-fee delivery covers the committed output.
 
 Local program IDs (see `Anchor.toml`):
 
 ```
 sra_handler         7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5
 sra_across_adapter  8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU
+sra_cctp_adapter    2bXAvxF3U4FtWAnJtcL9LDnwM7qnErf3y3m6USLRKpRw
 ```
 
 ## Project layout
@@ -51,6 +56,8 @@ sra-solana/
 ├── programs/
 │   ├── sra-handler/         # Handler program + LiteSVM tests under tests/
 │   ├── sra-across-adapter/  # Across adapter: source deposit + destination fill verification
+│   ├── sra-cctp-adapter/    # CCTP v2 source deposit adapter
+│   ├── mock-cctp/           # Test-only CCTP v2 stand-in
 │   ├── mock-spoke-pool/     # Test-only Across SpokePool mock
 │   └── mock-swap/           # Test-only swap target for the verified-CPI engine
 ├── tests/                   # Anchor TS smoke tests (mocha + ts-mocha)
@@ -98,7 +105,7 @@ cargo build
 
 ## Test
 
-There are two test surfaces:
+There are three test surfaces:
 
 **1. LiteSVM Rust tests** (in-process, fast — recommended while iterating)
 
@@ -109,8 +116,11 @@ cargo test
 # Just the handler program's tests
 cargo test -p sra-handler
 
-# A single test file
-cargo test -p sra-handler --test validate_and_prepare
+# Focused passive-source suites
+cargo test -p sra-handler --test manage_sra
+cargo test -p sra-handler --test passive_trigger
+cargo test -p sra-handler --test passive_cctp
+cargo test -p sra-handler --test passive_across
 ```
 
 These exercise instruction handlers against an in-process LiteSVM runtime. No validator required, but `anchor build` must run first because the suite loads `target/deploy/*.so` artifacts directly.
@@ -118,8 +128,8 @@ These exercise instruction handlers against an in-process LiteSVM runtime. No va
 **2. Anchor + mocha smoke tests** (runs against a local validator)
 
 ```bash
-# Spawns solana-test-validator, deploys, runs tests/*.ts, then tears down
-anchor test
+# After `anchor build`, run the same generated-client gate as CI
+anchor test --skip-build
 ```
 
 The current TS suite (`tests/sra-handler.ts`) is a smoke test that asserts the generated IDL/client surface — most coverage lives in the Rust LiteSVM tests.
@@ -132,7 +142,7 @@ NO_DNA=1 surfpool start --ci --network mainnet --legacy-anchor-compatibility
 cargo test -p sra-handler --test source_e2e_surfpool -- --ignored --nocapture
 ```
 
-This uses Surfpool's auto-deploy path to load the local `sra-handler` and `sra-across-adapter` programs at their declared Anchor IDs, then runs the Step 21 source deposit flow against the real Across `svm-spoke` program/state.
+This uses Surfpool's auto-deploy path to load the local `sra-handler` and `sra-across-adapter` programs at their declared Anchor IDs, then runs the source deposit flow against the real Across `svm-spoke` program/state.
 
 ## Running on localnet
 
@@ -152,10 +162,14 @@ Source-side handler:
 
 - [x] `initialize_address_book_root`
 - [x] `initialize_sra`
+- [x] `manage_sra`
 - [x] `set_address_book_entry`
-- [x] `validate_and_prepare`
+- [x] Passive-vault `trigger`
 - [x] Across adapter `execute_deposit_across`
+- [x] CCTP v2 adapter `execute_deposit_cctp`
 - [x] Across adapter `recover_stuck_custody`
+- [x] CCTP v2 adapter `recover_stuck_custody`
+- [ ] Owner recovery from the source SRA vault (not yet implemented)
 
 Destination-side handler:
 
@@ -190,6 +204,7 @@ yarn lint:fix    # rewrite
 
 - Program IDs in `Anchor.toml` and `declare_id!` are dev placeholders; they will rotate before any audited deployment.
 - The TS test harness is intentionally thin — Rust LiteSVM tests are the source of truth for behavioural coverage today.
+- Source-vault funds currently leave only through an initiator-authorized `trigger`. Owner recovery from the source SRA vault is not implemented yet; adapter `recover_stuck_custody` only recovers funds that already reached adapter custody.
 - No mainnet deployment exists. **Do not** point any production system at these program IDs.
 - **Launch checklist — burn upgrade authority.** The programs are designed to be immutable in production, but that cannot be enforced from inside the repo: it is a manual deploy-time step. After the verifiable build is deployed and verified on-chain, finalize each program with `solana program set-upgrade-authority <PROGRAM_ID> --final` and confirm the authority reads `none` before routing value through it.
 
