@@ -7,7 +7,213 @@ use solana_sdk::{
     transaction::TransactionError,
 };
 
+pub const SRA_STARTING_BALANCE: u64 = 10_000_000;
+const DEFAULT_TARGET_CHAIN_ID: u64 = 42_161;
+
+fn create_canonical_cctp_mint(svm: &mut LiteSVM, payer: &Keypair) -> Pubkey {
+    let mint = create_mint(svm, payer, &payer.pubkey(), 6);
+    let mint_account = svm.get_account(&mint).unwrap();
+    svm.set_account(sra_common::constants::USDC_MINT, mint_account)
+        .unwrap();
+    sra_common::constants::USDC_MINT
+}
+
+pub struct PassiveFixture {
+    pub payer: Keypair,
+    pub owner: Keypair,
+    pub initiator: Keypair,
+    /// Admin of the singleton fee config. The fixture initializes the config
+    /// with `Pubkey::default()` recipient (fees globally disabled) so the
+    /// zero-fee deposit paths run against genesis-like fee state; fee tests
+    /// use this admin to enable fees.
+    pub fee_admin: Keypair,
+    pub address_book_root: Pubkey,
+    pub handler_data: SourceHandlerData,
+    pub sra_config: Pubkey,
+    pub source_mint: Pubkey,
+    pub target_chain_id: u64,
+    pub target_token: [u8; 32],
+    pub adapter_program: Pubkey,
+    pub accounts: TriggerAccounts,
+    pub owner_ata: Pubkey,
+    pub across_state: Pubkey,
+    pub across_vault: Pubkey,
+}
+
 impl PassiveFixture {
+    pub fn new(svm: &mut LiteSVM) -> Self {
+        Self::build_cctp(
+            svm,
+            50,
+            vec![CCTP_ADAPTER_PROGRAM_ID],
+            DEFAULT_TARGET_CHAIN_ID,
+        )
+    }
+
+    pub fn new_with(svm: &mut LiteSVM, allowed_slippage_bps: u16) -> Self {
+        Self::build_cctp(
+            svm,
+            allowed_slippage_bps,
+            vec![CCTP_ADAPTER_PROGRAM_ID],
+            DEFAULT_TARGET_CHAIN_ID,
+        )
+    }
+
+    /// Default CCTP fixture whose SRA commits to `target_chain_id` — e.g. a
+    /// chain with no CCTP domain mapping, to exercise `UnsupportedChain`.
+    pub fn new_with_target_chain(svm: &mut LiteSVM, target_chain_id: u64) -> Self {
+        Self::build_cctp(svm, 50, vec![CCTP_ADAPTER_PROGRAM_ID], target_chain_id)
+    }
+
+    pub fn new_cctp_with_adapter_policy(
+        svm: &mut LiteSVM,
+        allowed_slippage_bps: u16,
+        allowed_adapters: Vec<Pubkey>,
+    ) -> Self {
+        Self::build_cctp(
+            svm,
+            allowed_slippage_bps,
+            allowed_adapters,
+            DEFAULT_TARGET_CHAIN_ID,
+        )
+    }
+
+    pub fn new_across_with_adapter_policy(
+        svm: &mut LiteSVM,
+        allowed_slippage_bps: u16,
+        allowed_adapters: Vec<Pubkey>,
+    ) -> Self {
+        let payer = funded_keypair(svm, 100 * SOL);
+        let source_mint = create_mint(svm, &payer, &payer.pubkey(), 6);
+        Self::build(
+            svm,
+            payer,
+            source_mint,
+            ADAPTER_PROGRAM_ID,
+            allowed_slippage_bps,
+            allowed_adapters,
+            DEFAULT_TARGET_CHAIN_ID,
+        )
+    }
+
+    fn build_cctp(
+        svm: &mut LiteSVM,
+        allowed_slippage_bps: u16,
+        allowed_adapters: Vec<Pubkey>,
+        target_chain_id: u64,
+    ) -> Self {
+        let payer = funded_keypair(svm, 100 * SOL);
+        let source_mint = create_canonical_cctp_mint(svm, &payer);
+        Self::build(
+            svm,
+            payer,
+            source_mint,
+            CCTP_ADAPTER_PROGRAM_ID,
+            allowed_slippage_bps,
+            allowed_adapters,
+            target_chain_id,
+        )
+    }
+
+    fn build(
+        svm: &mut LiteSVM,
+        payer: Keypair,
+        source_mint: Pubkey,
+        adapter_program: Pubkey,
+        allowed_slippage_bps: u16,
+        allowed_adapters: Vec<Pubkey>,
+        target_chain_id: u64,
+    ) -> Self {
+        let owner = funded_keypair(svm, SOL);
+        let initiator = funded_keypair(svm, SOL);
+
+        let fee_admin = funded_keypair(svm, SOL);
+        if svm.get_account(&derive_fee_config_pda().0).is_none() {
+            send_instructions(
+                svm,
+                &[initialize_fee_config_ix(
+                    &payer.pubkey(),
+                    &fee_admin.pubkey(),
+                    Pubkey::default(),
+                )],
+                &payer,
+                &[&fee_admin],
+            )
+            .expect("fee config init must succeed");
+        }
+
+        let address_book_root = init_address_book_root(svm, &payer, &owner);
+        let target_token = sample_target_token();
+        let handler_data = SourceHandlerData {
+            address_book_root,
+            target_chain_id,
+            recipient: evm_bytes32(0x33),
+            target_token,
+            allowed_slippage_bps,
+            allowed_adapters,
+        };
+        let salt = [0xABu8; 32];
+        let (sra_config, _) = derive_sra_pda(&owner.pubkey(), &handler_data, &salt);
+        send_ix(
+            svm,
+            initialize_sra_ix(
+                &payer.pubkey(),
+                &owner.pubkey(),
+                &address_book_root,
+                &sra_config,
+                handler_data.clone(),
+                salt,
+                initiator.pubkey(),
+                source_mint,
+            ),
+            &payer,
+            &[&owner],
+        )
+        .expect("initialize_sra should succeed");
+
+        setup_address_book_entry(
+            svm,
+            &payer,
+            &owner,
+            &address_book_root,
+            &source_mint,
+            target_chain_id,
+            target_token,
+            6,
+        );
+
+        let accounts = TriggerAccounts::derive(&sra_config, &source_mint, &adapter_program);
+        let owner_ata = create_ata(svm, &payer, &owner.pubkey(), &source_mint);
+        let across_state = funded_keypair(svm, SOL).pubkey();
+        let across_vault = create_ata(svm, &payer, &across_state, &source_mint);
+        mint_to(
+            svm,
+            &payer,
+            &payer,
+            &source_mint,
+            &accounts.sra_vault,
+            SRA_STARTING_BALANCE,
+        );
+
+        Self {
+            payer,
+            owner,
+            initiator,
+            fee_admin,
+            address_book_root,
+            handler_data,
+            sra_config,
+            source_mint,
+            target_chain_id,
+            target_token,
+            adapter_program,
+            accounts,
+            owner_ata,
+            across_state,
+            across_vault,
+        }
+    }
+
     pub fn for_mint(
         svm: &mut LiteSVM,
         fixture: &Self,
@@ -92,6 +298,111 @@ impl PassiveFixture {
             across_state,
             across_vault,
         }
+    }
+    pub fn address_book_entry(&self, target_chain_id: u64, target_token: &[u8; 32]) -> Pubkey {
+        self.address_book_entry_for(&self.source_mint, target_chain_id, target_token)
+    }
+
+    pub fn address_book_entry_for(
+        &self,
+        source_mint: &Pubkey,
+        target_chain_id: u64,
+        target_token: &[u8; 32],
+    ) -> Pubkey {
+        derive_address_book_pda(
+            &self.address_book_root,
+            source_mint,
+            target_chain_id,
+            target_token,
+        )
+        .0
+    }
+
+    pub fn invoke(
+        &self,
+        svm: &mut LiteSVM,
+        params: PrepareParams,
+    ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
+    {
+        self.invoke_full(svm, params, vec![], None, None)
+    }
+
+    pub fn invoke_with(
+        &self,
+        svm: &mut LiteSVM,
+        params: PrepareParams,
+        between_ixs: Vec<Instruction>,
+    ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
+    {
+        self.invoke_full(svm, params, between_ixs, None, None)
+    }
+
+    pub fn invoke_with_fee_ata(
+        &self,
+        svm: &mut LiteSVM,
+        params: PrepareParams,
+        fee_recipient_token_account: Option<Pubkey>,
+    ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
+    {
+        self.invoke_full(svm, params, vec![], fee_recipient_token_account, None)
+    }
+
+    /// Builds the normal 2-IX flow, then replaces the account-meta holding
+    /// `victim` with `substitute` in the trigger instruction — substitution
+    /// suites pin that every fee account is constraint-bound, never
+    /// caller-chosen.
+    pub fn invoke_with_fee_accounts_mutation(
+        &self,
+        svm: &mut LiteSVM,
+        params: PrepareParams,
+        fee_recipient_token_account: Option<Pubkey>,
+        victim: Pubkey,
+        substitute: Pubkey,
+    ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
+    {
+        self.invoke_full(
+            svm,
+            params,
+            vec![],
+            fee_recipient_token_account,
+            Some((victim, substitute)),
+        )
+    }
+
+    fn invoke_full(
+        &self,
+        svm: &mut LiteSVM,
+        params: PrepareParams,
+        between_ixs: Vec<Instruction>,
+        fee_recipient_token_account: Option<Pubkey>,
+        trigger_meta_substitution: Option<(Pubkey, Pubkey)>,
+    ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
+    {
+        let (execute_ix, event_data) =
+            execute_deposit_cctp_ix(&self.payer.pubkey(), self, &cctp_params_for(&params));
+        let address_book_entry = self.address_book_entry(self.target_chain_id, &self.target_token);
+        let mut trigger_ix = trigger_ix(
+            &self.payer.pubkey(),
+            &self.initiator.pubkey(),
+            &self.accounts,
+            &address_book_entry,
+            fee_recipient_token_account,
+            params.clone(),
+            &execute_ix,
+        );
+        if let Some((victim, substitute)) = trigger_meta_substitution {
+            let slot = trigger_ix
+                .accounts
+                .iter()
+                .position(|meta| meta.pubkey == victim)
+                .expect("victim account must be present in the trigger instruction");
+            trigger_ix.accounts[slot].pubkey = substitute;
+        }
+
+        let mut ixs = vec![trigger_ix];
+        ixs.extend(between_ixs);
+        ixs.push(execute_ix);
+        send_instructions(svm, &ixs, &self.payer, &[&self.initiator, &event_data])
     }
 }
 

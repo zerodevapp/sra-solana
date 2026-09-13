@@ -14,12 +14,7 @@ use sra_common::{abi::u256_from_u64, source_deposit::AcrossDepositParams};
 #[test]
 fn passive_across_happy_path() {
     let mut svm = setup_svm();
-    let fx = PassiveFixture::new_with_adapter_policy(
-        &mut svm,
-        ADAPTER_PROGRAM_ID,
-        50,
-        vec![ADAPTER_PROGRAM_ID],
-    );
+    let fx = PassiveFixture::new_across_with_adapter_policy(&mut svm, 50, vec![ADAPTER_PROGRAM_ID]);
     set_source_balance(&mut svm, &fx, 2_000_000);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, 30, false, false);
     let mut params = sample_prepare_params(fx.target_token);
@@ -84,12 +79,7 @@ fn passive_across_happy_path() {
 #[test]
 fn passive_across_rejects_timing_delegate_and_cpi_failure_atomically() {
     let mut svm = setup_svm();
-    let fx = PassiveFixture::new_with_adapter_policy(
-        &mut svm,
-        ADAPTER_PROGRAM_ID,
-        50,
-        vec![ADAPTER_PROGRAM_ID],
-    );
+    let fx = PassiveFixture::new_across_with_adapter_policy(&mut svm, 50, vec![ADAPTER_PROGRAM_ID]);
     let params = sample_prepare_params(fx.target_token);
     for (fill_deadline, exclusivity) in [(299, 120), (600, 601)] {
         let across = AcrossDepositParams::from_prepare(

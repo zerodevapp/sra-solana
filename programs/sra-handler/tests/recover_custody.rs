@@ -132,12 +132,7 @@ fn recover_stuck_custody_non_owner_rejected() {
 #[test]
 fn across_recover_stuck_custody_returns_funds_to_owner() {
     let mut svm = setup_svm();
-    let fx = PassiveFixture::new_with_adapter_policy(
-        &mut svm,
-        ADAPTER_PROGRAM_ID,
-        50,
-        vec![ADAPTER_PROGRAM_ID],
-    );
+    let fx = PassiveFixture::new_across_with_adapter_policy(&mut svm, 50, vec![ADAPTER_PROGRAM_ID]);
     strand_funds(&mut svm, &fx, STRANDED_AMOUNT);
 
     let before = fetch_token_balance(&svm, &fx.owner_ata);
@@ -155,12 +150,7 @@ fn across_recover_stuck_custody_returns_funds_to_owner() {
 #[test]
 fn across_recover_stuck_custody_nothing_to_recover_rejected() {
     let mut svm = setup_svm();
-    let fx = PassiveFixture::new_with_adapter_policy(
-        &mut svm,
-        ADAPTER_PROGRAM_ID,
-        50,
-        vec![ADAPTER_PROGRAM_ID],
-    );
+    let fx = PassiveFixture::new_across_with_adapter_policy(&mut svm, 50, vec![ADAPTER_PROGRAM_ID]);
     strand_funds(&mut svm, &fx, 0);
 
     let ix = recover_ix(&fx, &fx.owner.pubkey(), &fx.owner_ata);

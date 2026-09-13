@@ -319,12 +319,7 @@ fn passive_trigger_rejects_runtime_route_substitution_atomically() {
 #[test]
 fn passive_trigger_rejects_unallowlisted_and_non_executable_adapter_atomically() {
     let mut svm = setup_svm();
-    let fx = PassiveFixture::new_with_adapter_policy(
-        &mut svm,
-        CCTP_ADAPTER_PROGRAM_ID,
-        50,
-        vec![ADAPTER_PROGRAM_ID],
-    );
+    let fx = PassiveFixture::new_cctp_with_adapter_policy(&mut svm, 50, vec![ADAPTER_PROGRAM_ID]);
     let params = sample_prepare_params(fx.target_token);
     let (trigger, execute, event) = cctp_pair(&fx, params.clone(), cctp_params_for(&params), None);
     let error = assert_rejected_unchanged(
