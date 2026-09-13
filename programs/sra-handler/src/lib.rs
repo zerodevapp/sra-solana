@@ -36,6 +36,10 @@ pub mod sra_handler {
         instructions::source::manage_sra::handler(ctx, initiator, active)
     }
 
+    pub fn recover_source_vault(ctx: Context<RecoverSourceVault>) -> Result<()> {
+        instructions::source::recover_source_vault::handler(ctx)
+    }
+
     pub fn initialize_address_book_root(ctx: Context<InitializeAddressBookRoot>) -> Result<()> {
         instructions::source::address_book::initialize_root_handler(ctx)
     }

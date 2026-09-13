@@ -1,14 +1,14 @@
 use anchor_lang::{prelude::*, solana_program::sysvar::instructions};
 use anchor_spl::{
     associated_token::AssociatedToken,
-    token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked},
+    token::{Mint, Token, TokenAccount},
 };
 use sra_common::{
     errors::SraError,
     fees::compute_protocol_fee,
     seeds::{
         SEED_ADAPTER_AUTHORITY, SEED_ADDRESS_BOOK, SEED_ASSET_FEE_TIER, SEED_FEE_CONFIG,
-        SEED_PROTOCOL_FEE, SEED_SRA,
+        SEED_PROTOCOL_FEE,
     },
     source_deposit::{decode_output_amount, output_satisfies_slippage_floor, TriggerArgs},
     types::{AddressBookEntry, AssetFeeTier, FeeConfig, ProtocolFeeConfig, SraConfig},
@@ -17,7 +17,7 @@ use sra_common::{
 use crate::events::DepositTriggered;
 use crate::utils::adapter::validate_adapter_program;
 use crate::utils::ix_attestation::verify_next_adapter_ix;
-use crate::utils::read_optional_program_account;
+use crate::utils::{read_optional_program_account, transfer_from_sra_vault};
 
 #[derive(Accounts)]
 pub struct Trigger<'info> {
@@ -100,9 +100,6 @@ pub fn handler(ctx: Context<Trigger>, args: TriggerArgs) -> Result<()> {
         SraError::InsufficientSourceBalance
     );
 
-    let config_hash = sra_config
-        .handler_data
-        .config_hash(&sra_config.owner, &sra_config.final_handler);
     require!(
         sra_config.handler_data.target_chain_id == params.target_chain_id
             && sra_config.handler_data.recipient == params.recipient
@@ -162,17 +159,6 @@ pub fn handler(ctx: Context<Trigger>, args: TriggerArgs) -> Result<()> {
 
     let nonce = sra_config.deposit_nonce;
     let next_nonce = nonce.checked_add(1).ok_or(SraError::ArithmeticOverflow)?;
-    let owner = sra_config.owner.to_bytes();
-    let salt = sra_config.salt;
-    let bump = [sra_config.bump];
-    let signer_seeds: &[&[u8]] = &[
-        SEED_SRA,
-        owner.as_ref(),
-        config_hash.as_ref(),
-        salt.as_ref(),
-        bump.as_ref(),
-    ];
-    let signer: &[&[&[u8]]] = &[signer_seeds];
 
     if expected_fee > 0 {
         let fee_recipient_token_account = ctx
@@ -180,34 +166,22 @@ pub fn handler(ctx: Context<Trigger>, args: TriggerArgs) -> Result<()> {
             .fee_recipient_token_account
             .as_ref()
             .ok_or(SraError::MissingFeeRecipientAccount)?;
-        transfer_checked(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                TransferChecked {
-                    from: ctx.accounts.sra_vault.to_account_info(),
-                    mint: ctx.accounts.source_mint.to_account_info(),
-                    to: fee_recipient_token_account.to_account_info(),
-                    authority: ctx.accounts.sra_config.to_account_info(),
-                },
-                signer,
-            ),
+        transfer_from_sra_vault(
+            sra_config,
+            &ctx.accounts.sra_vault,
+            &ctx.accounts.source_mint,
+            fee_recipient_token_account,
+            &ctx.accounts.token_program,
             expected_fee,
-            ctx.accounts.source_mint.decimals,
         )?;
     }
-    transfer_checked(
-        CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            TransferChecked {
-                from: ctx.accounts.sra_vault.to_account_info(),
-                mint: ctx.accounts.source_mint.to_account_info(),
-                to: ctx.accounts.adapter_custody.to_account_info(),
-                authority: ctx.accounts.sra_config.to_account_info(),
-            },
-            signer,
-        ),
+    transfer_from_sra_vault(
+        sra_config,
+        &ctx.accounts.sra_vault,
+        &ctx.accounts.source_mint,
+        &ctx.accounts.adapter_custody,
+        &ctx.accounts.token_program,
         params.net_input_amount()?,
-        ctx.accounts.source_mint.decimals,
     )?;
     ctx.accounts.sra_config.deposit_nonce = next_nonce;
 

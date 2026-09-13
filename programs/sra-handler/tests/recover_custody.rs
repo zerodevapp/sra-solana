@@ -165,3 +165,66 @@ fn across_recover_stuck_custody_nothing_to_recover_rejected() {
         TransactionError::InstructionError(0, InstructionError::Custom(expected_code)),
     );
 }
+
+fn assert_recovery_isolated_from_sra_vault(
+    svm: &mut LiteSVM,
+    fx: &PassiveFixture,
+) -> litesvm::types::TransactionMetadata {
+    set_source_balance(svm, fx, 2_000_000);
+    strand_funds(svm, fx, STRANDED_AMOUNT);
+    let vault_before = svm.get_account(&fx.accounts.sra_vault).unwrap();
+    let config_before = svm.get_account(&fx.sra_config).unwrap();
+    let mut ix = recover_ix(fx, &fx.owner.pubkey(), &fx.owner_ata);
+    let custody = ix
+        .accounts
+        .iter()
+        .position(|meta| meta.pubkey == fx.accounts.adapter_custody)
+        .unwrap();
+    ix.accounts[custody].pubkey = fx.accounts.sra_vault;
+    assert_rejected_unchanged(
+        svm,
+        fx,
+        &[ix],
+        &[&fx.owner],
+        None,
+        "adapter recovery must reject the SRA vault",
+    );
+    let metadata = send_ix_with_meta(
+        svm,
+        recover_ix(fx, &fx.owner.pubkey(), &fx.owner_ata),
+        &fx.payer,
+        &[&fx.owner],
+    )
+    .unwrap();
+    assert_eq!(fetch_token_balance(svm, &fx.accounts.adapter_custody), 0);
+    assert_eq!(fetch_token_balance(svm, &fx.owner_ata), STRANDED_AMOUNT);
+    assert_eq!(
+        svm.get_account(&fx.accounts.sra_vault).unwrap(),
+        vault_before
+    );
+    assert_eq!(svm.get_account(&fx.sra_config).unwrap(), config_before);
+    metadata
+}
+
+#[test]
+fn recover_stuck_custody_rejects_sra_vault_and_leaves_it_untouched() {
+    let mut svm = setup_svm();
+    let fx = PassiveFixture::new(&mut svm);
+    let metadata = assert_recovery_isolated_from_sra_vault(&mut svm, &fx);
+    let event =
+        extract_anchor_event::<sra_cctp_adapter::events::CustodyRecovered>(&metadata.logs).unwrap();
+    assert_eq!(event.amount, STRANDED_AMOUNT);
+    assert_eq!(event.sra_config, fx.sra_config);
+}
+
+#[test]
+fn across_recover_stuck_custody_rejects_sra_vault_and_leaves_it_untouched() {
+    let mut svm = setup_svm();
+    let fx = PassiveFixture::new_across_with_adapter_policy(&mut svm, 50, vec![ADAPTER_PROGRAM_ID]);
+    let metadata = assert_recovery_isolated_from_sra_vault(&mut svm, &fx);
+    let event =
+        extract_anchor_event::<sra_across_adapter::events::CustodyRecovered>(&metadata.logs)
+            .unwrap();
+    assert_eq!(event.amount, STRANDED_AMOUNT);
+    assert_eq!(event.sra_config, fx.sra_config);
+}

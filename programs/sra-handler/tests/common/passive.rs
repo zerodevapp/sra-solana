@@ -418,6 +418,34 @@ pub fn manage_sra_ix(owner: Pubkey, sra: Pubkey, initiator: Pubkey, active: bool
     }
 }
 
+pub fn recover_source_vault_ix(fx: &PassiveFixture) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::RecoverSourceVault {
+            owner: fx.owner.pubkey(),
+            sra_config: fx.sra_config,
+            source_mint: fx.source_mint,
+            sra_vault: fx.accounts.sra_vault,
+            owner_token_account: fx.owner_ata,
+            token_program: anchor_spl::token::ID,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::RecoverSourceVault {}.data(),
+    }
+}
+
+pub fn recover_source_vault(
+    svm: &mut LiteSVM,
+    fx: &PassiveFixture,
+) -> sra_handler::events::SourceVaultRecovered {
+    let config_before = svm.get_account(&fx.sra_config).unwrap();
+    let metadata = send_ix_with_meta(svm, recover_source_vault_ix(fx), &fx.payer, &[&fx.owner])
+        .expect("owner recovery must succeed");
+    assert_eq!(fetch_token_balance(svm, &fx.accounts.sra_vault), 0);
+    assert_eq!(svm.get_account(&fx.sra_config).unwrap(), config_before);
+    extract_anchor_event(&metadata.logs).unwrap()
+}
+
 pub fn set_source_balance(svm: &mut LiteSVM, fx: &PassiveFixture, amount: u64) {
     let mut vault_account = svm.get_account(&fx.accounts.sra_vault).unwrap();
     let mut vault = Account::unpack(&vault_account.data).unwrap();
@@ -435,6 +463,7 @@ pub fn set_source_balance(svm: &mut LiteSVM, fx: &PassiveFixture, amount: u64) {
 #[derive(Debug, PartialEq, Eq)]
 pub struct PassiveSnapshot {
     sra_vault_balance: u64,
+    owner_ata_balance: u64,
     fee_recipient_balance: u64,
     adapter_custody_balance: u64,
     source_mint_supply: u64,
@@ -457,6 +486,7 @@ pub fn passive_snapshot(
     let fee_recipient = fetch_fee_config(svm, &derive_fee_config_pda().0).fee_recipient;
     PassiveSnapshot {
         sra_vault_balance: fetch_token_balance(svm, &fx.accounts.sra_vault),
+        owner_ata_balance: token_balance_or_zero(svm, &fx.owner_ata),
         fee_recipient_balance: token_balance_or_zero(
             svm,
             &derive_ata(&fee_recipient, &fx.source_mint),
