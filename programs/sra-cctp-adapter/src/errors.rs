@@ -48,7 +48,4 @@ pub enum CctpAdapterError {
 
     #[msg("Executed fee exceeds max fee, or max fee is not below the amount")]
     FeeExceedsMaxFee,
-
-    #[msg("CCTP input mint must be canonical six-decimal Solana USDC")]
-    InvalidInputMint,
 }

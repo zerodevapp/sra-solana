@@ -999,11 +999,6 @@
       "code": 6014,
       "name": "FeeExceedsMaxFee",
       "msg": "Executed fee exceeds max fee, or max fee is not below the amount"
-    },
-    {
-      "code": 6015,
-      "name": "InvalidInputMint",
-      "msg": "CCTP input mint must be canonical six-decimal Solana USDC"
     }
   ],
   "types": [
