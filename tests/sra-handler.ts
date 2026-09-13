@@ -25,6 +25,7 @@ describe("sra-handler", () => {
       "manageRoute",
       "manageSra",
       "recoverFunds",
+      "recoverSourceVault",
       "removeAssetFeeTier",
       "removeProtocolFee",
       "retryActions",
