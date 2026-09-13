@@ -2,8 +2,16 @@ mod common;
 
 use anchor_lang::error::ErrorCode;
 use common::*;
+use litesvm::LiteSVM;
 use solana_sdk::{pubkey::Pubkey, signer::Signer};
 use sra_common::errors::SraError;
+
+fn clone_account(svm: &mut LiteSVM, source: &Pubkey) -> Pubkey {
+    let copy = Pubkey::new_unique();
+    svm.set_account(copy, svm.get_account(source).unwrap())
+        .unwrap();
+    copy
+}
 
 #[test]
 fn owner_recovers_full_source_balance_active_or_paused_without_changing_config() {
@@ -34,27 +42,15 @@ fn owner_recovers_full_source_balance_active_or_paused_without_changing_config()
             &fx.owner_ata,
             123,
         );
-        let config_before = svm.get_account(&fx.sra_config).unwrap();
         let mint_before = svm.get_account(&fx.source_mint).unwrap();
-        let owner_before = fetch_token_balance(&svm, &fx.owner_ata);
-        let ix = recover_source_vault_ix(&fx);
-        assert!(!ix.accounts[1].is_writable);
-        let metadata = send_ix_with_meta(&mut svm, ix, &fx.payer, &[&fx.owner])
-            .expect("owner recovery must succeed");
-        let event =
-            extract_anchor_event::<sra_handler::events::SourceVaultRecovered>(&metadata.logs)
-                .unwrap();
+        assert!(!recover_source_vault_ix(&fx).accounts[1].is_writable);
+        let event = recover_source_vault(&mut svm, &fx);
         assert_eq!(event.sra_config, fx.sra_config);
         assert_eq!(event.owner, fx.owner.pubkey());
         assert_eq!(event.source_mint, fx.source_mint);
         assert_eq!(event.amount, 2_000_000);
         assert_eq!(event.deposit_nonce, u64::MAX);
-        assert_eq!(fetch_token_balance(&svm, &fx.accounts.sra_vault), 0);
-        assert_eq!(
-            fetch_token_balance(&svm, &fx.owner_ata),
-            owner_before + 2_000_000
-        );
-        assert_eq!(svm.get_account(&fx.sra_config).unwrap(), config_before);
+        assert_eq!(fetch_token_balance(&svm, &fx.owner_ata), 2_000_123);
         assert_eq!(svm.get_account(&fx.source_mint).unwrap(), mint_before);
     }
 }
@@ -64,7 +60,6 @@ fn empty_source_vault_returns_nothing_to_recover() {
     let mut svm = setup_svm();
     let fx = PassiveFixture::new(&mut svm);
     set_source_balance(&mut svm, &fx, 0);
-    let owner_before = svm.get_account(&fx.owner_ata).unwrap();
     let error = assert_rejected_unchanged(
         &mut svm,
         &fx,
@@ -74,7 +69,6 @@ fn empty_source_vault_returns_nothing_to_recover() {
         "empty recovery must reject",
     );
     assert_sra_error(error, 0, SraError::NothingToRecover);
-    assert_eq!(svm.get_account(&fx.owner_ata).unwrap(), owner_before);
 }
 
 #[test]
@@ -84,8 +78,6 @@ fn source_recovery_rejects_wrong_owner_and_unsigned_owner() {
     set_source_balance(&mut svm, &fx, 2_000_000);
     let attacker = funded_keypair(&mut svm, SOL);
     let attacker_ata = create_ata(&mut svm, &fx.payer, &attacker.pubkey(), &fx.source_mint);
-    let owner_before = svm.get_account(&fx.owner_ata).unwrap();
-    let attacker_before = svm.get_account(&attacker_ata).unwrap();
     let mut ix = recover_source_vault_ix(&fx);
     ix.accounts[0].pubkey = attacker.pubkey();
     ix.accounts[4].pubkey = attacker_ata;
@@ -98,7 +90,6 @@ fn source_recovery_rejects_wrong_owner_and_unsigned_owner() {
         "wrong owner must reject",
     );
     assert_eq!(error, anchor_error(ErrorCode::ConstraintHasOne));
-    assert_eq!(svm.get_account(&attacker_ata).unwrap(), attacker_before);
 
     let mut ix = recover_source_vault_ix(&fx);
     ix.accounts[0].is_signer = false;
@@ -111,7 +102,6 @@ fn source_recovery_rejects_wrong_owner_and_unsigned_owner() {
         "unsigned owner must reject",
     );
     assert_eq!(error, anchor_error(ErrorCode::AccountNotSigner));
-    assert_eq!(svm.get_account(&fx.owner_ata).unwrap(), owner_before);
 }
 
 #[test]
@@ -120,18 +110,8 @@ fn source_recovery_pins_mint_vault_and_canonical_owner_ata() {
     let fx = PassiveFixture::new(&mut svm);
     set_source_balance(&mut svm, &fx, 2_000_000);
     let other_mint = create_mint(&mut svm, &fx.payer, &fx.payer.pubkey(), 6);
-    let noncanonical_vault = Pubkey::new_unique();
-    svm.set_account(
-        noncanonical_vault,
-        svm.get_account(&fx.accounts.sra_vault).unwrap(),
-    )
-    .unwrap();
-    let noncanonical_owner_ata = Pubkey::new_unique();
-    svm.set_account(
-        noncanonical_owner_ata,
-        svm.get_account(&fx.owner_ata).unwrap(),
-    )
-    .unwrap();
+    let noncanonical_vault = clone_account(&mut svm, &fx.accounts.sra_vault);
+    let noncanonical_owner_ata = clone_account(&mut svm, &fx.owner_ata);
     let other_owner_ata = create_ata(&mut svm, &fx.payer, &fx.payer.pubkey(), &fx.source_mint);
     for (index, substitute, expected) in [
         (2, other_mint, ErrorCode::ConstraintAssociated),
@@ -140,8 +120,6 @@ fn source_recovery_pins_mint_vault_and_canonical_owner_ata() {
         (4, other_owner_ata, ErrorCode::ConstraintTokenOwner),
         (4, noncanonical_owner_ata, ErrorCode::ConstraintAssociated),
     ] {
-        let owner_before = svm.get_account(&fx.owner_ata).unwrap();
-        let substitute_before = svm.get_account(&substitute).unwrap();
         let mut ix = recover_source_vault_ix(&fx);
         ix.accounts[index].pubkey = substitute;
         let error = assert_rejected_unchanged(
@@ -153,8 +131,6 @@ fn source_recovery_pins_mint_vault_and_canonical_owner_ata() {
             "substituted recovery account must reject",
         );
         assert_eq!(error, anchor_error(expected));
-        assert_eq!(svm.get_account(&fx.owner_ata).unwrap(), owner_before);
-        assert_eq!(svm.get_account(&substitute).unwrap(), substitute_before);
     }
 }
 
