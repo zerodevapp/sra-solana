@@ -1,7 +1,7 @@
 //! Source compute-unit regression assertions.
 //!
 //! The production source deposit is a single transaction shaped
-//! `[compute_budget, validate_and_prepare (IX 1), execute_deposit_cctp
+//! `[compute_budget, trigger (IX 1), execute_deposit_cctp
 //! (IX 2)]` over an ALT, requesting a 400k CU limit. These tests execute the
 //! full 2-IX flow through the mock CCTP program, read the real consumption from
 //! LiteSVM's `TransactionMetadata`, log it with headroom, and assert it stays
@@ -37,22 +37,19 @@ const DEFAULT_FEE: u64 = 3_000; // sample input (1_000_000) * 30 / 10_000
 /// executes it, and returns the CU consumed.
 fn measure_source_2ix_cu(
     svm: &mut LiteSVM,
-    fx: &ValidatePrepareFixture,
+    fx: &PassiveFixture,
     params: PrepareParams,
     fee_recipient_token_account: Option<Pubkey>,
 ) -> u64 {
     let (execute_ix, event_data) =
         execute_deposit_cctp_ix(&fx.payer.pubkey(), fx, &cctp_params_for(&params));
-    let address_book_entry = fx.address_book_entry(params.target_chain_id, &params.target_token);
-    let validate_ix = validate_and_prepare_ix(
+    let address_book_entry = fx.address_book_entry(fx.target_chain_id, &fx.target_token);
+    let trigger = trigger_ix(
         &fx.payer.pubkey(),
-        &fx.owner.pubkey(),
+        &fx.initiator.pubkey(),
         &fx.accounts,
-        &fx.owner_ata,
-        &fx.address_book_root,
         &address_book_entry,
         fee_recipient_token_account,
-        fx.handler_data.clone(),
         params.clone(),
         &execute_ix,
     );
@@ -60,9 +57,9 @@ fn measure_source_2ix_cu(
 
     send_instructions(
         svm,
-        &[cu_limit, validate_ix, execute_ix],
+        &[cu_limit, trigger, execute_ix],
         &fx.payer,
-        &[&fx.owner, &event_data],
+        &[&fx.initiator, &event_data],
     )
     .expect("source 2-IX flow must execute")
     .compute_units_consumed
@@ -84,7 +81,7 @@ fn assert_under_budget(consumed: u64, label: &str) {
 #[test]
 fn source_2ix_flow_under_cu_budget() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     let consumed =
         measure_source_2ix_cu(&mut svm, &fx, sample_prepare_params(fx.target_token), None);
     assert_under_budget(consumed, "representative, no fee");
@@ -93,7 +90,7 @@ fn source_2ix_flow_under_cu_budget() {
 #[test]
 fn source_2ix_flow_with_fee_under_cu_budget() {
     let mut svm = setup_svm();
-    let fx = ValidatePrepareFixture::new(&mut svm);
+    let fx = PassiveFixture::new(&mut svm);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, DEFAULT_FEE_BPS, false, false);
 
     // Heaviest production path: protocol fee ON adds a second token CPI

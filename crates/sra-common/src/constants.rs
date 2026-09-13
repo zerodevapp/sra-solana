@@ -57,9 +57,7 @@ pub const SOLANA_CHAIN_ID: u64 = 34_268_394_551_451;
 #[cfg(feature = "devnet")]
 pub const SOLANA_CHAIN_ID: u64 = 133_268_194_659_241;
 
-/// USDC mint on Solana mainnet. Not compiled into program logic (client/test use
-/// only) — the mint is always supplied as a runtime account, so devnet uses a
-/// devnet mint without a rebuild.
+/// USDC mint on Solana mainnet. Enforced by the mainnet-only CCTP source adapter.
 pub const USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 
 /// Across SVM SpokePool program ID. Enforced on-chain via `#[account(address = ...)]`

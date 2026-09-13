@@ -2256,163 +2256,33 @@
       ]
     },
     {
-      "name": "validate_and_prepare",
+      "name": "trigger",
       "discriminator": [
-        94,
-        245,
-        191,
-        182,
-        185,
-        43,
-        240,
-        175
+        215,
+        172,
+        161,
+        36,
+        115,
+        157,
+        116,
+        147
       ],
       "accounts": [
         {
           "name": "fee_payer",
-          "docs": [
-            "Pays tx fees. Separated from `owner` to enable gas sponsorship."
-          ],
           "writable": true,
           "signer": true
         },
         {
-          "name": "owner",
-          "docs": [
-            "Owns the source ATA and authorizes the user->vault transfer."
-          ],
-          "signer": true,
-          "relations": [
-            "sra_config",
-            "address_book_root"
-          ]
+          "name": "initiator",
+          "signer": true
         },
         {
-          "name": "sra_config"
-        },
-        {
-          "name": "mint_nonce",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  105,
-                  110,
-                  116,
-                  95,
-                  110,
-                  111,
-                  110,
-                  99,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "sra_config"
-              },
-              {
-                "kind": "account",
-                "path": "source_mint"
-              }
-            ]
-          }
+          "name": "sra_config",
+          "writable": true
         },
         {
           "name": "source_mint"
-        },
-        {
-          "name": "owner_token_account",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "owner"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  6,
-                  221,
-                  246,
-                  225,
-                  215,
-                  101,
-                  161,
-                  147,
-                  217,
-                  203,
-                  225,
-                  70,
-                  206,
-                  235,
-                  121,
-                  172,
-                  28,
-                  180,
-                  133,
-                  237,
-                  95,
-                  91,
-                  55,
-                  145,
-                  58,
-                  140,
-                  245,
-                  133,
-                  126,
-                  255,
-                  0,
-                  169
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "source_mint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
         },
         {
           "name": "sra_vault",
@@ -2506,9 +2376,6 @@
         },
         {
           "name": "adapter_authority",
-          "docs": [
-            "the derivation."
-          ],
           "pda": {
             "seeds": [
               {
@@ -2638,9 +2505,6 @@
           "name": "adapter_program"
         },
         {
-          "name": "address_book_root"
-        },
-        {
           "name": "address_book_entry"
         },
         {
@@ -2667,10 +2531,6 @@
         },
         {
           "name": "protocol_fee_config",
-          "docs": [
-            "== no protocol fee configured — existence is read in-body, never",
-            "caller-claimed."
-          ],
           "pda": {
             "seeds": [
               {
@@ -2695,9 +2555,6 @@
         },
         {
           "name": "asset_fee_tier",
-          "docs": [
-            "data == no tier, fall back to `default_fee_bps`."
-          ],
           "pda": {
             "seeds": [
               {
@@ -2728,9 +2585,6 @@
         },
         {
           "name": "fee_recipient_token_account",
-          "docs": [
-            "Canonical ATA(fee_config.fee_recipient, source_mint)"
-          ],
           "writable": true,
           "optional": true,
           "pda": {
@@ -2840,28 +2694,11 @@
       ],
       "args": [
         {
-          "name": "handler_data",
+          "name": "args",
           "type": {
             "defined": {
-              "name": "SourceHandlerData"
+              "name": "TriggerArgs"
             }
-          }
-        },
-        {
-          "name": "params",
-          "type": {
-            "defined": {
-              "name": "PrepareParams"
-            }
-          }
-        },
-        {
-          "name": "paired_adapter_ix_data_hash",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
           }
         }
       ]
@@ -2931,19 +2768,6 @@
         19,
         167,
         139
-      ]
-    },
-    {
-      "name": "MintNonce",
-      "discriminator": [
-        207,
-        90,
-        192,
-        29,
-        25,
-        162,
-        153,
-        119
       ]
     },
     {
@@ -3092,16 +2916,16 @@
       ]
     },
     {
-      "name": "DepositPrepared",
+      "name": "DepositTriggered",
       "discriminator": [
-        187,
-        14,
-        148,
-        59,
-        88,
-        77,
-        103,
-        114
+        173,
+        52,
+        244,
+        53,
+        176,
+        128,
+        220,
+        145
       ]
     },
     {
@@ -3610,67 +3434,40 @@
       }
     },
     {
-      "name": "DepositPrepared",
-      "docs": [
-        "Emitted by `validate_and_prepare` after funds reach adapter custody. Carries",
-        "the routing inputs needed to build the target-specific bridge message."
-      ],
+      "name": "DepositTriggered",
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "sra_config",
-            "docs": [
-              "SraConfig PDA the deposit was prepared for."
-            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "initiator",
             "type": "pubkey"
           },
           {
             "name": "source_mint",
-            "docs": [
-              "Source mint that was locked."
-            ],
             "type": "pubkey"
           },
           {
             "name": "adapter_program",
-            "docs": [
-              "Allowlisted adapter program for the prepared deposit."
-            ],
             "type": "pubkey"
           },
           {
             "name": "nonce",
-            "docs": [
-              "Nonce captured before the prepare handler increments it."
-            ],
             "type": "u64"
           },
           {
             "name": "input_amount",
-            "docs": [
-              "Gross tokens pulled from the owner ATA into the SRA vault. The amount",
-              "forwarded to adapter custody and bridged in the same transaction is",
-              "`input_amount - protocol_fee_amount`."
-            ],
             "type": "u64"
           },
           {
             "name": "protocol_fee_amount",
-            "docs": [
-              "Protocol fee collected on the source. Zero when fees are",
-              "disabled globally, no protocol-fee config is set, or the deposit is",
-              "sponsored."
-            ],
             "type": "u64"
           },
           {
             "name": "output_amount",
-            "docs": [
-              "Minimum output amount the destination must honor; enforced here via",
-              "the slippage check (floored from the GROSS input)",
-              "and re-honored by the target-specific adapter flow."
-            ],
             "type": {
               "array": [
                 "u8",
@@ -3680,16 +3477,10 @@
           },
           {
             "name": "target_chain_id",
-            "docs": [
-              "Runtime target chain id from `PrepareParams`."
-            ],
             "type": "u64"
           },
           {
             "name": "recipient",
-            "docs": [
-              "Destination account / recipient identifier."
-            ],
             "type": {
               "array": [
                 "u8",
@@ -3699,10 +3490,6 @@
           },
           {
             "name": "target_token",
-            "docs": [
-              "Per-deposit target token identifier. Stored as raw bytes32 so Solana",
-              "pubkeys and other non-EVM ids are not truncated."
-            ],
             "type": {
               "array": [
                 "u8",
@@ -4051,27 +3838,6 @@
       }
     },
     {
-      "name": "MintNonce",
-      "docs": [
-        "Persistent nonce per `(sra_config, source_mint)`. The owner-signed deposit",
-        "flow will create it lazily and increment it per source-mint deposit.",
-        "PDA seeds: [\"mint_nonce\", sra_config, source_mint]"
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "nonce",
-            "type": "u64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
       "name": "PendingAdminSet",
       "type": {
         "kind": "struct",
@@ -4137,8 +3903,8 @@
           {
             "name": "is_sponsor",
             "docs": [
-              "Owner-signed assertion that skips the protocol fee; honored only when",
-              "the fee admin enabled `allow_sponsored`, else `SponsoredNotAllowed`."
+              "Initiator-supplied assertion that skips the protocol fee; honored only",
+              "when the fee admin enabled `allow_sponsored`, else `SponsoredNotAllowed`."
             ],
             "type": "bool"
           },
@@ -4487,16 +4253,13 @@
     {
       "name": "SourceHandlerData",
       "docs": [
-        "Owner-installed source policy. Committed at SRA install via",
-        "`handler_data_hash` (folded into the SRA's PDA identity) and re-supplied,",
-        "then re-authenticated, on every deposit. The routing tuple",
+        "Owner-installed source policy. Stored in the SRA and committed at install",
+        "via `handler_data_hash`, which is folded into the SRA's PDA identity. The",
+        "routing tuple",
         "(`target_chain_id` / `recipient` / `target_token`) is part of the immutable",
-        "identity, mirroring the",
-        "EVM `RouteConfig` that `trigger()` reads from storage and a caller cannot",
-        "redirect (see `sra-stx/src/handler/SRAHandler.sol`). Every deposit must echo",
-        "this exact routing in `PrepareParams`; `validate_and_prepare` rejects any",
-        "divergence. Changing the route means a new SRA at a new address — the Solana",
-        "analogue of the EVM clone-proxy + `_onInstall` model."
+        "identity, mirroring the EVM `RouteConfig` that `trigger()` reads from",
+        "storage and a caller cannot redirect. Every deposit must echo this exact",
+        "routing in `PrepareParams`; `trigger` rejects any divergence."
       ],
       "type": {
         "kind": "struct",
@@ -4676,6 +4439,31 @@
           {
             "name": "deposit_nonce",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TriggerArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "PrepareParams"
+              }
+            }
+          },
+          {
+            "name": "paired_adapter_ix_data_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }

@@ -3,28 +3,23 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 use sra_common::{
     constants::{
         cctp_domain_for_chain, CCTP_MESSAGE_TRANSMITTER_V2_ID, CCTP_TOKEN_MESSENGER_MINTER_V2_ID,
-        FINALITY_THRESHOLD_FINALIZED,
+        FINALITY_THRESHOLD_FAST, FINALITY_THRESHOLD_FINALIZED, USDC_MINT,
     },
-    seeds::{SEED_ADAPTER_AUTHORITY, SEED_MINT_NONCE},
+    seeds::SEED_ADAPTER_AUTHORITY,
     source_deposit::{decode_output_amount, CctpDepositParams, PrepareParams},
-    types::{MintNonce, SraConfig},
+    types::SraConfig,
 };
 
 use crate::events::CctpDepositExecuted;
 use crate::utils::token_messenger_minter_v2::{cpi as cctp_cpi, types::DepositForBurnParams};
 use crate::CctpAdapterError;
 
-// Recover the nonce captured before `validate_and_prepare` increments it.
-fn prepared_nonce(mint_nonce: &MintNonce) -> Result<u64> {
-    mint_nonce
-        .nonce
-        .checked_sub(1)
-        .ok_or(error!(CctpAdapterError::PreparedNonceUnavailable))
-}
-
 fn validate_finality_threshold(min_finality_threshold: u32) -> Result<()> {
     require!(
-        (1..=FINALITY_THRESHOLD_FINALIZED).contains(&min_finality_threshold),
+        matches!(
+            min_finality_threshold,
+            FINALITY_THRESHOLD_FAST | FINALITY_THRESHOLD_FINALIZED
+        ),
         CctpAdapterError::InvalidFinalityThreshold
     );
     Ok(())
@@ -38,8 +33,12 @@ fn validate_finality_threshold(min_finality_threshold: u32) -> Result<()> {
 /// 1:1 and USDC is 6-decimals on every supported domain; revisit if a non-6dp
 /// corridor is ever added.
 fn validate_quote_after_max_fee(prepare: &PrepareParams, max_fee: u64) -> Result<()> {
-    let worst_case_delivery = prepare
-        .net_input_amount()?
+    let net_input_amount = prepare.net_input_amount()?;
+    require!(
+        max_fee < net_input_amount,
+        CctpAdapterError::QuoteExceedsNetAfterFee
+    );
+    let worst_case_delivery = net_input_amount
         .checked_sub(max_fee)
         .ok_or(error!(CctpAdapterError::QuoteExceedsNetAfterFee))?;
     require!(
@@ -58,12 +57,6 @@ pub struct ExecuteDepositCctp<'info> {
     #[account(address = instructions::ID)]
     pub instructions_sysvar: UncheckedAccount<'info>,
     pub sra_config: Box<Account<'info, SraConfig>>,
-    #[account(
-        seeds = [SEED_MINT_NONCE, sra_config.key().as_ref(), input_mint.key().as_ref()],
-        bump = mint_nonce.bump,
-        seeds::program = sra_common::ID,
-    )]
-    pub mint_nonce: Box<Account<'info, MintNonce>>,
     /// CHECK: adapter authority PDA under this program; the handler derives
     /// the same address via `seeds::program = adapter_program.key()`. Owns
     /// `adapter_custody` and signs the burn directly (no delegate approval).
@@ -79,7 +72,7 @@ pub struct ExecuteDepositCctp<'info> {
     )]
     pub adapter_custody: Box<Account<'info, TokenAccount>>,
     /// The burn decreases the supply, so the mint is writable.
-    #[account(mut)]
+    #[account(mut, address = USDC_MINT)]
     pub input_mint: Box<Account<'info, Mint>>,
     /// CHECK: CCTP burn-signing authority PDA, cheap to pin by seeds.
     #[account(seeds = [b"sender_authority"], bump, seeds::program = cctp_program.key())]
@@ -133,7 +126,7 @@ pub fn handler(ctx: Context<ExecuteDepositCctp>, params: CctpDepositParams) -> R
     let destination_domain = cctp_domain_for_chain(params.target_chain_id)
         .ok_or(error!(CctpAdapterError::UnsupportedChain))?;
 
-    let prepare = sra_common::ix_attestation::verify_previous_handler_ix(
+    let prepare = sra_common::ix_attestation::verify_previous_trigger_ix(
         &ctx.accounts.instructions_sysvar.to_account_info(),
         &ctx.accounts.sra_config.key(),
         &ctx.accounts.input_mint.key(),
@@ -143,7 +136,11 @@ pub fn handler(ctx: Context<ExecuteDepositCctp>, params: CctpDepositParams) -> R
 
     validate_quote_after_max_fee(&prepare, params.max_fee)?;
 
-    let prepared_nonce = prepared_nonce(&ctx.accounts.mint_nonce)?;
+    let triggered_nonce = ctx
+        .accounts
+        .sra_config
+        .last_triggered_nonce()
+        .ok_or(error!(CctpAdapterError::TriggeredNonceUnavailable))?;
 
     let sra_config_key = ctx.accounts.sra_config.key();
     let adapter_authority_bump = [ctx.bumps.adapter_authority];
@@ -194,7 +191,7 @@ pub fn handler(ctx: Context<ExecuteDepositCctp>, params: CctpDepositParams) -> R
     emit!(CctpDepositExecuted {
         sra_config: ctx.accounts.sra_config.key(),
         input_mint: ctx.accounts.input_mint.key(),
-        nonce: prepared_nonce,
+        nonce: triggered_nonce,
         message_sent_event_data: ctx.accounts.message_sent_event_data.key(),
         destination_domain,
         input_amount: params.input_amount,
@@ -213,27 +210,13 @@ mod tests {
     use sra_common::constants::{FINALITY_THRESHOLD_FAST, NO_FEE_BPS_OVERRIDE};
 
     #[test]
-    fn prepared_nonce_rejects_zero() {
-        let mint_nonce = MintNonce { nonce: 0, bump: 1 };
-        let err = prepared_nonce(&mint_nonce).expect_err("zero nonce must reject");
-        assert_eq!(err, error!(CctpAdapterError::PreparedNonceUnavailable));
-    }
-
-    #[test]
-    fn prepared_nonce_uses_pre_increment_value() {
-        let mint_nonce = MintNonce { nonce: 7, bump: 1 };
-        assert_eq!(prepared_nonce(&mint_nonce).unwrap(), 6);
-    }
-
-    #[test]
     fn finality_threshold_bounds() {
-        let err = validate_finality_threshold(0).expect_err("0 must reject");
-        assert_eq!(err, error!(CctpAdapterError::InvalidFinalityThreshold));
-        validate_finality_threshold(1).expect("1 is the lower bound");
         validate_finality_threshold(FINALITY_THRESHOLD_FAST).expect("fast is canonical");
-        validate_finality_threshold(FINALITY_THRESHOLD_FINALIZED).expect("2000 is the upper bound");
-        let err = validate_finality_threshold(2001).expect_err("2001 must reject");
-        assert_eq!(err, error!(CctpAdapterError::InvalidFinalityThreshold));
+        validate_finality_threshold(FINALITY_THRESHOLD_FINALIZED).expect("standard is canonical");
+        for value in [0, 1, 999, 1001, 1999, 2001] {
+            let err = validate_finality_threshold(value).expect_err("value must reject");
+            assert_eq!(err, error!(CctpAdapterError::InvalidFinalityThreshold));
+        }
     }
 
     fn quote_prepare(input: u64, fee: u64, output: u64) -> PrepareParams {
@@ -261,9 +244,11 @@ mod tests {
 
     #[test]
     fn quote_invariant_max_fee_above_net_fails_closed() {
-        let err = validate_quote_after_max_fee(&quote_prepare(100, 3, 0), 98)
-            .expect_err("max_fee above the net must fail closed");
-        assert_eq!(err, error!(CctpAdapterError::QuoteExceedsNetAfterFee));
+        for max_fee in [97, 98] {
+            let err = validate_quote_after_max_fee(&quote_prepare(100, 3, 0), max_fee)
+                .expect_err("max_fee at or above the net must fail closed");
+            assert_eq!(err, error!(CctpAdapterError::QuoteExceedsNetAfterFee));
+        }
     }
 
     #[test]

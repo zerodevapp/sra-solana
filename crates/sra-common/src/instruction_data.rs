@@ -51,7 +51,7 @@ mod tests {
         };
         let data = encode_anchor_instruction_data("wrong_name", &params);
 
-        let err = decode_anchor_instruction_data::<PrepareParams>("validate_and_prepare", &data)
+        let err = decode_anchor_instruction_data::<PrepareParams>("trigger", &data)
             .expect_err("wrong discriminator must reject");
         assert_eq!(err, error!(SraError::InvalidPairedInstruction));
     }

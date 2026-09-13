@@ -176,4 +176,13 @@ pub enum SraError {
 
     #[msg("Initiator pubkey must be non-zero")]
     InvalidInitiator,
+
+    #[msg("SRA is inactive")]
+    SraInactive,
+
+    #[msg("Caller is not the configured initiator")]
+    InitiatorNotAllowed,
+
+    #[msg("SRA vault balance is below the requested input amount")]
+    InsufficientSourceBalance,
 }

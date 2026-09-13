@@ -33,9 +33,13 @@ describe("sra-handler", () => {
       "setFeeRecipient",
       "setPendingAdmin",
       "setProtocolFee",
+      "trigger",
+    ];
+    const removedInstructionNames = [
+      "updateAdapters",
+      "updateSlippage",
       "validateAndPrepare",
     ];
-    const removedInstructionNames = ["updateAdapters", "updateSlippage"];
     const instructionNames = program.idl.instructions.map(({ name }) => name);
 
     assert.sameMembers(instructionNames, expectedInstructionNames);

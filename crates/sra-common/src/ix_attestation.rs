@@ -6,21 +6,19 @@ use crate::errors::SraError;
 use crate::instruction_data::{
     decode_anchor_instruction_data, encode_anchor_instruction_data, instruction_data_hash,
 };
-use crate::source_deposit::{
-    AcrossDepositParams, CctpDepositParams, PrepareParams, ValidateAndPrepareArgs,
-};
+use crate::source_deposit::{AcrossDepositParams, CctpDepositParams, PrepareParams, TriggerArgs};
 
-// Account-slot indices in the handler's `ValidateAndPrepare` ix that the
+// Account-slot indices in the handler's `Trigger` ix that the
 // adapter verifier needs to pin. Drift would silently break attestation, so
-// these mirror `programs/sra-handler/src/instructions/source/validate_and_prepare.rs`
+// these mirror `programs/sra-handler/src/instructions/source/trigger.rs`
 // account order.
 const HANDLER_ACCT_SRA_CONFIG: usize = 2;
-const HANDLER_ACCT_SOURCE_MINT: usize = 4;
-const HANDLER_ACCT_ADAPTER_PROGRAM: usize = 9;
+const HANDLER_ACCT_SOURCE_MINT: usize = 3;
+const HANDLER_ACCT_ADAPTER_PROGRAM: usize = 7;
 const MIN_HANDLER_ACCOUNTS: usize = HANDLER_ACCT_ADAPTER_PROGRAM + 1;
 
 /// An adapter's deposit params, pairable with the handler's
-/// `validate_and_prepare` through instruction-data attestation.
+/// `trigger` through instruction-data attestation.
 pub trait PairedDeposit: AnchorSerialize + PartialEq + Sized {
     /// The adapter's execute-instruction name (its Anchor discriminator).
     const ADAPTER_IX_NAME: &'static str;
@@ -52,11 +50,11 @@ impl PairedDeposit for CctpDepositParams {
 }
 
 /// Verifies that the previous instruction is the handler's
-/// `validate_and_prepare` paired to this adapter leg: pins the handler's
+/// `trigger` paired to this adapter leg: pins the handler's
 /// account slots, requires the handler-attested ix-data hash to equal this
 /// leg's encoded data, recomputes the deposit from the attested prepare
 /// params, and requires equality. Returns the attested `PrepareParams`.
-pub fn verify_previous_handler_ix<D: PairedDeposit>(
+pub fn verify_previous_trigger_ix<D: PairedDeposit>(
     instructions_sysvar: &AccountInfo,
     sra_config: &Pubkey,
     source_mint: &Pubkey,
@@ -87,10 +85,7 @@ pub fn verify_previous_handler_ix<D: PairedDeposit>(
         SraError::PairedInstructionMismatch
     );
 
-    let args = decode_anchor_instruction_data::<ValidateAndPrepareArgs>(
-        "validate_and_prepare",
-        &prev_ix.data,
-    )?;
+    let args = decode_anchor_instruction_data::<TriggerArgs>("trigger", &prev_ix.data)?;
     require!(
         instruction_data_hash(&encode_anchor_instruction_data(D::ADAPTER_IX_NAME, deposit))
             == args.paired_adapter_ix_data_hash,
@@ -119,20 +114,7 @@ mod tests {
         empty_instruction, sample_across_deposit, sample_cctp_deposit, sample_prepare_params,
         InstructionsSysvarFixture,
     };
-    use crate::types::SourceHandlerData;
-
-    fn sample_handler_data() -> SourceHandlerData {
-        SourceHandlerData {
-            address_book_root: Pubkey::new_unique(),
-            target_chain_id: 42_161,
-            recipient: [0x33; 32],
-            target_token: [0xAB; 32],
-            allowed_slippage_bps: 50,
-            allowed_adapters: vec![Pubkey::new_unique()],
-        }
-    }
-
-    fn previous_validate_ix(
+    fn previous_trigger_ix(
         sra_config: Pubkey,
         source_mint: Pubkey,
         adapter_program: Pubkey,
@@ -144,19 +126,16 @@ mod tests {
             accounts: vec![
                 AccountMeta::new(Pubkey::new_unique(), true),
                 AccountMeta::new_readonly(Pubkey::new_unique(), true),
-                AccountMeta::new_readonly(sra_config, false),
-                AccountMeta::new(Pubkey::new_unique(), false),
+                AccountMeta::new(sra_config, false),
                 AccountMeta::new_readonly(source_mint, false),
-                AccountMeta::new(Pubkey::new_unique(), false),
                 AccountMeta::new(Pubkey::new_unique(), false),
                 AccountMeta::new_readonly(Pubkey::new_unique(), false),
                 AccountMeta::new(Pubkey::new_unique(), false),
                 AccountMeta::new_readonly(adapter_program, false),
             ],
             data: encode_anchor_instruction_data(
-                "validate_and_prepare",
-                &ValidateAndPrepareArgs {
-                    handler_data: sample_handler_data(),
+                "trigger",
+                &TriggerArgs {
                     params: prepare.clone(),
                     paired_adapter_ix_data_hash,
                 },
@@ -182,7 +161,7 @@ mod tests {
         let source_mint = Pubkey::new_unique();
         let adapter_program = Pubkey::new_unique();
         let matching_previous = |prepare: &PrepareParams, deposit: &D| {
-            previous_validate_ix(
+            previous_trigger_ix(
                 sra_config,
                 source_mint,
                 adapter_program,
@@ -197,7 +176,7 @@ mod tests {
             1,
             &[matching_previous(&prepare, &deposit), empty_instruction()],
         );
-        let recovered = verify_previous_handler_ix(
+        let recovered = verify_previous_trigger_ix(
             &sysvar.account_info(),
             &sra_config,
             &source_mint,
@@ -209,7 +188,7 @@ mod tests {
 
         // Missing adjacent previous ix must reject.
         let mut sysvar = InstructionsSysvarFixture::new(0, &[empty_instruction()]);
-        let err = verify_previous_handler_ix(
+        let err = verify_previous_trigger_ix(
             &sysvar.account_info(),
             &sra_config,
             &source_mint,
@@ -221,7 +200,7 @@ mod tests {
 
         // Mutated previous instructions must reject with the named error.
         type IxMutator = fn(&mut Instruction);
-        let cases: [(&str, IxMutator, anchor_lang::error::Error); 6] = [
+        let cases: [(&str, IxMutator, anchor_lang::error::Error); 7] = [
             (
                 "wrong program",
                 |ix| ix.program_id = Pubkey::new_unique(),
@@ -252,13 +231,18 @@ mod tests {
                 |ix| ix.data.truncate(7),
                 error!(SraError::InvalidPairedInstruction),
             ),
+            (
+                "wrong discriminator",
+                |ix| ix.data[..8].fill(0),
+                error!(SraError::InvalidPairedInstruction),
+            ),
         ];
         for (name, mutate, expected) in cases {
             let deposit = sample(&prepare);
             let mut previous = matching_previous(&prepare, &deposit);
             mutate(&mut previous);
             let mut sysvar = InstructionsSysvarFixture::new(1, &[previous, empty_instruction()]);
-            let err = verify_previous_handler_ix(
+            let err = verify_previous_trigger_ix(
                 &sysvar.account_info(),
                 &sra_config,
                 &source_mint,
@@ -274,7 +258,7 @@ mod tests {
         let previous = matching_previous(&prepare, &deposit);
         mutate_shared_field(&mut deposit);
         let mut sysvar = InstructionsSysvarFixture::new(1, &[previous, empty_instruction()]);
-        let err = verify_previous_handler_ix(
+        let err = verify_previous_trigger_ix(
             &sysvar.account_info(),
             &sra_config,
             &source_mint,
@@ -282,6 +266,21 @@ mod tests {
             &deposit,
         )
         .expect_err("mutated shared deposit field must reject");
+        assert_eq!(err, error!(SraError::PairedInstructionMismatch));
+
+        let deposit = sample(&prepare);
+        let mut mismatched_prepare = prepare.clone();
+        mismatched_prepare.output_amount[31] = mismatched_prepare.output_amount[31].wrapping_add(1);
+        let previous = matching_previous(&mismatched_prepare, &deposit);
+        let mut sysvar = InstructionsSysvarFixture::new(1, &[previous, empty_instruction()]);
+        let err = verify_previous_trigger_ix(
+            &sysvar.account_info(),
+            &sra_config,
+            &source_mint,
+            &adapter_program,
+            &deposit,
+        )
+        .expect_err("recomputed deposit must equal the supplied deposit");
         assert_eq!(err, error!(SraError::PairedInstructionMismatch));
 
         // A handler payload whose attested fee exceeds the input can never
@@ -297,7 +296,7 @@ mod tests {
                 empty_instruction(),
             ],
         );
-        let err = verify_previous_handler_ix(
+        let err = verify_previous_trigger_ix(
             &sysvar.account_info(),
             &sra_config,
             &source_mint,
@@ -312,7 +311,7 @@ mod tests {
         let previous = matching_previous(&prepare, &deposit);
         mutate_bridge_field(&mut deposit);
         let mut sysvar = InstructionsSysvarFixture::new(1, &[previous, empty_instruction()]);
-        let err = verify_previous_handler_ix(
+        let err = verify_previous_trigger_ix(
             &sysvar.account_info(),
             &sra_config,
             &source_mint,

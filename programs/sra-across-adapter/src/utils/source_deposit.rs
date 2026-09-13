@@ -1,8 +1,5 @@
 use anchor_lang::prelude::*;
-use sra_common::{
-    source_deposit::{AcrossDepositParams, PrepareParams},
-    types::SraConfig,
-};
+use sra_common::source_deposit::{AcrossDepositParams, PrepareParams};
 
 use crate::utils::seed_hash::{deposit_now_delegate, DelegateDerivation, DepositNowParams};
 
@@ -21,7 +18,6 @@ pub struct DepositNowBuild {
 /// nothing rides in the bridge payload.
 pub fn build_deposit_now_bundle(
     adapter_authority: &Pubkey,
-    _sra_config: &SraConfig,
     input_mint: &Pubkey,
     prepare: &PrepareParams,
     deposit: &AcrossDepositParams,
@@ -59,26 +55,6 @@ mod tests {
         out
     }
 
-    fn sample_sra_config() -> SraConfig {
-        SraConfig {
-            owner: Pubkey::new_unique(),
-            final_handler: Pubkey::new_unique(),
-            handler_data: sra_common::types::SourceHandlerData {
-                address_book_root: Pubkey::new_unique(),
-                target_chain_id: 42_161,
-                recipient: evm_bytes32(0x33),
-                target_token: evm_bytes32(0xbb),
-                allowed_slippage_bps: 50,
-                allowed_adapters: vec![crate::ID],
-            },
-            salt: [0x55u8; 32],
-            initiator: Pubkey::new_unique(),
-            active: true,
-            deposit_nonce: 0,
-            bump: 254,
-        }
-    }
-
     #[test]
     fn build_deposit_now_bundle_bridges_net_with_empty_message() {
         let prepare = PrepareParams::new(
@@ -96,7 +72,6 @@ mod tests {
 
         let build = build_deposit_now_bundle(
             &Pubkey::new_unique(),
-            &sample_sra_config(),
             &Pubkey::new_unique(),
             &prepare,
             &deposit,
@@ -130,14 +105,8 @@ mod tests {
         let deposit = AcrossDepositParams::from_prepare(&prepare, Pubkey::new_unique(), 600, 120)
             .expect("sample params must produce a valid net amount");
 
-        let build = build_deposit_now_bundle(
-            &adapter_authority,
-            &sample_sra_config(),
-            &input_mint,
-            &prepare,
-            &deposit,
-        )
-        .unwrap();
+        let build =
+            build_deposit_now_bundle(&adapter_authority, &input_mint, &prepare, &deposit).unwrap();
 
         assert_eq!(build.params.depositor, adapter_authority);
         assert_eq!(build.params.input_token, input_mint);

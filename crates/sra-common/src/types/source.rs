@@ -5,16 +5,13 @@ use crate::{
     errors::SraError,
 };
 
-/// Owner-installed source policy. Committed at SRA install via
-/// `handler_data_hash` (folded into the SRA's PDA identity) and re-supplied,
-/// then re-authenticated, on every deposit. The routing tuple
+/// Owner-installed source policy. Stored in the SRA and committed at install
+/// via `handler_data_hash`, which is folded into the SRA's PDA identity. The
+/// routing tuple
 /// (`target_chain_id` / `recipient` / `target_token`) is part of the immutable
-/// identity, mirroring the
-/// EVM `RouteConfig` that `trigger()` reads from storage and a caller cannot
-/// redirect (see `sra-stx/src/handler/SRAHandler.sol`). Every deposit must echo
-/// this exact routing in `PrepareParams`; `validate_and_prepare` rejects any
-/// divergence. Changing the route means a new SRA at a new address — the Solana
-/// analogue of the EVM clone-proxy + `_onInstall` model.
+/// identity, mirroring the EVM `RouteConfig` that `trigger()` reads from
+/// storage and a caller cannot redirect. Every deposit must echo this exact
+/// routing in `PrepareParams`; `trigger` rejects any divergence.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq, InitSpace)]
 pub struct SourceHandlerData {
     pub address_book_root: Pubkey,
@@ -71,22 +68,18 @@ pub struct SraConfig {
     pub bump: u8,
 }
 
+impl SraConfig {
+    pub fn last_triggered_nonce(&self) -> Option<u64> {
+        self.deposit_nonce.checked_sub(1)
+    }
+}
+
 /// Owner-managed source address-book namespace. The root account is initialized
 /// explicitly and then committed inside immutable `SourceHandlerData`.
 #[account]
 #[derive(InitSpace)]
 pub struct AddressBookRoot {
     pub owner: Pubkey,
-}
-
-/// Persistent nonce per `(sra_config, source_mint)`. The owner-signed deposit
-/// flow will create it lazily and increment it per source-mint deposit.
-/// PDA seeds: ["mint_nonce", sra_config, source_mint]
-#[account]
-#[derive(InitSpace)]
-pub struct MintNonce {
-    pub nonce: u64,
-    pub bump: u8,
 }
 
 /// Per-address-book-root owner-managed (source_mint, chain, target_token) -> decimals registry.
@@ -121,6 +114,33 @@ impl AddressBookEntry {
 mod tests {
     use super::*;
 
+    fn sample_sra_config(deposit_nonce: u64) -> SraConfig {
+        SraConfig {
+            owner: Pubkey::new_unique(),
+            final_handler: Pubkey::new_unique(),
+            handler_data: SourceHandlerData {
+                address_book_root: Pubkey::new_unique(),
+                target_chain_id: 42_161,
+                recipient: [0x33; 32],
+                target_token: [0xAB; 32],
+                allowed_slippage_bps: 50,
+                allowed_adapters: vec![Pubkey::new_unique()],
+            },
+            salt: [0x55; 32],
+            initiator: Pubkey::new_unique(),
+            active: true,
+            deposit_nonce,
+            bump: 254,
+        }
+    }
+
+    #[test]
+    fn last_triggered_nonce_handles_zero_and_positive_boundaries() {
+        assert_eq!(sample_sra_config(0).last_triggered_nonce(), None);
+        assert_eq!(sample_sra_config(1).last_triggered_nonce(), Some(0));
+        assert_eq!(sample_sra_config(7).last_triggered_nonce(), Some(6));
+    }
+
     #[test]
     fn source_handler_data_init_space() {
         // 32 address_book_root + 8 target_chain_id + 32 recipient + 32 target_token
@@ -140,12 +160,6 @@ mod tests {
     fn address_book_root_init_space() {
         // 32 owner
         assert_eq!(AddressBookRoot::INIT_SPACE, 32);
-    }
-
-    #[test]
-    fn mint_nonce_init_space() {
-        // 8 nonce + 1 bump = 9
-        assert_eq!(MintNonce::INIT_SPACE, 9);
     }
 
     #[test]
