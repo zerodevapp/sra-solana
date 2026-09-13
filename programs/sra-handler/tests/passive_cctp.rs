@@ -2,10 +2,12 @@ mod common;
 
 use common::*;
 use solana_sdk::{
+    instruction::InstructionError,
     message::{Message, VersionedMessage},
     signer::Signer,
-    transaction::VersionedTransaction,
+    transaction::{TransactionError, VersionedTransaction},
 };
+use sra_cctp_adapter::CctpAdapterError;
 use sra_common::{
     abi::u256_from_u64, constants::FINALITY_THRESHOLD_FAST, source_deposit::CctpDepositParams,
 };
@@ -76,6 +78,30 @@ fn passive_cctp_happy_path() {
         extract_anchor_event::<sra_cctp_adapter::events::CctpDepositExecuted>(&metadata.logs)
             .unwrap();
     assert_eq!(executed.nonce, 0);
+}
+
+#[test]
+fn passive_cctp_rejects_unsupported_target_chain_atomically() {
+    let mut svm = setup_svm();
+    let fx = PassiveFixture::new_with_target_chain(&mut svm, 56);
+    let mut params = sample_prepare_params(fx.target_token);
+    params.target_chain_id = 56;
+    let (trigger, execute, event) = cctp_pair(&fx, params.clone(), cctp_params_for(&params), None);
+    let error = assert_rejected_unchanged(
+        &mut svm,
+        &fx,
+        &[trigger, execute],
+        &[&fx.initiator, &event],
+        Some(event.pubkey()),
+        "unsupported CCTP target chain must reject",
+    );
+    assert_eq!(
+        error,
+        TransactionError::InstructionError(
+            1,
+            InstructionError::Custom(CctpAdapterError::UnsupportedChain.into()),
+        )
+    );
 }
 
 #[test]

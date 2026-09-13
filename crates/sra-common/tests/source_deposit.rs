@@ -1,6 +1,6 @@
 use sra_common::{
     instruction_data::{decode_anchor_instruction_data, encode_anchor_instruction_data},
-    source_deposit::{AcrossDepositParams, PrepareParams},
+    source_deposit::{AcrossDepositParams, PrepareParams, TriggerArgs},
 };
 
 fn evm_bytes32(byte: u8) -> [u8; 32] {
@@ -23,12 +23,17 @@ fn sample_prepare_params() -> PrepareParams {
 }
 
 #[test]
-fn decode_prepare_params_round_trips_valid_data() {
+fn decode_trigger_args_round_trips_valid_data() {
     let params = sample_prepare_params();
-    let data = encode_anchor_instruction_data("trigger", &params);
+    let args = TriggerArgs {
+        params: params.clone(),
+        paired_adapter_ix_data_hash: [0xA5; 32],
+    };
+    let data = encode_anchor_instruction_data("trigger", &args);
 
-    let decoded = decode_anchor_instruction_data::<PrepareParams>("trigger", &data).unwrap();
-    assert_eq!(decoded, params);
+    let decoded = decode_anchor_instruction_data::<TriggerArgs>("trigger", &data).unwrap();
+    assert_eq!(decoded.params, params);
+    assert_eq!(decoded.paired_adapter_ix_data_hash, [0xA5; 32]);
 }
 
 #[test]
@@ -50,12 +55,17 @@ fn decode_across_deposit_params_round_trips_valid_data() {
 }
 
 #[test]
-fn decode_prepare_params_rejects_wrong_discriminator() {
-    let params = sample_prepare_params();
-    let data = encode_anchor_instruction_data("wrong_name", &params);
+fn decode_trigger_args_rejects_wrong_discriminator() {
+    let args = TriggerArgs {
+        params: sample_prepare_params(),
+        paired_adapter_ix_data_hash: [0xA5; 32],
+    };
+    let data = encode_anchor_instruction_data("wrong_name", &args);
 
-    let err = decode_anchor_instruction_data::<PrepareParams>("trigger", &data)
-        .expect_err("wrong discriminator must reject");
+    let err = match decode_anchor_instruction_data::<TriggerArgs>("trigger", &data) {
+        Ok(_) => panic!("wrong discriminator must reject"),
+        Err(err) => err,
+    };
     assert!(format!("{err:?}").contains("InvalidPairedInstruction"));
 }
 
