@@ -418,6 +418,22 @@ pub fn manage_sra_ix(owner: Pubkey, sra: Pubkey, initiator: Pubkey, active: bool
     }
 }
 
+pub fn recover_source_vault_ix(fx: &PassiveFixture) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: sra_handler::accounts::RecoverSourceVault {
+            owner: fx.owner.pubkey(),
+            sra_config: fx.sra_config,
+            source_mint: fx.source_mint,
+            sra_vault: fx.accounts.sra_vault,
+            owner_token_account: fx.owner_ata,
+            token_program: anchor_spl::token::ID,
+        }
+        .to_account_metas(None),
+        data: sra_handler::instruction::RecoverSourceVault {}.data(),
+    }
+}
+
 pub fn set_source_balance(svm: &mut LiteSVM, fx: &PassiveFixture, amount: u64) {
     let mut vault_account = svm.get_account(&fx.accounts.sra_vault).unwrap();
     let mut vault = Account::unpack(&vault_account.data).unwrap();

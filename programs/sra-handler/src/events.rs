@@ -24,6 +24,15 @@ pub struct SraManaged {
 }
 
 #[event]
+pub struct SourceVaultRecovered {
+    pub sra_config: Pubkey,
+    pub owner: Pubkey,
+    pub source_mint: Pubkey,
+    pub amount: u64,
+    pub deposit_nonce: u64,
+}
+
+#[event]
 pub struct AddressBookRootInitialized {
     pub address_book_root: Pubkey,
     pub owner: Pubkey,
