@@ -15,7 +15,7 @@ use crate::source_deposit::{AcrossDepositParams, CctpDepositParams, PrepareParam
 const HANDLER_ACCT_SRA_CONFIG: usize = 2;
 const HANDLER_ACCT_SOURCE_MINT: usize = 3;
 const HANDLER_ACCT_ADAPTER_PROGRAM: usize = 7;
-const MIN_HANDLER_ACCOUNTS: usize = 8;
+const MIN_HANDLER_ACCOUNTS: usize = HANDLER_ACCT_ADAPTER_PROGRAM + 1;
 
 /// An adapter's deposit params, pairable with the handler's
 /// `trigger` through instruction-data attestation.
