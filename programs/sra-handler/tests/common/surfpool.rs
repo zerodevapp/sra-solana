@@ -14,7 +14,7 @@
 //! WITHIN a binary (each open handle contends), replacing the old file-local
 //! `SURFPOOL_TEST_MUTEX`. The lock releases on drop, including on panic.
 
-use anchor_lang::{prelude::borsh, AccountDeserialize, AnchorSerialize};
+use anchor_lang::{prelude::borsh, AccountDeserialize, AccountSerialize, AnchorSerialize};
 use fslock::LockFile;
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
@@ -40,11 +40,15 @@ use sra_cctp_adapter::utils::cctp_state::{
 use sra_common::{
     constants::{CCTP_MESSAGE_TRANSMITTER_V2_ID, CCTP_TOKEN_MESSENGER_MINTER_V2_ID, USDC_MINT},
     instruction_data::encode_anchor_instruction_data,
+    types::FeeConfig,
 };
 use std::{env, error::Error, path::PathBuf, thread::sleep, time::Duration};
 
 use super::cctp::{derive_transmitter_state_pda, derive_used_nonce_pda};
-use super::derive_ata;
+use super::{
+    derive_ata, derive_fee_config_pda, initialize_fee_config_ix, set_fee_recipient_ix,
+    set_protocol_fee_ix,
+};
 
 pub const SURFPOOL_RPC_URL: &str = "http://127.0.0.1:8899";
 pub const SURFPOOL_RETRY_COUNT: usize = 30;
@@ -201,7 +205,7 @@ pub fn build_versioned_transaction(
     // exercising lookup-table account resolution — fail instead.
     if !lookup_tables.is_empty() && message.address_table_lookups.is_empty() {
         return Err(format!(
-            "send_versioned_transaction[{label}]: no address was resolved through the provided lookup table(s)"
+            "build_versioned_transaction[{label}]: no address was resolved through the provided lookup table(s)"
         )
         .into());
     }
@@ -216,17 +220,13 @@ pub fn build_versioned_transaction(
 pub fn send_versioned_transaction(
     rpc: &RpcClient,
     label: &str,
-    payer: &Keypair,
-    signers: &[&Keypair],
-    ixs: &[Instruction],
-    lookup_tables: &[AddressLookupTableAccount],
+    tx: &VersionedTransaction,
 ) -> TestResult<Signature> {
-    let tx = build_versioned_transaction(rpc, label, payer, signers, ixs, lookup_tables)?;
     surfpool_log(format!(
         "send_versioned_transaction[{label}]: sending {} instruction(s)",
-        ixs.len()
+        tx.message.instructions().len()
     ));
-    let signature = rpc.send_and_confirm_transaction(&tx)?;
+    let signature = rpc.send_and_confirm_transaction(tx)?;
     surfpool_log(format!(
         "send_versioned_transaction[{label}]: confirmed signature {signature}"
     ));
@@ -345,6 +345,68 @@ pub fn surfpool_rpc(http: &Client, method: &str, params: Value) -> TestResult<Va
     Ok(response["result"].clone())
 }
 
+pub fn surfpool_set_account_data(http: &Client, address: &Pubkey, data: &[u8]) -> TestResult<()> {
+    let hex_data: String = data.iter().map(|byte| format!("{byte:02x}")).collect();
+    surfpool_rpc(
+        http,
+        "surfnet_setAccount",
+        json!([address.to_string(), { "data": hex_data }]),
+    )?;
+    Ok(())
+}
+
+pub fn configure_protocol_fee(
+    rpc: &RpcClient,
+    http: &Client,
+    payer: &Keypair,
+    fee_bps: u16,
+) -> TestResult<Option<Pubkey>> {
+    let fee_config = derive_fee_config_pda().0;
+    if rpc.get_account(&fee_config).is_ok() {
+        let mut config: FeeConfig = read_anchor_account(rpc, &fee_config)?;
+        config.admin = payer.pubkey();
+        let mut data = Vec::new();
+        config.try_serialize(&mut data)?;
+        surfpool_set_account_data(http, &fee_config, &data)?;
+    } else {
+        send_legacy_transaction(
+            rpc,
+            "initialize_fee_config",
+            payer,
+            &[],
+            &[initialize_fee_config_ix(
+                &payer.pubkey(),
+                &payer.pubkey(),
+                Pubkey::default(),
+            )],
+        )?;
+    }
+    let fee_recipient = if fee_bps == 0 {
+        Pubkey::default()
+    } else {
+        Pubkey::new_unique()
+    };
+    send_legacy_transaction(
+        rpc,
+        "configure_protocol_fee",
+        payer,
+        &[],
+        &[
+            set_fee_recipient_ix(&payer.pubkey(), fee_recipient),
+            set_protocol_fee_ix(&payer.pubkey(), &payer.pubkey(), fee_bps, false, false),
+        ],
+    )?;
+    if fee_bps == 0 {
+        return Ok(None);
+    }
+    surfpool_rpc(
+        http,
+        "surfnet_setTokenAccount",
+        json!([fee_recipient.to_string(), USDC_MINT.to_string(), { "amount": 0 }, anchor_spl::token::ID.to_string()]),
+    )?;
+    Ok(Some(derive_ata(&fee_recipient, &USDC_MINT)))
+}
+
 /// Across paused deposits AND fills on the live Solana spoke (observed
 /// 2026-07-23), and the fork inherits that state, failing every deposit/fill
 /// with `DepositsArePaused`/`FillsArePaused`. Clear the two pause bools —
@@ -366,12 +428,7 @@ pub fn unpause_across_spoke_state(
     }
     data[8] = 0; // paused_deposits
     data[9] = 0; // paused_fills
-    let hex_data: String = data.iter().map(|byte| format!("{byte:02x}")).collect();
-    surfpool_rpc(
-        http,
-        "surfnet_setAccount",
-        json!([state.to_string(), { "data": hex_data }]),
-    )?;
+    surfpool_set_account_data(http, state, &data)?;
     surfpool_log("unpause_across_spoke_state: cleared pause flags on the fork");
     Ok(())
 }
@@ -489,12 +546,7 @@ pub fn override_transmitter_attesters(
     state.enabled_attesters = vec![attester];
     let mut data = MESSAGE_TRANSMITTER_DISCRIMINATOR.to_vec();
     state.serialize(&mut data)?;
-    let hex_data: String = data.iter().map(|byte| format!("{byte:02x}")).collect();
-    surfpool_rpc(
-        http,
-        "surfnet_setAccount",
-        json!([state_pda.to_string(), { "data": hex_data }]),
-    )?;
+    surfpool_set_account_data(http, &state_pda, &data)?;
     surfpool_log("override_transmitter_attesters: installed the test attester (threshold 1)");
     Ok(())
 }

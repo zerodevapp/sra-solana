@@ -8,7 +8,19 @@ use solana_sdk::{
 };
 
 pub const SRA_STARTING_BALANCE: u64 = 10_000_000;
+pub const FEE_TEST_OUTPUT: u64 = 995_000;
 const DEFAULT_TARGET_CHAIN_ID: u64 = 42_161;
+
+pub fn fee_params(fx: &PassiveFixture, protocol_fee_amount: u64) -> PrepareParams {
+    let mut params = sample_prepare_params(fx.target_token);
+    params.protocol_fee_amount = protocol_fee_amount;
+    params.output_amount = u256_from_u64(FEE_TEST_OUTPUT);
+    params
+}
+
+pub fn signer_keys(tx: &VersionedTransaction) -> &[Pubkey] {
+    &tx.message.static_account_keys()[..usize::from(tx.message.header().num_required_signatures)]
+}
 
 fn create_canonical_cctp_mint(svm: &mut LiteSVM, payer: &Keypair) -> Pubkey {
     let mint = create_mint(svm, payer, &payer.pubkey(), 6);

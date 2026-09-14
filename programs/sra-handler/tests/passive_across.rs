@@ -9,7 +9,7 @@ use solana_sdk::{
     transaction::{TransactionError, VersionedTransaction},
 };
 use sra_across_adapter::AcrossAdapterError;
-use sra_common::{abi::u256_from_u64, source_deposit::AcrossDepositParams};
+use sra_common::source_deposit::AcrossDepositParams;
 
 #[test]
 fn passive_across_happy_path() {
@@ -17,9 +17,7 @@ fn passive_across_happy_path() {
     let fx = PassiveFixture::new_across_with_adapter_policy(&mut svm, 50, vec![ADAPTER_PROGRAM_ID]);
     set_source_balance(&mut svm, &fx, 2_000_000);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, 30, false, false);
-    let mut params = sample_prepare_params(fx.target_token);
-    params.protocol_fee_amount = 3_000;
-    params.output_amount = u256_from_u64(995_000);
+    let params = fee_params(&fx, 3_000);
     let execute_ix = execute_deposit_across_ix(
         &fx.payer.pubkey(),
         &fx,
@@ -45,12 +43,7 @@ fn passive_across_happy_path() {
         &[&fx.payer, &fx.initiator],
     )
     .unwrap();
-    let owner_index = tx
-        .message
-        .static_account_keys()
-        .iter()
-        .position(|key| key == &fx.owner.pubkey());
-    assert!(owner_index.is_none_or(|index| !tx.message.is_signer(index)));
+    assert!(!signer_keys(&tx).contains(&fx.owner.pubkey()));
     assert_eq!(tx.signatures.len(), 2);
     let fee_before = fetch_token_balance(&svm, &fee_ata);
     let across_before = fetch_token_balance(&svm, &fx.across_vault);
@@ -130,9 +123,7 @@ fn passive_across_rejects_timing_delegate_and_cpi_failure_atomically() {
     );
 
     let fee_ata = enable_protocol_fee(&mut svm, &fx, 30, false, false);
-    let mut params = params;
-    params.protocol_fee_amount = 3_000;
-    params.output_amount = u256_from_u64(995_000);
+    let params = fee_params(&fx, 3_000);
     freeze_token_account(&mut svm, &fx.across_vault);
     let across =
         AcrossDepositParams::from_prepare(&params, Pubkey::new_unique(), 600, 120).unwrap();
