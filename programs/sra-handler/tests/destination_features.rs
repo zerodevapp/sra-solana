@@ -2,16 +2,6 @@
 //! once more than one fill or route coexists, which the per-instruction and
 //! single-fill lifecycle suites never exercise.
 //!
-//! Two complementary invariants:
-//! - **Same route, many fills**: the `FillReceipt` is per `(route, fill_id)`, but
-//!   the execution vault is per-route and SHARED by every fill of that route.
-//!   Finalizing several fills co-mingles them in one vault while writing
-//!   independent receipts; recovering one drains the whole vault and advances
-//!   only that receipt — fund-safe (no double payout), the others stay valid.
-//! - **Different routes, same owner**: vaults and receipts are keyed on the route
-//!   PDA, so two routes under one owner are fully isolated — operating on one
-//!   never touches the other.
-//!
 //! Both drive the genuine path (relayer fill -> verify_across_fill ->
 //! finalize_fill) and use `recover_funds` as the terminal step (no action_config
 //! infra needed — the invariants are about vault/receipt keying, not actions).
@@ -91,7 +81,7 @@ fn finalize_one(
 }
 
 #[test]
-fn multiple_fills_same_route_share_execution_vault_independent_receipts() {
+fn recovery_releases_route_for_next_fill() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 100 * SOL);
     let owner = funded_keypair(&mut svm, 100 * SOL);
@@ -102,11 +92,21 @@ fn multiple_fills_same_route_share_execution_vault_independent_receipts() {
     let (execution_authority, _) = derive_execution_authority_pda(&route);
     let execution_vault = derive_ata(&execution_authority, &mint);
 
-    // Two distinct fills on the SAME route (distinct deposit_id -> distinct fill_id).
     let (fill_a, receipt_a) =
         finalize_one(&mut svm, &payer, &route, hash, mint, [0xA1; 32], AMOUNT_A);
-    // The first finalize drains the route vault before the second fill arrives.
     assert_eq!(fetch_token_balance(&svm, &route_vault), 0);
+    assert_eq!(fetch_route(&svm, &route).active_fill, Some(fill_a));
+    let owner_ata = create_ata(&mut svm, &payer, &owner.pubkey(), &mint);
+    send_ix(
+        &mut svm,
+        recover_funds_ix(&owner.pubkey(), &route, &fill_a, &mint, &owner_ata),
+        &owner,
+        &[],
+    )
+    .expect("recover A releases the route");
+    assert_eq!(fetch_route(&svm, &route).active_fill, None);
+    assert_eq!(fetch_token_balance(&svm, &execution_vault), 0);
+    assert_eq!(fetch_token_balance(&svm, &owner_ata), AMOUNT_A);
     let (fill_b, receipt_b) =
         finalize_one(&mut svm, &payer, &route, hash, mint, [0xB2; 32], AMOUNT_B);
     assert_ne!(
@@ -115,62 +115,42 @@ fn multiple_fills_same_route_share_execution_vault_independent_receipts() {
     );
     assert_eq!(fetch_token_balance(&svm, &route_vault), 0);
 
-    // Two independent receipts, each Finalized with its OWN amount...
     let ra = fetch_fill_receipt(&svm, &receipt_a);
     let rb = fetch_fill_receipt(&svm, &receipt_b);
     assert_eq!(ra.fill_id, fill_a);
     assert_eq!(rb.fill_id, fill_b);
     assert_eq!(ra.amount, AMOUNT_A);
     assert_eq!(rb.amount, AMOUNT_B);
-    assert_eq!(ra.execution_status, ExecutionStatus::Finalized);
+    assert_eq!(ra.execution_status, ExecutionStatus::Recovered);
     assert_eq!(rb.execution_status, ExecutionStatus::Finalized);
-    // ...but ONE shared execution vault holding the co-mingled total (the vault is
-    // keyed on the route PDA alone — per-route, not per-fill).
-    assert_eq!(
-        fetch_token_balance(&svm, &execution_vault),
-        AMOUNT_A + AMOUNT_B
-    );
-
-    // Recovering fill A drains the WHOLE shared vault to the owner and advances
-    // only A's receipt; B's receipt is untouched (independent lifecycle).
-    let owner_ata = create_ata(&mut svm, &payer, &owner.pubkey(), &mint);
-    send_ix(
-        &mut svm,
-        recover_funds_ix(&owner.pubkey(), &route, &fill_a, &mint, &owner_ata),
-        &owner,
-        &[],
-    )
-    .expect("recover fill A should succeed");
-    assert_eq!(fetch_token_balance(&svm, &owner_ata), AMOUNT_A + AMOUNT_B);
-    assert_eq!(fetch_token_balance(&svm, &execution_vault), 0);
-    assert_eq!(
-        fetch_fill_receipt(&svm, &receipt_a).execution_status,
-        ExecutionStatus::Recovered
-    );
-    assert_eq!(
-        fetch_fill_receipt(&svm, &receipt_b).execution_status,
-        ExecutionStatus::Finalized
-    );
-
-    // Single-drain conservation: A's recovery already swept the shared vault, so
-    // recovering B now moves nothing (NothingToRecover) and B stays Finalized. The
-    // payout is capped at the vault balance, not the sum of receipt amounts — a
-    // receipt is a lifecycle marker, not a per-fill fund claim. Recovery is
-    // owner-gated and owner-ATA-only, so this is loose-but-safe, never a double-spend.
+    assert_eq!(fetch_route(&svm, &route).active_fill, Some(fill_b));
+    assert_eq!(fetch_token_balance(&svm, &execution_vault), AMOUNT_B);
+    let addresses = [route, execution_vault, owner_ata, receipt_a, receipt_b];
+    let before = addresses.map(|key| svm.get_account(&key));
     assert_eq!(
         send_ix_expect_err(
             &mut svm,
-            recover_funds_ix(&owner.pubkey(), &route, &fill_b, &mint, &owner_ata),
+            recover_funds_ix(&owner.pubkey(), &route, &fill_a, &mint, &owner_ata),
             &owner,
             &[],
-            "recover against an emptied shared vault must not double-pay",
+            "recovered A cannot drain active B",
         ),
-        custom_error(SraError::NothingToRecover)
+        custom_error(SraError::InvalidActiveFill)
     );
+    assert_eq!(addresses.map(|key| svm.get_account(&key)), before);
+    send_ix(
+        &mut svm,
+        recover_funds_ix(&owner.pubkey(), &route, &fill_b, &mint, &owner_ata),
+        &owner,
+        &[],
+    )
+    .expect("recover B succeeds");
     assert_eq!(fetch_token_balance(&svm, &owner_ata), AMOUNT_A + AMOUNT_B);
+    assert_eq!(fetch_token_balance(&svm, &execution_vault), 0);
+    assert_eq!(fetch_route(&svm, &route).active_fill, None);
     assert_eq!(
         fetch_fill_receipt(&svm, &receipt_b).execution_status,
-        ExecutionStatus::Finalized
+        ExecutionStatus::Recovered
     );
 }
 

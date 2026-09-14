@@ -31,6 +31,7 @@ pub struct FinalizeFill<'info> {
     // argument; binding it in the seeds both validates it and yields the signer
     // seeds for the vault transfer below.
     #[account(
+        mut,
         seeds = [SEED_SRA_ROUTE, route.owner.as_ref(), &route_config_hash, &route.salt],
         bump = route.bump,
     )]
@@ -77,6 +78,11 @@ pub(crate) fn handler(
     fill_id: [u8; 32],
     route_config_hash: [u8; 32],
 ) -> Result<()> {
+    require!(
+        ctx.accounts.route.active_fill.is_none(),
+        SraError::InvalidActiveFill
+    );
+
     // 1. Route must be active (pause blocks finalize, so a paused fill stays finalizable after unpause).
     require!(!ctx.accounts.route.paused, SraError::RoutePaused);
 
@@ -176,6 +182,7 @@ pub(crate) fn handler(
         finalized_at,
         bump: ctx.bumps.fill_receipt,
     });
+    ctx.accounts.route.active_fill = Some(fill_id);
 
     emit!(FillFinalized {
         route: route_key,

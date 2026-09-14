@@ -479,7 +479,7 @@ fn double_finalize_rejected_and_execute_after_success_rejected() {
         &[],
         "re-execute terminal receipt",
     );
-    assert_eq!(err, custom_error(SraError::InvalidExecutionStatus));
+    assert_eq!(err, custom_error(SraError::InvalidActiveFill));
     assert_eq!(
         fetch_token_balance(&svm, &recipient_ata),
         VAULT,
@@ -739,6 +739,7 @@ fn stage_verified(
 
     let fill_receipt =
         seed_fill_receipt_with_status(svm, &route, V_FILL_ID, VAULT, ExecutionStatus::Finalized);
+    common::active_fill::set_active_fill(svm, &route, Some(V_FILL_ID));
 
     StagedVerified {
         payer,

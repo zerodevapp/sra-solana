@@ -1455,6 +1455,17 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "active_fill",
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  32
+                ]
+              }
+            }
           }
         ]
       }

@@ -339,8 +339,6 @@ fn lifecycle_finalize_recover_skip_actions_terminal() {
     assert_eq!(fetch_token_balance(&svm, &owner_ata), AMOUNT);
 }
 
-/// Every lifecycle-mutating op rejects a terminal receipt with
-/// `InvalidExecutionStatus`, leaving status and funds untouched.
 fn assert_all_ops_rejected(
     svm: &mut litesvm::LiteSVM,
     payer: &Keypair,
@@ -353,7 +351,6 @@ fn assert_all_ops_rejected(
     let before = status(svm, &f.fill_receipt);
     let vault_before = fetch_token_balance(svm, &f.execution_vault);
 
-    // Status gate fires before the executor/pause gates.
     let err = send_ix_expect_err(
         svm,
         execute_actions_ix(
@@ -367,7 +364,7 @@ fn assert_all_ops_rejected(
         &[],
         "execute on a terminal receipt must reject",
     );
-    assert_eq!(err, custom_error(SraError::InvalidExecutionStatus));
+    assert_eq!(err, custom_error(SraError::InvalidActiveFill));
 
     let err = send_ix_expect_err(
         svm,
@@ -382,7 +379,7 @@ fn assert_all_ops_rejected(
         &[owner],
         "retry on a terminal receipt must reject",
     );
-    assert_eq!(err, custom_error(SraError::InvalidExecutionStatus));
+    assert_eq!(err, custom_error(SraError::InvalidActiveFill));
 
     let err = send_ix_expect_err(
         svm,
@@ -391,7 +388,7 @@ fn assert_all_ops_rejected(
         &[],
         "recover on a terminal receipt must reject",
     );
-    assert_eq!(err, custom_error(SraError::InvalidExecutionStatus));
+    assert_eq!(err, custom_error(SraError::InvalidActiveFill));
 
     assert_eq!(
         status(svm, &f.fill_receipt),

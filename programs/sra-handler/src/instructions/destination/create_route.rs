@@ -97,6 +97,7 @@ pub(crate) fn handler(
     route.allowed_executors = params.allowed_executors;
     route.paused = false;
     route.bump = ctx.bumps.route;
+    route.active_fill = None;
 
     emit!(RouteCreated {
         route: route.key(),

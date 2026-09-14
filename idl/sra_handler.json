@@ -348,7 +348,8 @@
             "`fill_receipt` PDA below is seeded by `route.key()`, so passing any other",
             "route would fail to find a finalized receipt — and per the single-tenant",
             "trust model a route only ever touches its own execution authority."
-          ]
+          ],
+          "writable": true
         },
         {
           "name": "fill_receipt",
@@ -563,7 +564,8 @@
           "signer": true
         },
         {
-          "name": "route"
+          "name": "route",
+          "writable": true
         },
         {
           "name": "verified_fill",
@@ -1231,6 +1233,7 @@
         },
         {
           "name": "route",
+          "writable": true,
           "relations": [
             "fill_receipt"
           ]
@@ -1862,7 +1865,8 @@
           "name": "route",
           "docs": [
             "`has_one = owner`; not seed-bound (the `fill_receipt` PDA is seeded by `route`)."
-          ]
+          ],
+          "writable": true
         },
         {
           "name": "fill_receipt",
@@ -4472,6 +4476,17 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "active_fill",
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  32
+                ]
+              }
+            }
           }
         ]
       }

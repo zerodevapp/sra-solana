@@ -506,6 +506,7 @@ fn manage_route_does_not_affect_finalized_receipts() {
         .get_account(&fill_receipt)
         .expect("planted receipt exists")
         .data;
+    common::active_fill::set_active_fill(&mut svm, &route, Some([0xCD; 32]));
 
     let extra = deploy_extra_adapter(&mut svm);
     let new_set = vec![ADAPTER_PROGRAM_ID, extra];
@@ -516,6 +517,8 @@ fn manage_route_does_not_affect_finalized_receipts() {
         &new_set,
     );
     send_ix(&mut svm, ix, &payer, &[&owner]).expect("manage_route succeeds");
+
+    assert_eq!(fetch_route(&svm, &route).active_fill, Some([0xCD; 32]));
 
     let after = svm
         .get_account(&fill_receipt)

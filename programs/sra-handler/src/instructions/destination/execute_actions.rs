@@ -49,6 +49,7 @@ pub struct ExecuteActions<'info> {
     /// `fill_receipt` PDA below is seeded by `route.key()`, so passing any other
     /// route would fail to find a finalized receipt — and per the single-tenant
     /// trust model a route only ever touches its own execution authority.
+    #[account(mut)]
     pub route: Box<Account<'info, SolanaSraRoute>>,
     /// The replay/lifecycle marker; bound to `route` + `fill_id` by its seeds.
     #[account(
@@ -124,12 +125,15 @@ pub(crate) fn handler<'info>(
     fill_id: [u8; 32],
     verified_runtimes: Vec<VerifiedCpiRuntime>,
 ) -> Result<()> {
+    require!(
+        ctx.accounts.route.active_fill == Some(fill_id),
+        SraError::InvalidActiveFill
+    );
     // Must be settled and not yet acted on (ActionsFailed is retried via retry_actions).
     require!(
         ctx.accounts.fill_receipt.execution_status == ExecutionStatus::Finalized,
         SraError::InvalidExecutionStatus
     );
-    // Pause + executor gates (EVM executeOnTarget parity); route stays read-only.
     require!(!ctx.accounts.route.paused, SraError::RoutePaused);
     require!(
         ctx.accounts
@@ -154,6 +158,7 @@ pub(crate) fn handler<'info>(
     match run_committed_actions(&accounts, fill_id, &verified_runtimes)? {
         ActionOutcome::Succeeded => {
             ctx.accounts.fill_receipt.execution_status = ExecutionStatus::ActionsSucceeded;
+            ctx.accounts.route.active_fill = None;
             emit!(ActionsExecuted { route, fill_id });
         }
         ActionOutcome::SoftFailed => {

@@ -2,9 +2,7 @@
 //!
 //! Drains the route's execution vault to the route owner's canonical ATA (pinned
 //! by authority + mint) and advances the fill receipt to the terminal `Recovered`
-//! state. The vault is shared by every fill of the route, so recovery drains the
-//! whole balance and advances only the referenced receipt — fund-safe, since the
-//! only authority is the owner and the only destination is their ATA.
+//! state.
 
 use anchor_lang::prelude::*;
 use anchor_spl::token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked};
@@ -20,7 +18,7 @@ use crate::events::FundsRecovered;
 pub struct RecoverFunds<'info> {
     /// Recovery authority (route owner).
     pub owner: Signer<'info>,
-    #[account(has_one = owner)]
+    #[account(mut, has_one = owner)]
     pub route: Box<Account<'info, SolanaSraRoute>>,
     /// The fill lifecycle marker.
     #[account(mut, has_one = route)]
@@ -48,6 +46,10 @@ pub struct RecoverFunds<'info> {
 }
 
 pub(crate) fn handler(ctx: Context<RecoverFunds>) -> Result<()> {
+    require!(
+        ctx.accounts.route.active_fill == Some(ctx.accounts.fill_receipt.fill_id),
+        SraError::InvalidActiveFill
+    );
     // Recoverable from Finalized (actions not yet run, or a run aborted before
     // marking failure — e.g. CU exhaustion) or ActionsFailed; the rest are terminal.
     require!(
@@ -83,6 +85,7 @@ pub(crate) fn handler(ctx: Context<RecoverFunds>) -> Result<()> {
     )?;
 
     ctx.accounts.fill_receipt.execution_status = ExecutionStatus::Recovered;
+    ctx.accounts.route.active_fill = None;
 
     emit!(FundsRecovered {
         route: route_key,

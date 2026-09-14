@@ -11,6 +11,8 @@
 //! `VerifiedFill` ABI is exercised. The forgery / edge tests fabricate
 //! adapter-owned evidence directly to probe each handler-side cross-check.
 
+#[path = "finalize_fill/active_fill.rs"]
+mod active_fill;
 mod common;
 
 use anchor_lang::error::ErrorCode;
@@ -103,6 +105,37 @@ fn setup_finalizable_fill(svm: &mut litesvm::LiteSVM) -> Finalizable {
 }
 
 impl Finalizable {
+    fn queued_fill(
+        &self,
+        svm: &mut litesvm::LiteSVM,
+        fill_id: [u8; 32],
+        amount: u64,
+    ) -> solana_sdk::instruction::Instruction {
+        let evidence = sample_verified_fill_data(self.route, self.mint, fill_id, amount);
+        let verified_fill = fabricate_verified_fill(
+            svm,
+            fill_id,
+            ADAPTER_PROGRAM_ID,
+            verified_fill_account_bytes(&evidence),
+        );
+        mint_to(
+            svm,
+            &self.payer,
+            &self.payer,
+            &self.mint,
+            &self.route_vault,
+            amount,
+        );
+        finalize_fill_ix(
+            &self.payer.pubkey(),
+            &self.route,
+            self.route_config_hash,
+            &verified_fill,
+            fill_id,
+            &self.mint,
+        )
+    }
+
     fn finalize_ix(&self) -> solana_sdk::instruction::Instruction {
         finalize_fill_ix(
             &self.payer.pubkey(),
@@ -173,11 +206,52 @@ impl Finalizable {
 // --------------------------------------------------------------------------
 
 #[test]
+fn second_fill_rejected_while_active() {
+    let mut svm = setup_svm();
+    let f = setup_finalizable_fill(&mut svm);
+    let second_id = [0x82; 32];
+    let second_ix = f.queued_fill(&mut svm, second_id, 6_000_000);
+    let second_receipt = derive_fill_receipt_pda(&f.route, &second_id).0;
+    assert_eq!(fetch_token_balance(&svm, &f.route_vault), 10_000_000);
+    f.finalize(&mut svm).expect("first fill finalizes");
+    let route_before = svm.get_account(&f.route).unwrap().data;
+    let receipt_before = svm.get_account(&second_receipt);
+    let balances_before = (
+        fetch_token_balance(&svm, &f.route_vault),
+        fetch_token_balance(&svm, &f.execution_vault),
+    );
+
+    assert_eq!(
+        send_ix_expect_err(
+            &mut svm,
+            second_ix,
+            &f.payer,
+            &[],
+            "second fill must reject while the first fill is active"
+        ),
+        custom_error(SraError::InvalidActiveFill)
+    );
+
+    assert_eq!(svm.get_account(&f.route).unwrap().data, route_before);
+    assert_eq!(svm.get_account(&second_receipt), receipt_before);
+    assert!(svm.get_account(&second_receipt).is_none());
+    assert_eq!(balances_before, (6_000_000, AMOUNT));
+    assert_eq!(
+        (
+            fetch_token_balance(&svm, &f.route_vault),
+            fetch_token_balance(&svm, &f.execution_vault)
+        ),
+        balances_before
+    );
+}
+
+#[test]
 fn finalize_fill_happy_path() {
     let mut svm = setup_svm();
     let f = setup_finalizable_fill(&mut svm);
 
     f.finalize(&mut svm).expect("finalize_fill should succeed");
+    assert_eq!(fetch_route(&svm, &f.route).active_fill, Some(f.fill_id));
 
     // The full verified amount moved route_vault -> execution_vault (no fees).
     assert_eq!(fetch_token_balance(&svm, &f.route_vault), 0);
@@ -216,6 +290,7 @@ fn finalize_fill_forwards_full_amount() {
     assert_eq!(exec_before, 0);
 
     f.finalize(&mut svm).expect("finalize_fill should succeed");
+    assert_eq!(fetch_route(&svm, &f.route).active_fill, Some(f.fill_id));
 
     assert_eq!(
         fetch_token_balance(&svm, &f.execution_vault) - exec_before,
@@ -234,6 +309,7 @@ fn finalize_fill_emits_fill_finalized() {
 
     let meta = send_ix_with_meta(&mut svm, f.finalize_ix(), &f.payer, &[])
         .expect("finalize_fill should succeed");
+    assert_eq!(fetch_route(&svm, &f.route).active_fill, Some(f.fill_id));
     let event: sra_handler::events::FillFinalized =
         extract_anchor_event(&meta.logs).expect("FillFinalized emitted");
     assert_eq!(event.route, f.route);
@@ -278,6 +354,7 @@ fn finalize_fill_after_unpause_succeeds() {
     // The same fill (never consumed while paused) finalizes cleanly after unpause.
     f.finalize(&mut svm)
         .expect("finalize after unpause should succeed");
+    assert_eq!(fetch_route(&svm, &f.route).active_fill, Some(f.fill_id));
     assert_eq!(fetch_token_balance(&svm, &f.execution_vault), AMOUNT);
     assert_eq!(
         fetch_fill_receipt(&svm, &f.receipt_pda()).execution_status,
@@ -319,6 +396,7 @@ fn finalize_fill_after_readding_adapter_succeeds() {
     f.set_adapters(&mut svm, &[ADAPTER_PROGRAM_ID]);
     f.finalize(&mut svm)
         .expect("finalize after re-adding the adapter should succeed");
+    assert_eq!(fetch_route(&svm, &f.route).active_fill, Some(f.fill_id));
     assert_eq!(fetch_token_balance(&svm, &f.execution_vault), AMOUNT);
 }
 
@@ -785,6 +863,7 @@ fn finalize_fill_consumes_cctp_verified_fill_end_to_end() {
     );
     send_ix(&mut svm, ix.clone(), &payer, &[])
         .expect("finalize_fill should consume the CCTP VerifiedFill");
+    assert_eq!(fetch_route(&svm, &route).active_fill, Some(nonce));
 
     // The full delivered amount staged into the execution vault; receipt written.
     let (execution_authority, _) = derive_execution_authority_pda(&route);

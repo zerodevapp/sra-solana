@@ -19,7 +19,7 @@ pub struct RetryActions<'info> {
     /// Only the route owner may retry.
     pub owner: Signer<'info>,
     /// `has_one = owner`; not seed-bound (the `fill_receipt` PDA is seeded by `route`).
-    #[account(has_one = owner)]
+    #[account(mut, has_one = owner)]
     pub route: Box<Account<'info, SolanaSraRoute>>,
     /// Replay/lifecycle marker: gates on `ActionsFailed`, advanced on a clean
     /// re-run, never closed.
@@ -52,6 +52,10 @@ pub(crate) fn handler<'info>(
     fill_id: [u8; 32],
     verified_runtimes: Vec<VerifiedCpiRuntime>,
 ) -> Result<()> {
+    require!(
+        ctx.accounts.route.active_fill == Some(fill_id),
+        SraError::InvalidActiveFill
+    );
     // Only an ActionsFailed receipt is retryable (Finalized -> execute_actions; terminal states can't re-run).
     require!(
         ctx.accounts.fill_receipt.execution_status == ExecutionStatus::ActionsFailed,
@@ -77,6 +81,7 @@ pub(crate) fn handler<'info>(
             // The re-run applied. ActionsRetried is the retry-path success event
             // (the counterpart of execute_actions' ActionsExecuted), not a re-attempt.
             ctx.accounts.fill_receipt.execution_status = ExecutionStatus::ActionsSucceeded;
+            ctx.accounts.route.active_fill = None;
             emit!(ActionsRetried { route, fill_id });
         }
         ActionOutcome::SoftFailed => {

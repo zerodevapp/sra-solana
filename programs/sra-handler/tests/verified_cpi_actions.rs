@@ -179,6 +179,7 @@ fn stage(
 
     let fill_receipt =
         seed_fill_receipt_with_status(svm, &route, FILL_ID, VAULT, ExecutionStatus::Finalized);
+    common::active_fill::set_active_fill(svm, &route, Some(FILL_ID));
 
     Staged {
         payer,

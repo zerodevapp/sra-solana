@@ -15,6 +15,7 @@
 
 mod common;
 
+use common::active_fill::set_active_fill;
 use common::*;
 use solana_sdk::{
     compute_budget::ComputeBudgetInstruction, pubkey::Pubkey, signature::Keypair, signer::Signer,
@@ -76,6 +77,7 @@ fn stage(svm: &mut litesvm::LiteSVM, action_config: Vec<SolanaAction>, amount: u
     }
     let fill_receipt =
         seed_fill_receipt_with_status(svm, &route, FILL_ID, amount, ExecutionStatus::Finalized);
+    set_active_fill(svm, &route, Some(FILL_ID));
 
     Staged {
         payer,
@@ -92,7 +94,72 @@ fn stage(svm: &mut litesvm::LiteSVM, action_config: Vec<SolanaAction>, amount: u
 // --------------------------------------------------------------------------
 
 #[test]
-fn execute_actions_single_spl_transfer_succeeds() {
+fn execute_actions_rejects_non_active_fill() {
+    let mut svm = setup_svm();
+    let recipient = Pubkey::new_unique();
+    let s = stage(&mut svm, vec![spl(recipient, 10_000)], AMOUNT);
+    let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
+    let second_id = [8; 32];
+    let second_receipt = seed_fill_receipt_with_status(
+        &mut svm,
+        &s.route,
+        second_id,
+        6_000_000,
+        ExecutionStatus::Finalized,
+    );
+    let addresses = [
+        s.route,
+        s.execution_vault,
+        recipient_ata,
+        s.fill_receipt,
+        second_receipt,
+    ];
+    let before = addresses.map(|key| svm.get_account(&key));
+    let ix = execute_actions_ix(
+        &s.payer.pubkey(),
+        &s.route,
+        second_id,
+        &s.mint,
+        &[recipient_ata],
+    );
+    assert_eq!(
+        send_ix_expect_err(&mut svm, ix, &s.payer, &[], "non-active fill must reject"),
+        custom_error(SraError::InvalidActiveFill)
+    );
+    assert_eq!(addresses.map(|key| svm.get_account(&key)), before);
+}
+
+#[test]
+fn execute_actions_failure_retains_active_fill() {
+    for hard_failure in [false, true] {
+        let mut svm = setup_svm();
+        let recipient = Pubkey::new_unique();
+        let s = stage(&mut svm, vec![spl(recipient, 10_000)], AMOUNT);
+        let missing = derive_ata(&recipient, &s.mint);
+        let remaining = if hard_failure { vec![] } else { vec![missing] };
+        let before = svm.get_account(&s.fill_receipt).unwrap().data;
+        let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &remaining);
+        if hard_failure {
+            assert_eq!(
+                send_ix_expect_err(&mut svm, ix, &s.payer, &[], "missing accounts hard reject"),
+                custom_error(SraError::ActionAccountMismatch)
+            );
+            assert_eq!(svm.get_account(&s.fill_receipt).unwrap().data, before);
+        } else {
+            send_ix(&mut svm, ix, &s.payer, &[]).expect("missing ATA soft fails");
+            assert_eq!(
+                status(&svm, &s.fill_receipt),
+                ExecutionStatus::ActionsFailed
+            );
+        }
+        assert_eq!(fetch_route(&svm, &s.route).active_fill, Some(FILL_ID));
+        assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
+        assert!(svm.get_account(&missing).is_none());
+    }
+}
+
+#[test]
+fn execute_actions_success_clears_active_fill() {
     let mut svm = setup_svm();
     let recipient = Pubkey::new_unique();
     let s = stage(&mut svm, vec![spl(recipient, 10_000)], AMOUNT);
@@ -106,6 +173,7 @@ fn execute_actions_single_spl_transfer_succeeds() {
         &[recipient_ata],
     );
     send_ix(&mut svm, ix, &s.payer, &[]).expect("execute_actions should succeed");
+    assert_eq!(fetch_route(&svm, &s.route).active_fill, None);
 
     assert_eq!(fetch_token_balance(&svm, &recipient_ata), AMOUNT);
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), 0);
@@ -191,6 +259,7 @@ fn execute_actions_legacy_under_consuming_config_hard_rejects_recoverable() {
         ExecutionStatus::Finalized,
     );
     let recipient_ata = create_ata(&mut svm, &payer, &recipient, &mint);
+    set_active_fill(&mut svm, &route, Some(FILL_ID));
 
     let ix = execute_actions_ix(&payer.pubkey(), &route, FILL_ID, &mint, &[recipient_ata]);
     let err = send_ix_expect_err(
@@ -255,6 +324,7 @@ fn execute_actions_legacy_oracle_min_out_hard_rejects_recoverable() {
     );
 
     let ix = execute_actions_ix(&payer.pubkey(), &route, FILL_ID, &mint, &[]);
+    set_active_fill(&mut svm, &route, Some(FILL_ID));
     let err = send_ix_expect_err(
         &mut svm,
         ix,
@@ -460,7 +530,7 @@ fn execute_actions_non_finalized_status_rejected() {
         &[recipient_ata],
     );
     let err = send_ix_expect_err(&mut svm, ix2, &s.payer, &[], "non-finalized rejected");
-    assert_eq!(err, custom_error(SraError::InvalidExecutionStatus));
+    assert_eq!(err, custom_error(SraError::InvalidActiveFill));
 }
 
 #[test]

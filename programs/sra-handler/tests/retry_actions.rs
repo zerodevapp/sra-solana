@@ -6,6 +6,7 @@ mod common;
 
 use anchor_lang::error::ErrorCode;
 use anchor_spl::token::ID as TOKEN_PROGRAM_ID;
+use common::active_fill::set_active_fill;
 use common::*;
 use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey, signature::Keypair, signer::Signer};
 use sra_common::{
@@ -67,6 +68,7 @@ fn stage(
         mint_to(svm, &payer, &payer, &mint, &execution_vault, amount);
     }
     let fill_receipt = seed_fill_receipt_with_status(svm, &route, FILL_ID, amount, initial_status);
+    set_active_fill(svm, &route, Some(FILL_ID));
 
     Staged {
         payer,
@@ -81,6 +83,116 @@ fn stage(
 // --------------------------------------------------------------------------
 // Success — a fix applied out-of-band settles on retry
 // --------------------------------------------------------------------------
+
+#[test]
+fn retry_actions_rejects_non_active_fill() {
+    let mut svm = setup_svm();
+    let recipient = Pubkey::new_unique();
+    let s = stage(
+        &mut svm,
+        vec![spl(recipient, 10_000)],
+        AMOUNT,
+        ExecutionStatus::ActionsFailed,
+    );
+    let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
+    let second_id = [8; 32];
+    let second_receipt = seed_fill_receipt_with_status(
+        &mut svm,
+        &s.route,
+        second_id,
+        6_000_000,
+        ExecutionStatus::ActionsFailed,
+    );
+    let addresses = [
+        s.route,
+        s.execution_vault,
+        recipient_ata,
+        s.fill_receipt,
+        second_receipt,
+    ];
+    let before = addresses.map(|key| svm.get_account(&key));
+    let ix = retry_actions_ix(
+        &s.owner.pubkey(),
+        &s.route,
+        second_id,
+        &s.mint,
+        &[recipient_ata],
+    );
+    assert_eq!(
+        send_ix_expect_err(
+            &mut svm,
+            ix,
+            &s.payer,
+            &[&s.owner],
+            "non-active retry must reject"
+        ),
+        custom_error(SraError::InvalidActiveFill)
+    );
+    assert_eq!(addresses.map(|key| svm.get_account(&key)), before);
+}
+
+#[test]
+fn retry_actions_success_clears_active_fill() {
+    let mut svm = setup_svm();
+    let recipient = Pubkey::new_unique();
+    let s = stage(
+        &mut svm,
+        vec![spl(recipient, 10_000)],
+        AMOUNT,
+        ExecutionStatus::ActionsFailed,
+    );
+    let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
+    let ix = retry_actions_ix(
+        &s.owner.pubkey(),
+        &s.route,
+        FILL_ID,
+        &s.mint,
+        &[recipient_ata],
+    );
+    send_ix(&mut svm, ix, &s.payer, &[&s.owner]).expect("retry succeeds");
+    assert_eq!(fetch_route(&svm, &s.route).active_fill, None);
+    assert_eq!(
+        status(&svm, &s.fill_receipt),
+        ExecutionStatus::ActionsSucceeded
+    );
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), 0);
+    assert_eq!(fetch_token_balance(&svm, &recipient_ata), AMOUNT);
+}
+
+#[test]
+fn retry_actions_failure_retains_active_fill() {
+    for hard_failure in [false, true] {
+        let mut svm = setup_svm();
+        let recipient = Pubkey::new_unique();
+        let s = stage(
+            &mut svm,
+            vec![spl(recipient, 10_000)],
+            AMOUNT,
+            ExecutionStatus::ActionsFailed,
+        );
+        let missing = derive_ata(&recipient, &s.mint);
+        let remaining = if hard_failure { vec![] } else { vec![missing] };
+        let addresses = [s.route, s.execution_vault, s.fill_receipt, missing];
+        let before = addresses.map(|key| svm.get_account(&key));
+        let ix = retry_actions_ix(&s.owner.pubkey(), &s.route, FILL_ID, &s.mint, &remaining);
+        if hard_failure {
+            assert_eq!(
+                send_ix_expect_err(
+                    &mut svm,
+                    ix,
+                    &s.payer,
+                    &[&s.owner],
+                    "missing accounts hard reject"
+                ),
+                custom_error(SraError::ActionAccountMismatch)
+            );
+        } else {
+            send_ix(&mut svm, ix, &s.payer, &[&s.owner]).expect("missing ATA soft fails");
+        }
+        assert_eq!(addresses.map(|key| svm.get_account(&key)), before);
+        assert_eq!(fetch_route(&svm, &s.route).active_fill, Some(FILL_ID));
+    }
+}
 
 #[test]
 fn retry_actions_after_fix_succeeds() {
@@ -493,6 +605,7 @@ fn stage_verified(svm: &mut litesvm::LiteSVM, quoter: &Keypair) -> VerifiedStage
 
     let fill_receipt =
         seed_fill_receipt_with_status(svm, &route, FILL_ID, VAULT, ExecutionStatus::ActionsFailed);
+    set_active_fill(svm, &route, Some(FILL_ID));
 
     VerifiedStaged {
         payer,

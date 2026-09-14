@@ -47,6 +47,7 @@ fn create_route_happy_path() {
     );
     assert!(!route.paused, "paused must start false");
     assert_ne!(route.bump, 0, "canonical bump stamped");
+    assert_eq!(route.active_fill, None);
 
     // Both vault ATAs created and empty.
     assert_eq!(fetch_token_balance(&svm, &route_vault), 0);

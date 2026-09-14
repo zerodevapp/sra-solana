@@ -9,6 +9,7 @@
 mod common;
 
 use anchor_lang::error::ErrorCode;
+use common::active_fill::set_active_fill;
 use common::*;
 use solana_sdk::{
     pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::TransactionError,
@@ -51,6 +52,7 @@ fn setup_recoverable(
     }
 
     let receipt = seed_fill_receipt_with_status(svm, &route, FILL_ID, AMOUNT, status);
+    set_active_fill(svm, &route, Some(FILL_ID));
     let owner_ata = create_ata(svm, &payer, &owner.pubkey(), &mint);
 
     Recoverable {
@@ -97,7 +99,47 @@ impl Recoverable {
 // --------------------------------------------------------------------------
 
 #[test]
-fn recover_from_finalized_transfers_to_owner() {
+fn recover_funds_rejects_non_active_fill() {
+    let mut svm = setup_svm();
+    let r = setup_recoverable(&mut svm, ExecutionStatus::Finalized, AMOUNT);
+    let second_id = [8; 32];
+    let second_receipt = seed_fill_receipt_with_status(
+        &mut svm,
+        &r.route,
+        second_id,
+        6_000_000,
+        ExecutionStatus::Finalized,
+    );
+    let addresses = [
+        r.route,
+        r.execution_vault,
+        r.owner_ata,
+        r.receipt,
+        second_receipt,
+    ];
+    let before = addresses.map(|key| svm.get_account(&key));
+    let ix = recover_funds_ix(
+        &r.owner.pubkey(),
+        &r.route,
+        &second_id,
+        &r.mint,
+        &r.owner_ata,
+    );
+    assert_eq!(
+        send_ix_expect_err(
+            &mut svm,
+            ix,
+            &r.owner,
+            &[],
+            "non-active recovery must reject"
+        ),
+        custom_error(SraError::InvalidActiveFill)
+    );
+    assert_eq!(addresses.map(|key| svm.get_account(&key)), before);
+}
+
+#[test]
+fn recover_funds_clears_active_fill() {
     let mut svm = setup_svm();
     let r = setup_recoverable(&mut svm, ExecutionStatus::Finalized, AMOUNT);
 
@@ -107,6 +149,7 @@ fn recover_from_finalized_transfers_to_owner() {
     assert_eq!(fetch_token_balance(&svm, &r.execution_vault), 0);
     assert_eq!(fetch_token_balance(&svm, &r.owner_ata), AMOUNT);
     assert_eq!(r.status(&svm), ExecutionStatus::Recovered);
+    assert_eq!(fetch_route(&svm, &r.route).active_fill, None);
 }
 
 #[test]

@@ -61,6 +61,7 @@ pub struct SolanaSraRoute {
     pub allowed_executors: Vec<Pubkey>,
     pub paused: bool,
     pub bump: u8,
+    pub active_fill: Option<[u8; 32]>,
 }
 
 /// Inputs to `create_route`. Identity fields are folded into `route_config_hash`
@@ -185,12 +186,7 @@ mod tests {
 
     #[test]
     fn solana_sra_route_init_space() {
-        // 32 owner + 8 source_chain_id + 32 expected_mint
-        // + 4 + (4 * 203) action_config + 32 salt
-        // + 4 + (32 * 8) allowed_adapters
-        // + 4 + (32 * 8) allowed_executors + 1 paused + 1 bump
-        // = 32 + 8 + 32 + (4 + 812) + 32 + 260 + 260 + 1 + 1 = 1442
-        assert_eq!(SolanaSraRoute::INIT_SPACE, 1442);
+        assert_eq!(SolanaSraRoute::INIT_SPACE, 1442 + 33);
     }
 
     #[test]
@@ -211,6 +207,7 @@ mod tests {
             allowed_executors: vec![],
             paused: false,
             bump: 255,
+            active_fill: None,
         };
         assert_eq!(route.action_config, vec![action]);
     }

@@ -185,4 +185,7 @@ pub enum SraError {
 
     #[msg("SRA vault balance is below the requested input amount")]
     InsufficientSourceBalance,
+
+    #[msg("Fill does not match the route's active fill state")]
+    InvalidActiveFill,
 }

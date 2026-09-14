@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 #![allow(clippy::too_many_arguments)]
 
+pub mod active_fill;
 pub mod cctp;
 pub mod dest_e2e;
 pub mod passive;
@@ -1612,9 +1613,11 @@ pub fn seed_route_with_config(
         allowed_executors: vec![*executor],
         paused: false,
         bump: 255,
+        active_fill: None,
     };
     let mut data = <SolanaSraRoute as Discriminator>::DISCRIMINATOR.to_vec();
     route.serialize(&mut data).unwrap();
+    data.resize(8 + <SolanaSraRoute as anchor_lang::Space>::INIT_SPACE, 0);
 
     let address = Pubkey::new_unique();
     let account = solana_sdk::account::Account {
