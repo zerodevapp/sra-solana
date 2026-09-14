@@ -186,7 +186,13 @@ mod tests {
 
     #[test]
     fn solana_sra_route_init_space() {
-        assert_eq!(SolanaSraRoute::INIT_SPACE, 1442 + 33);
+        // 32 owner + 8 source_chain_id + 32 expected_mint
+        // + 4 + (4 * 203) action_config + 32 salt
+        // + 4 + (32 * 8) allowed_adapters
+        // + 4 + (32 * 8) allowed_executors + 1 paused + 1 bump
+        // + 1 + 32 active_fill
+        // = 32 + 8 + 32 + (4 + 812) + 32 + 260 + 260 + 1 + 1 + 33 = 1475
+        assert_eq!(SolanaSraRoute::INIT_SPACE, 1475);
     }
 
     #[test]
