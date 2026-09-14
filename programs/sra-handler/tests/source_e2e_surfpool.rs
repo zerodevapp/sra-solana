@@ -16,18 +16,17 @@
 
 mod common;
 
-use anchor_lang::AccountSerialize;
 use common::surfpool::*;
 use common::*;
 use reqwest::blocking::Client;
 use serde_json::json;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
+    instruction::Instruction,
     pubkey::Pubkey,
     signature::{read_keypair_file, Keypair, Signer},
 };
 use sra_cctp_adapter::utils::message::{BurnMessage, CctpMessage};
-use sra_common::abi::u256_from_u64;
 use sra_common::{
     constants::{
         cctp_domain_for_chain, ACROSS_SPOKE_POOL_ID, CCTP_MESSAGE_TRANSMITTER_V2_ID,
@@ -35,10 +34,11 @@ use sra_common::{
         USDC_MINT,
     },
     source_deposit::{AcrossDepositParams, PrepareParams},
-    types::{FeeConfig, SourceHandlerData, SraConfig},
+    types::SraConfig,
 };
 
 const INPUT_AMOUNT: u64 = 1_000_000;
+const SRA_FUNDED_AMOUNT: u64 = 2_000_000;
 const PROTOCOL_FEE: u64 = 3_000;
 const NET_AMOUNT: u64 = INPUT_AMOUNT - PROTOCOL_FEE;
 const TARGET_TOKEN_DECIMALS: u8 = 6;
@@ -47,7 +47,7 @@ const FILL_DEADLINE_OFFSET_SECS: u32 = 3_600;
 const EXCLUSIVITY_PERIOD_SECS: u32 = 900;
 
 fn default_prepare_params_rpc(fx: &SurfpoolSourceFixture) -> PrepareParams {
-    let mut params = sample_prepare_params(fx.target_token);
+    let mut params = sample_prepare_params(fx.source.target_token);
     params.input_amount = INPUT_AMOUNT;
     params
 }
@@ -65,18 +65,8 @@ fn lookup_table_activation_waits_for_last_extended_slot() {
 struct SurfpoolSourceFixture {
     rpc: RpcClient,
     http: Client,
-    payer: Keypair,
-    owner: Keypair,
-    initiator: Keypair,
-    address_book_root: Pubkey,
-    handler_data: SourceHandlerData,
-    sra_config: Pubkey,
-    target_token: [u8; 32],
-    across_state: Pubkey,
-    across_vault: Pubkey,
-    adapter_program: Pubkey,
-    accounts: TriggerAccounts,
-    fee_ata: Pubkey,
+    source: PassiveFixture,
+    fee_ata: Option<Pubkey>,
 }
 
 impl SurfpoolSourceFixture {
@@ -101,7 +91,6 @@ impl SurfpoolSourceFixture {
         let target_chain_id = sample_prepare_params(target_token).target_chain_id;
         let salt = [0xAB; 32];
         let (sra_config, _) = derive_sra_pda(&owner.pubkey(), &handler_data, &salt);
-        let accounts = TriggerAccounts::derive(&sra_config, &USDC_MINT, &adapter_program);
         let (across_state, _) = derive_real_across_state_pda();
         let across_vault = derive_ata(&across_state, &USDC_MINT);
 
@@ -140,54 +129,7 @@ impl SurfpoolSourceFixture {
             address_book_root_pubkey
         ));
 
-        let fee_config = derive_fee_config_pda().0;
-        if rpc.get_account(&fee_config).is_ok() {
-            let mut config: FeeConfig = read_anchor_account(&rpc, &fee_config)?;
-            config.admin = payer.pubkey();
-            let mut data = Vec::new();
-            config.try_serialize(&mut data)?;
-            let hex_data: String = data.iter().map(|byte| format!("{byte:02x}")).collect();
-            surfpool_rpc(
-                &http,
-                "surfnet_setAccount",
-                json!([fee_config.to_string(), { "data": hex_data }]),
-            )?;
-        } else {
-            send_legacy_transaction(
-                &rpc,
-                "initialize_fee_config",
-                &payer,
-                &[],
-                &[initialize_fee_config_ix(
-                    &payer.pubkey(),
-                    &payer.pubkey(),
-                    Pubkey::default(),
-                )],
-            )?;
-        }
-        let fee_recipient = if fee_bps == 0 {
-            Pubkey::default()
-        } else {
-            Pubkey::new_unique()
-        };
-        send_legacy_transaction(
-            &rpc,
-            "configure_protocol_fee",
-            &payer,
-            &[],
-            &[
-                set_fee_recipient_ix(&payer.pubkey(), fee_recipient),
-                set_protocol_fee_ix(&payer.pubkey(), &payer.pubkey(), fee_bps, false, false),
-            ],
-        )?;
-        let fee_ata = derive_ata(&fee_recipient, &USDC_MINT);
-        if fee_bps != 0 {
-            surfpool_rpc(
-                &http,
-                "surfnet_setTokenAccount",
-                json!([fee_recipient.to_string(), USDC_MINT.to_string(), { "amount": 0 }, anchor_spl::token::ID.to_string()]),
-            )?;
-        }
+        let fee_ata = configure_protocol_fee(&rpc, &http, &payer, fee_bps)?;
 
         let initialize_ix = initialize_sra_ix(
             &payer.pubkey(),
@@ -202,13 +144,19 @@ impl SurfpoolSourceFixture {
         send_legacy_transaction(&rpc, "initialize_sra", &payer, &[&owner], &[initialize_ix])?;
         surfpool_log(format!("bootstrap: initialized SRA config {}", sra_config));
 
-        let address_book_entry = derive_address_book_pda(
-            &address_book_root_pubkey,
-            &USDC_MINT,
+        let source = PassiveFixture::from_existing_accounts(
+            &payer,
+            &owner,
+            &initiator,
+            handler_data,
+            sra_config,
+            USDC_MINT,
             target_chain_id,
-            &target_token,
-        )
-        .0;
+            adapter_program,
+            across_state,
+            across_vault,
+        );
+        let address_book_entry = source.address_book_entry(target_chain_id, &target_token);
         let address_book_ix = set_address_book_entry_ix(
             &payer.pubkey(),
             &owner.pubkey(),
@@ -234,49 +182,24 @@ impl SurfpoolSourceFixture {
         let fixture = Self {
             rpc,
             http,
-            payer,
-            owner,
-            initiator,
-            address_book_root: address_book_root_pubkey,
-            handler_data,
-            sra_config,
-            target_token,
-            across_state,
-            across_vault,
-            adapter_program,
-            accounts,
+            source,
             fee_ata,
         };
         surfpool_rpc(
             &fixture.http,
             "surfnet_setTokenAccount",
             json!([
-                fixture.sra_config.to_string(),
+                fixture.source.sra_config.to_string(),
                 USDC_MINT.to_string(),
-                { "amount": 2_000_000 },
+                { "amount": SRA_FUNDED_AMOUNT },
                 anchor_spl::token::ID.to_string()
             ]),
         )?;
         assert_eq!(
-            fixture.token_amount(&fixture.accounts.sra_vault)?,
-            2_000_000
+            fixture.token_amount(&fixture.source.accounts.sra_vault)?,
+            SRA_FUNDED_AMOUNT
         );
         Ok(fixture)
-    }
-
-    fn passive_fixture(&self, target_chain_id: u64) -> PassiveFixture {
-        PassiveFixture::from_existing_accounts(
-            &self.payer,
-            &self.owner,
-            &self.initiator,
-            self.handler_data.clone(),
-            self.sra_config,
-            USDC_MINT,
-            target_chain_id,
-            self.adapter_program,
-            self.across_state,
-            self.across_vault,
-        )
     }
 
     /// Pair `trigger` with the given adapter leg and submit the
@@ -285,7 +208,8 @@ impl SurfpoolSourceFixture {
     fn submit_source_flow(
         &self,
         params: &PrepareParams,
-        execute_ix: solana_sdk::instruction::Instruction,
+        trigger: Instruction,
+        execute_ix: Instruction,
         extra_signers: &[&Keypair],
     ) -> TestResult<Vec<String>> {
         surfpool_log(format!(
@@ -295,45 +219,28 @@ impl SurfpoolSourceFixture {
             params.output_amount,
             self.current_nonce()?
         ));
-        let address_book_entry = derive_address_book_pda(
-            &self.address_book_root,
-            &USDC_MINT,
-            params.target_chain_id,
-            &params.target_token,
-        )
-        .0;
-        let trigger = trigger_ix(
-            &self.payer.pubkey(),
-            &self.initiator.pubkey(),
-            &self.accounts,
-            &address_book_entry,
-            (params.protocol_fee_amount != 0).then_some(self.fee_ata),
-            params.clone(),
-            &execute_ix,
-        );
-
         let lookup_addresses =
             representative_lookup_addresses(&[trigger.clone(), execute_ix.clone()]);
-        let lookup_table = prepare_lookup_table(&self.rpc, &self.payer, lookup_addresses)?;
+        let lookup_table = prepare_lookup_table(&self.rpc, &self.source.payer, lookup_addresses)?;
 
-        let mut signers = vec![&self.initiator];
+        let mut signers = vec![&self.source.initiator];
         signers.extend_from_slice(extra_signers);
         let tx = build_versioned_transaction(
             &self.rpc,
             "source_flow",
-            &self.payer,
+            &self.source.payer,
             &signers,
             &[compute_budget_ix(), trigger, execute_ix],
             &[lookup_table],
         )?;
-        let signer_keys = &tx.message.static_account_keys()
-            [..usize::from(tx.message.header().num_required_signatures)];
-        let mut expected_signers = vec![self.payer.pubkey(), self.initiator.pubkey()];
+        let mut actual_signers = signer_keys(&tx).to_vec();
+        let mut expected_signers = vec![self.source.payer.pubkey(), self.source.initiator.pubkey()];
         expected_signers.extend(extra_signers.iter().map(|signer| signer.pubkey()));
-        assert!(!signer_keys.contains(&self.owner.pubkey()));
-        assert_eq!(signer_keys.len(), expected_signers.len());
-        assert!(expected_signers.iter().all(|key| signer_keys.contains(key)));
-        let signature = self.rpc.send_and_confirm_transaction(&tx)?;
+        assert!(!actual_signers.contains(&self.source.owner.pubkey()));
+        actual_signers.sort_unstable();
+        expected_signers.sort_unstable();
+        assert_eq!(actual_signers, expected_signers);
+        let signature = send_versioned_transaction(&self.rpc, "source_flow", &tx)?;
 
         let logs = logs_for_signature(&self.http, &signature)?;
         surfpool_log(format!(
@@ -344,36 +251,37 @@ impl SurfpoolSourceFixture {
     }
 
     fn invoke_source_flow(&self, params: PrepareParams) -> TestResult<Vec<String>> {
-        let execute_ix = execute_deposit_across_ix(
-            &self.payer.pubkey(),
-            &self.passive_fixture(params.target_chain_id),
-            &params,
+        let (trigger, execute_ix) = across_pair(
+            &self.source,
+            params.clone(),
             AcrossDepositParams::from_prepare(
                 &params,
-                self.payer.pubkey(),
+                self.source.payer.pubkey(),
                 FILL_DEADLINE_OFFSET_SECS,
                 EXCLUSIVITY_PERIOD_SECS,
             )
             .expect("prepare params must produce a valid net amount"),
+            self.fee_ata,
         );
-        self.submit_source_flow(&params, execute_ix, &[])
+        self.submit_source_flow(&params, trigger, execute_ix, &[])
     }
 
     /// The CCTP paired flow: the ephemeral `message_sent_event_data` keypair
     /// co-signs, and its pubkey is returned so tests can read back the real
     /// `MessageSent` account the transmitter wrote.
     fn invoke_source_flow_cctp(&self, params: PrepareParams) -> TestResult<(Vec<String>, Pubkey)> {
-        let (execute_ix, event_data) = execute_deposit_cctp_ix(
-            &self.payer.pubkey(),
-            &self.passive_fixture(params.target_chain_id),
-            &cctp_params_for(&params),
+        let (trigger, execute_ix, event_data) = cctp_pair(
+            &self.source,
+            params.clone(),
+            cctp_params_for(&params),
+            self.fee_ata,
         );
-        let logs = self.submit_source_flow(&params, execute_ix, &[&event_data])?;
+        let logs = self.submit_source_flow(&params, trigger, execute_ix, &[&event_data])?;
         Ok((logs, event_data.pubkey()))
     }
 
     fn current_nonce(&self) -> TestResult<u64> {
-        Ok(read_anchor_account::<SraConfig>(&self.rpc, &self.sra_config)?.deposit_nonce)
+        Ok(read_anchor_account::<SraConfig>(&self.rpc, &self.source.sra_config)?.deposit_nonce)
     }
 
     fn token_amount(&self, account: &Pubkey) -> TestResult<u64> {
@@ -396,12 +304,11 @@ impl SurfpoolSourceFixture {
 fn source_e2e_real_across_passive_deposit() -> TestResult<()> {
     let _lock = surfpool_lock().expect("acquire surfpool lock");
     let fx = SurfpoolSourceFixture::bootstrap(ADAPTER_PROGRAM_ID, 30)?;
-    let mut params = default_prepare_params_rpc(&fx);
-    params.protocol_fee_amount = PROTOCOL_FEE;
-    params.output_amount = u256_from_u64(995_000);
-    let pre_sra_vault = fx.token_amount(&fx.accounts.sra_vault)?;
-    let pre_vault = fx.token_amount(&fx.across_vault)?;
-    let pre_fee = fx.token_amount(&fx.fee_ata)?;
+    let params = fee_params(&fx.source, PROTOCOL_FEE);
+    let fee_ata = fx.fee_ata.expect("protocol fee ATA configured");
+    let pre_sra_vault = fx.token_amount(&fx.source.accounts.sra_vault)?;
+    let pre_vault = fx.token_amount(&fx.source.across_vault)?;
+    let pre_fee = fx.token_amount(&fee_ata)?;
     let pre_nonce = fx.current_nonce()?;
     let logs = fx.invoke_source_flow(params)?;
     assert_program_ran(
@@ -411,12 +318,15 @@ fn source_e2e_real_across_passive_deposit() -> TestResult<()> {
         2,
     );
     assert_eq!(
-        fx.token_amount(&fx.accounts.sra_vault)?,
+        fx.token_amount(&fx.source.accounts.sra_vault)?,
         pre_sra_vault - INPUT_AMOUNT
     );
-    assert_eq!(fx.token_amount(&fx.accounts.adapter_custody)?, 0);
-    assert_eq!(fx.token_amount(&fx.across_vault)?, pre_vault + NET_AMOUNT);
-    assert_eq!(fx.token_amount(&fx.fee_ata)?, pre_fee + PROTOCOL_FEE);
+    assert_eq!(fx.token_amount(&fx.source.accounts.adapter_custody)?, 0);
+    assert_eq!(
+        fx.token_amount(&fx.source.across_vault)?,
+        pre_vault + NET_AMOUNT
+    );
+    assert_eq!(fx.token_amount(&fee_ata)?, pre_fee + PROTOCOL_FEE);
     assert_eq!(fx.current_nonce()?, pre_nonce + 1);
     Ok(())
 }
@@ -452,12 +362,11 @@ fn source_e2e_real_across_nonce_increments() {
 fn source_e2e_real_cctp_passive_deposit() -> TestResult<()> {
     let _lock = surfpool_lock().expect("acquire surfpool lock");
     let fx = SurfpoolSourceFixture::bootstrap(CCTP_ADAPTER_PROGRAM_ID, 30)?;
-    let mut params = default_prepare_params_rpc(&fx);
-    params.protocol_fee_amount = PROTOCOL_FEE;
-    params.output_amount = u256_from_u64(995_000);
-    let pre_sra_vault = fx.token_amount(&fx.accounts.sra_vault)?;
+    let params = fee_params(&fx.source, PROTOCOL_FEE);
+    let fee_ata = fx.fee_ata.expect("protocol fee ATA configured");
+    let pre_sra_vault = fx.token_amount(&fx.source.accounts.sra_vault)?;
     let pre_supply = fx.usdc_supply()?;
-    let pre_fee = fx.token_amount(&fx.fee_ata)?;
+    let pre_fee = fx.token_amount(&fee_ata)?;
     let pre_nonce = fx.current_nonce()?;
 
     let (logs, message_sent) = fx
@@ -479,16 +388,16 @@ fn source_e2e_real_cctp_passive_deposit() -> TestResult<()> {
         1,
     );
     assert_eq!(
-        fx.token_amount(&fx.accounts.sra_vault)?,
+        fx.token_amount(&fx.source.accounts.sra_vault)?,
         pre_sra_vault - INPUT_AMOUNT
     );
-    assert_eq!(fx.token_amount(&fx.accounts.adapter_custody)?, 0);
+    assert_eq!(fx.token_amount(&fx.source.accounts.adapter_custody)?, 0);
     assert_eq!(
         fx.usdc_supply()?,
         pre_supply - NET_AMOUNT,
         "deposit_for_burn must reduce the USDC supply by the net amount"
     );
-    assert_eq!(fx.token_amount(&fx.fee_ata)?, pre_fee + PROTOCOL_FEE);
+    assert_eq!(fx.token_amount(&fee_ata)?, pre_fee + PROTOCOL_FEE);
 
     // The ephemeral MessageSent account the real transmitter wrote: parse the
     // wire message with the adapter's own parsers and pin every field the
@@ -501,7 +410,7 @@ fn source_e2e_real_cctp_passive_deposit() -> TestResult<()> {
     assert_eq!(event_account.owner, CCTP_MESSAGE_TRANSMITTER_V2_ID);
     let event: mock_cctp::MessageSent = read_anchor_account(&fx.rpc, &message_sent)
         .expect("MessageSent account parses (real layout == mock layout)");
-    assert_eq!(event.rent_payer, fx.payer.pubkey());
+    assert_eq!(event.rent_payer, fx.source.payer.pubkey());
     let message = CctpMessage::parse(&event.message).expect("wire message parses");
     let expected_domain =
         cctp_domain_for_chain(params.target_chain_id).expect("target chain has a CCTP domain");
