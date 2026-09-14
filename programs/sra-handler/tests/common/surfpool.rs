@@ -186,14 +186,14 @@ pub fn send_legacy_transaction(
     Ok(signature)
 }
 
-pub fn send_versioned_transaction(
+pub fn build_versioned_transaction(
     rpc: &RpcClient,
     label: &str,
     payer: &Keypair,
     signers: &[&Keypair],
     ixs: &[Instruction],
     lookup_tables: &[AddressLookupTableAccount],
-) -> TestResult<Signature> {
+) -> TestResult<VersionedTransaction> {
     let blockhash = rpc.get_latest_blockhash()?;
     let message = v0::Message::try_compile(&payer.pubkey(), ixs, lookup_tables, blockhash)?;
     // A caller passing lookup tables is claiming an ALT-resolved shape; if the
@@ -207,11 +207,24 @@ pub fn send_versioned_transaction(
     }
     let mut all_signers = vec![payer];
     all_signers.extend_from_slice(signers);
-    let tx = VersionedTransaction::try_new(VersionedMessage::V0(message), &all_signers)?;
+    Ok(VersionedTransaction::try_new(
+        VersionedMessage::V0(message),
+        &all_signers,
+    )?)
+}
+
+pub fn send_versioned_transaction(
+    rpc: &RpcClient,
+    label: &str,
+    payer: &Keypair,
+    signers: &[&Keypair],
+    ixs: &[Instruction],
+    lookup_tables: &[AddressLookupTableAccount],
+) -> TestResult<Signature> {
+    let tx = build_versioned_transaction(rpc, label, payer, signers, ixs, lookup_tables)?;
     surfpool_log(format!(
-        "send_versioned_transaction[{label}]: sending {} instruction(s) with {} lookup table(s)",
-        ixs.len(),
-        lookup_tables.len()
+        "send_versioned_transaction[{label}]: sending {} instruction(s)",
+        ixs.len()
     ));
     let signature = rpc.send_and_confirm_transaction(&tx)?;
     surfpool_log(format!(
