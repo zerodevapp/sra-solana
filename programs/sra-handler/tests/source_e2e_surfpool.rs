@@ -20,12 +20,11 @@ use common::surfpool::*;
 use common::*;
 use reqwest::blocking::Client;
 use serde_json::json;
-use solana_client::rpc_client::RpcClient;
-use solana_sdk::{
-    instruction::Instruction,
-    pubkey::Pubkey,
-    signature::{read_keypair_file, Keypair, Signer},
-};
+use solana_instruction::Instruction;
+use solana_keypair::{read_keypair_file, Keypair};
+use solana_pubkey::Pubkey;
+use solana_rpc_client::rpc_client::RpcClient;
+use solana_signer::Signer;
 use sra_cctp_adapter::utils::message::{BurnMessage, CctpMessage};
 use sra_common::{
     constants::{

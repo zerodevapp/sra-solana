@@ -55,7 +55,7 @@ pub mod mock_cctp {
 
         burn(
             CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 Burn {
                     mint: ctx.accounts.burn_token_mint.to_account_info(),
                     from: ctx.accounts.burn_token_account.to_account_info(),
@@ -68,7 +68,7 @@ pub mod mock_cctp {
         let message_sent = &mut ctx.accounts.message_sent_event_data;
         message_sent.rent_payer = ctx.accounts.event_rent_payer.key();
         message_sent.created_at = Clock::get()?.unix_timestamp;
-        message_sent.message = params.try_to_vec()?;
+        message_sent.message = borsh::to_vec(&params)?;
         Ok(())
     }
 }

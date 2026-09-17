@@ -12,6 +12,6 @@
 // so suppress the lint at module scope.
 #![allow(clippy::too_many_arguments)]
 
-use anchor_lang::declare_program;
+use anchor_lang::{declare_program, prelude::anchor_lang};
 
 declare_program!(token_messenger_minter_v2);

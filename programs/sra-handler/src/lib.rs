@@ -85,7 +85,7 @@ pub mod sra_handler {
     }
 
     pub fn execute_actions<'info>(
-        ctx: Context<'_, '_, '_, 'info, ExecuteActions<'info>>,
+        ctx: Context<'info, ExecuteActions<'info>>,
         fill_id: [u8; 32],
         verified_runtimes: Vec<VerifiedCpiRuntime>,
     ) -> Result<()> {
@@ -93,7 +93,7 @@ pub mod sra_handler {
     }
 
     pub fn retry_actions<'info>(
-        ctx: Context<'_, '_, '_, 'info, RetryActions<'info>>,
+        ctx: Context<'info, RetryActions<'info>>,
         fill_id: [u8; 32],
         verified_runtimes: Vec<VerifiedCpiRuntime>,
     ) -> Result<()> {

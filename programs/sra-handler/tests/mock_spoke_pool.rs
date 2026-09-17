@@ -13,7 +13,9 @@ use anchor_lang::{AccountDeserialize, Discriminator};
 use common::*;
 use litesvm::LiteSVM;
 use mock_spoke_pool::{FillStatus, FillStatusAccount};
-use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use sra_across_adapter::utils::svm_spoke;
 use sra_common::constants::ACROSS_SPOKE_POOL_ID;
 

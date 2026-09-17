@@ -151,7 +151,7 @@ mod tests {
     use crate::types::{
         validate_action_config, AccountTemplate, FixedRole, MinOut, SlotRole, SolanaAction,
     };
-    use anchor_lang::{prelude::*, AnchorDeserialize, AnchorSerialize};
+    use anchor_lang::{prelude::*, AnchorDeserialize};
 
     fn full_template() -> AccountTemplate {
         AccountTemplate {
@@ -204,7 +204,7 @@ mod tests {
         let m = MinOut::SignedQuote {
             quoter: Pubkey::new_unique(),
         };
-        let bytes = m.try_to_vec().unwrap();
+        let bytes = borsh::to_vec(&m).unwrap();
         assert_eq!(MinOut::try_from_slice(&bytes).unwrap(), m);
     }
 
@@ -214,7 +214,7 @@ mod tests {
             feed: Pubkey::new_unique(),
             max_slippage_bps: 50,
         };
-        let bytes = m.try_to_vec().unwrap();
+        let bytes = borsh::to_vec(&m).unwrap();
         assert_eq!(MinOut::try_from_slice(&bytes).unwrap(), m);
     }
 

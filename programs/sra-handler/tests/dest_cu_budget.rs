@@ -43,10 +43,11 @@ mod common;
 use anchor_spl::token::ID as TOKEN_PROGRAM_ID;
 use common::*;
 use litesvm::LiteSVM;
-use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, instruction::AccountMeta, pubkey::Pubkey,
-    signature::Keypair, signer::Signer,
-};
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_instruction::AccountMeta;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use sra_common::{
     quote::{action_context_hash, signed_quote_message},
     types::{CreateRouteParams, ExecutionStatus, MinOut, SolanaAction},
@@ -170,13 +171,13 @@ fn stage_filled(
 impl Staged {
     /// `verify_across_fill` over this fill (`relay_data` is deterministic, so it is
     /// recomputed from the same inputs `stage_filled` used).
-    fn verify_ix(&self, payer: &Pubkey) -> solana_sdk::instruction::Instruction {
+    fn verify_ix(&self, payer: &Pubkey) -> solana_instruction::Instruction {
         let relay_data = sample_relay_data(self.route, self.mint, SOURCE_CHAIN_ID, AMOUNT);
         verify_across_fill_ix(payer, &self.route, self.relay_hash, relay_data)
     }
 
     /// `finalize_fill` over this fill.
-    fn finalize_ix(&self, payer: &Pubkey) -> solana_sdk::instruction::Instruction {
+    fn finalize_ix(&self, payer: &Pubkey) -> solana_instruction::Instruction {
         finalize_fill_ix(
             payer,
             &self.route,
@@ -188,7 +189,7 @@ impl Staged {
     }
 }
 
-fn cu_limit_ix() -> solana_sdk::instruction::Instruction {
+fn cu_limit_ix() -> solana_instruction::Instruction {
     ComputeBudgetInstruction::set_compute_unit_limit(MEASUREMENT_CU_LIMIT)
 }
 

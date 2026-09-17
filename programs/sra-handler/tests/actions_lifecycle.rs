@@ -31,7 +31,10 @@ mod common;
 
 use anchor_spl::token::ID as TOKEN_PROGRAM_ID;
 use common::*;
-use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey, signature::Keypair, signer::Signer};
+use solana_instruction::AccountMeta;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use sra_common::{
     errors::SraError,
     quote::{action_context_hash, signed_quote_message},
@@ -660,9 +663,9 @@ fn lifecycle_verified_cpi_below_min_out_reverts_then_reexecutes() {
     // execute_actions sits at index 1 (the ed25519 quote is index 0).
     assert_eq!(
         err,
-        solana_sdk::transaction::TransactionError::InstructionError(
+        solana_transaction_error::TransactionError::InstructionError(
             1,
-            solana_sdk::instruction::InstructionError::Custom(SraError::MinOutNotMet.into()),
+            solana_instruction_error::InstructionError::Custom(SraError::MinOutNotMet.into()),
         )
     );
     assert_eq!(fetch_token_balance(&svm, &v.f.execution_vault), AMOUNT);

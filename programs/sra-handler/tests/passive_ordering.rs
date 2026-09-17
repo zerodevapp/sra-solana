@@ -2,11 +2,10 @@ mod common;
 
 use common::*;
 use litesvm::{types::TransactionMetadata, LiteSVM};
-use solana_sdk::{
-    pubkey::Pubkey,
-    signer::Signer,
-    transaction::{Transaction, TransactionError},
-};
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction::Transaction;
+use solana_transaction_error::TransactionError;
 use sra_common::{abi::u256_from_u64, errors::SraError};
 
 const FEE_BPS: u16 = 30;

@@ -1,6 +1,7 @@
 //! Source-leg paired-instruction attestation, shared by every bridge adapter.
 
-use anchor_lang::{error, prelude::*, solana_program::sysvar::instructions};
+use anchor_lang::{error, prelude::*};
+use solana_program::sysvar::instructions;
 
 use crate::errors::SraError;
 use crate::instruction_data::{
@@ -104,10 +105,8 @@ pub fn verify_previous_trigger_ix<D: PairedDeposit>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anchor_lang::{
-        error,
-        solana_program::instruction::{AccountMeta, Instruction},
-    };
+    use anchor_lang::error;
+    use solana_program::instruction::{AccountMeta, Instruction};
     use std::fmt::Debug;
 
     use crate::test_utils::{

@@ -735,32 +735,6 @@
   ],
   "accounts": [
     {
-      "name": "SolanaSraRoute",
-      "discriminator": [
-        134,
-        92,
-        176,
-        20,
-        31,
-        152,
-        16,
-        120
-      ]
-    },
-    {
-      "name": "SraConfig",
-      "discriminator": [
-        218,
-        163,
-        165,
-        102,
-        168,
-        101,
-        23,
-        222
-      ]
-    },
-    {
       "name": "VerifiedFill",
       "discriminator": [
         2,

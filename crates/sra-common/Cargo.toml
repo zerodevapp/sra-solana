@@ -12,8 +12,9 @@ anchor-debug = []
 devnet = []
 
 [dependencies]
-anchor-lang = "0.32.1"
-anchor-spl = "0.32.1"
+anchor-lang = "=1.2.0"
+anchor-spl = "=1.2.0"
+solana-program = "3.0.0"
 solana-keccak-hasher = "2.2.1"
 solana-sha256-hasher = "2.3.0"
 

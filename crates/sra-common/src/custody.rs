@@ -65,7 +65,7 @@ macro_rules! adapter_custody_recovery {
             );
             transfer_checked(
                 CpiContext::new_with_signer(
-                    ctx.accounts.token_program.to_account_info(),
+                    ctx.accounts.token_program.key(),
                     TransferChecked {
                         from: ctx.accounts.adapter_custody.to_account_info(),
                         mint: ctx.accounts.mint.to_account_info(),

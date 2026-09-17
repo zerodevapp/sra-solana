@@ -15,9 +15,11 @@ mod common;
 
 use anchor_lang::error::ErrorCode;
 use common::*;
-use solana_sdk::{
-    clock::Clock, pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::TransactionError,
-};
+use solana_clock::Clock;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 use sra_common::{
     errors::SraError,
     types::{ExecutionStatus, ManageRouteParams},
@@ -103,7 +105,7 @@ fn setup_finalizable_fill(svm: &mut litesvm::LiteSVM) -> Finalizable {
 }
 
 impl Finalizable {
-    fn finalize_ix(&self) -> solana_sdk::instruction::Instruction {
+    fn finalize_ix(&self) -> solana_instruction::Instruction {
         finalize_fill_ix(
             &self.payer.pubkey(),
             &self.route,
@@ -642,7 +644,7 @@ fn finalize_fill_non_adapter_owner_rejected() {
         fabricate_and_expect_err(
             &mut svm,
             &fix,
-            solana_sdk::system_program::ID,
+            solana_system_interface::program::ID,
             fill_id,
             fill_id,
             verified_fill_account_bytes(&vf),
@@ -691,7 +693,7 @@ fn finalize_cannot_consume_donated_route_vault() {
         fabricate_and_expect_err(
             &mut svm,
             &fix,
-            solana_sdk::system_program::ID,
+            solana_system_interface::program::ID,
             fill_id,
             fill_id,
             verified_fill_account_bytes(&vf),

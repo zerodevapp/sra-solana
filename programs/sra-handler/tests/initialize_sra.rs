@@ -2,9 +2,11 @@ mod common;
 
 use anchor_lang::{error::ErrorCode, InstructionData, Space};
 use common::*;
-use solana_sdk::signer::Signer;
-use solana_sdk::{instruction::InstructionError, transaction::TransactionError};
-use solana_sdk::{pubkey::Pubkey, signature::Keypair};
+use solana_instruction_error::InstructionError;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 use sra_common::errors::SraError;
 use sra_common::{constants::MAX_ADAPTERS, types::SraConfig};
 
@@ -303,7 +305,7 @@ fn initialize_sra_config_hash_matches_expected() {
     send_ix(&mut svm, ix, &payer, &[&owner]).expect("initialize_sra should succeed");
 
     let expected_hash = handler_data.config_hash(&owner.pubkey(), &PROGRAM_ID);
-    let (recomputed_pda, _) = solana_sdk::pubkey::Pubkey::find_program_address(
+    let (recomputed_pda, _) = solana_pubkey::Pubkey::find_program_address(
         &[
             sra_common::seeds::SEED_SRA,
             owner.pubkey().as_ref(),

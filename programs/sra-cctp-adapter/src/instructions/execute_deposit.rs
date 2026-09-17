@@ -1,5 +1,6 @@
-use anchor_lang::{prelude::*, solana_program::sysvar::instructions};
+use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
+use solana_program::sysvar::instructions;
 use sra_common::{
     constants::{
         cctp_domain_for_chain, CCTP_MESSAGE_TRANSMITTER_V2_ID, CCTP_TOKEN_MESSENGER_MINTER_V2_ID,
@@ -172,7 +173,7 @@ pub fn handler(ctx: Context<ExecuteDepositCctp>, params: CctpDepositParams) -> R
     };
     cctp_cpi::deposit_for_burn(
         CpiContext::new_with_signer(
-            ctx.accounts.cctp_program.to_account_info(),
+            ctx.accounts.cctp_program.key(),
             cpi_accounts,
             &[&adapter_authority_seeds],
         ),

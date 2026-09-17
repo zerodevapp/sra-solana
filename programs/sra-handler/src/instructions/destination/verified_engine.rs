@@ -17,8 +17,6 @@
 //! context hash (a port of the EVM signed-pair resolver; ed25519, not secp256k1).
 
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::program::invoke_signed;
-use anchor_lang::solana_program::sysvar::instructions as ix_sysvar;
 use anchor_spl::token::{transfer_checked, TransferChecked};
 use anchor_spl::token_2022::spl_token_2022::extension::default_account_state::DefaultAccountState;
 use anchor_spl::token_2022::spl_token_2022::extension::{
@@ -27,6 +25,9 @@ use anchor_spl::token_2022::spl_token_2022::extension::{
 use anchor_spl::token_2022::spl_token_2022::state::{
     Account as TokenAccountState, AccountState, Mint,
 };
+use solana_program::instruction::{AccountMeta, Instruction};
+use solana_program::program::invoke_signed;
+use solana_program::sysvar::instructions as ix_sysvar;
 
 use sra_common::errors::SraError;
 use sra_common::quote::SIGNED_QUOTE_MESSAGE_LEN;
@@ -133,7 +134,7 @@ pub(crate) fn execute_verified<'info>(
     if call.input_amount > 0 {
         transfer_checked(
             CpiContext::new_with_signer(
-                call.token_program.to_account_info(),
+                call.token_program.key(),
                 TransferChecked {
                     from: call.execution_vault.to_account_info(),
                     mint: call.input_mint.to_account_info(),
@@ -155,7 +156,7 @@ pub(crate) fn execute_verified<'info>(
     let pre = post.observe()?;
 
     // Invoke the pinned program signed by the scratch authority only.
-    let ix = anchor_lang::solana_program::instruction::Instruction {
+    let ix = Instruction {
         program_id: *call.program.key,
         accounts: metas,
         data: call.inner_data.to_vec(),
@@ -177,7 +178,7 @@ pub(crate) fn execute_verified<'info>(
     if residue > 0 {
         transfer_checked(
             CpiContext::new_with_signer(
-                call.token_program.to_account_info(),
+                call.token_program.key(),
                 TransferChecked {
                     from: scratch.to_account_info(),
                     mint: call.input_mint.to_account_info(),
@@ -261,11 +262,7 @@ pub(crate) fn validate_template_slots(
 /// missing/wrong set makes the inner `transfer_checked` revert, which aborts the
 /// whole instruction (fail-closed, funds stay staged and retryable). The post-fee
 /// balance-diff is the binding correctness gate regardless of the hook's behavior.
-fn build_inner_metas(
-    slots: &[AccountInfo],
-    template: &AccountTemplate,
-) -> Vec<anchor_lang::solana_program::instruction::AccountMeta> {
-    use anchor_lang::solana_program::instruction::AccountMeta;
+fn build_inner_metas(slots: &[AccountInfo], template: &AccountTemplate) -> Vec<AccountMeta> {
     template
         .slots
         .iter()
@@ -568,12 +565,12 @@ mod tests {
 
     // ---- mint_is_permissioned (Token-2022 extension scan) ----
 
-    use anchor_lang::solana_program::program_option::COption;
     use anchor_spl::token_2022::spl_token_2022::extension::pausable::PausableConfig;
     use anchor_spl::token_2022::spl_token_2022::extension::permanent_delegate::PermanentDelegate;
     use anchor_spl::token_2022::spl_token_2022::extension::{
         BaseStateWithExtensionsMut, StateWithExtensionsMut,
     };
+    use solana_program::program_option::COption;
 
     /// Pack a Token-2022 mint buffer carrying `exts`, letting `set` fill each
     /// extension after allocation — the same layout the token program writes, so the

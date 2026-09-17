@@ -10,9 +10,10 @@ mod common;
 
 use anchor_lang::error::ErrorCode;
 use common::*;
-use solana_sdk::{
-    pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::TransactionError,
-};
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 use sra_common::{
     errors::SraError,
     types::{ExecutionStatus, ManageRouteParams},
@@ -65,7 +66,7 @@ fn setup_recoverable(
 }
 
 impl Recoverable {
-    fn recover_ix(&self) -> solana_sdk::instruction::Instruction {
+    fn recover_ix(&self) -> solana_instruction::Instruction {
         recover_funds_ix(
             &self.owner.pubkey(),
             &self.route,

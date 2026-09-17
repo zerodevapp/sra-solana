@@ -4,7 +4,7 @@
 //! source-flow suites and the Surfpool E2E.
 
 use anchor_lang::{AnchorSerialize, InstructionData};
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 use sra_cctp_adapter::utils::token_messenger_minter_v2::types::DepositForBurnParams as IdlParams;
 
 #[test]

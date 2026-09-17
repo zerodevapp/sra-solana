@@ -349,7 +349,7 @@ mod tests {
             max_fee: 0x2122232425262728,
             min_finality_threshold: 0x3132_3334,
         };
-        let bytes = anchor_lang::AnchorSerialize::try_to_vec(&deposit).unwrap();
+        let bytes = borsh::to_vec(&deposit).unwrap();
         assert_eq!(bytes.len(), 124);
         assert_eq!(bytes[..8], [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]); // input u64 LE
         assert_eq!(bytes[8..40], [0xAA; 32]); // output_amount
@@ -374,7 +374,7 @@ mod tests {
         let mut prepare = fee_prepare(100, 0x0102030405060708);
         prepare.is_sponsor = true;
         prepare.protocol_fee_bps_override = 0x1234;
-        let bytes = anchor_lang::AnchorSerialize::try_to_vec(&prepare).unwrap();
+        let bytes = borsh::to_vec(&prepare).unwrap();
         let tail = &bytes[bytes.len() - 11..];
         assert_eq!(
             tail,

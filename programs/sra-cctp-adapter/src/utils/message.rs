@@ -244,7 +244,7 @@ mod tests {
         let bytes = canonical().encode();
         assert_eq!(bytes.len(), HEADER_LEN + BURN_BODY_LEN);
         assert_eq!(
-            hex::encode(keccak::hash(&bytes).0),
+            hex::encode(keccak::hash(&bytes).to_bytes()),
             "07a15016e91673319284b403e7eba0e69ac3ea4f94086c215ee634767cc814a3",
         );
     }

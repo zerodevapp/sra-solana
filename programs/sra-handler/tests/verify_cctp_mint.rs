@@ -15,10 +15,12 @@ use anchor_lang::error::ErrorCode;
 use common::cctp::*;
 use common::*;
 use libsecp256k1::SecretKey;
-use solana_sdk::{
-    clock::Clock, instruction::InstructionError, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, transaction::TransactionError,
-};
+use solana_clock::Clock;
+use solana_instruction_error::InstructionError;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 use sra_cctp_adapter::utils::message::{TestBurnMessage, BURN_BODY_LEN, HEADER_LEN};
 use sra_cctp_adapter::CctpAdapterError;
 use sra_common::types::ManageRouteParams;

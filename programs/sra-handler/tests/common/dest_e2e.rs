@@ -10,13 +10,13 @@ use hex_literal::hex;
 use libsecp256k1::SecretKey;
 use reqwest::blocking::Client;
 use serde_json::json;
-use solana_client::rpc_client::RpcClient;
+use solana_instruction::Instruction;
+use solana_keypair::{read_keypair_file, Keypair};
 use solana_program::keccak;
-use solana_sdk::{
-    instruction::Instruction,
-    pubkey::Pubkey,
-    signature::{read_keypair_file, Keypair, Signature, Signer},
-};
+use solana_pubkey::Pubkey;
+use solana_rpc_client::rpc_client::RpcClient;
+use solana_signature::Signature;
+use solana_signer::Signer;
 use sra_across_adapter::utils::svm_spoke;
 use sra_across_adapter::utils::svm_spoke::types::RelayData;
 use sra_common::{
@@ -290,7 +290,7 @@ impl SurfpoolDestFixture {
         let (fill_status, _) = derive_fill_status_pda(&relay_hash);
         surfpool_log(format!(
             "execute_real_fill: relay_hash={} fill_status={fill_status} delegate={delegate}",
-            solana_sdk::bs58::encode(relay_hash).into_string()
+            bs58::encode(relay_hash).into_string()
         ));
 
         let approve_ix = anchor_spl::token::spl_token::instruction::approve(
@@ -313,8 +313,8 @@ impl SurfpoolDestFixture {
                 recipient_token_account: self.route_vault,
                 fill_status,
                 token_program: anchor_spl::token::ID,
-                associated_token_program: spl_associated_token_account::ID,
-                system_program: solana_sdk::system_program::ID,
+                associated_token_program: spl_associated_token_account::program::ID,
+                system_program: solana_system_interface::program::ID,
                 event_authority: derive_real_across_event_authority_pda().0,
                 program: ACROSS_SPOKE_POOL_ID,
             }
@@ -423,7 +423,7 @@ impl SurfpoolDestFixture {
     pub fn execute_real_receive(&self, msg: &AttestedMessage) -> TestResult<Vec<String>> {
         surfpool_log(format!(
             "execute_real_receive: nonce={} used_nonce={}",
-            solana_sdk::bs58::encode(msg.nonce).into_string(),
+            bs58::encode(msg.nonce).into_string(),
             derive_used_nonce_pda(&msg.nonce)
         ));
         let ix = receive_message_ix(

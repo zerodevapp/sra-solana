@@ -39,8 +39,7 @@ pub fn hash_non_empty_message(message: &[u8]) -> [u8; 32] {
 /// is byte-identical to serializing every field except `message` and is cheaper
 /// than re-serializing field by field.
 pub fn compute_relay_hash(relay_data: &RelayData, chain_id: u64) -> Result<[u8; 32]> {
-    let mut input = relay_data
-        .try_to_vec()
+    let mut input = borsh::to_vec(relay_data)
         .map_err(|_| error!(AcrossAdapterError::RelayHashSerializationFailed))?;
     // Fail closed rather than underflow (debug panic) or wrap into a no-op
     // truncate + wrong hash (release) if the serialized layout ever stops ending

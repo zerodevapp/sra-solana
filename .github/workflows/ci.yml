@@ -12,8 +12,8 @@ concurrency:
 
 env:
   SOLANA_VERSION: "3.1.11"
-  ANCHOR_VERSION: "0.32.1"
-  NODE_VERSION: "20"
+  ANCHOR_VERSION: "1.2.0"
+  NODE_VERSION: "20.18.0"
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -26,7 +26,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.89.0
+          toolchain: 1.93.1
           components: rustfmt, clippy
 
       - name: Cache Rust build (host target)
@@ -72,7 +72,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.89.0
+          toolchain: 1.93.1
 
       - name: Cache Rust build (BPF target)
         uses: Swatinem/rust-cache@v2
@@ -102,8 +102,8 @@ jobs:
       - name: Install avm + Anchor
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
         run: |
-          cargo install --git https://github.com/coral-xyz/anchor --tag v${ANCHOR_VERSION} avm --force
-          avm install ${ANCHOR_VERSION}
+          cargo install --git https://github.com/otter-sec/anchor --tag v${ANCHOR_VERSION} avm --force
+          avm install ${ANCHOR_VERSION} --from-source
           avm use ${ANCHOR_VERSION}
 
       - name: Verify tool versions
@@ -127,7 +127,7 @@ jobs:
           solana-keygen new --no-bip39-passphrase --force --silent --outfile ~/.config/solana/id.json
 
       - name: anchor build
-        run: anchor build
+        run: NO_DNA=1 anchor build --ignore-keys --arch v0
 
       - name: cargo test --workspace
         run: cargo test --workspace
@@ -152,7 +152,7 @@ jobs:
           exit $fail
 
       - name: anchor test
-        run: anchor test --skip-build
+        run: NO_DNA=1 anchor test --skip-build --validator legacy
 
   ts:
     name: TypeScript (prettier)

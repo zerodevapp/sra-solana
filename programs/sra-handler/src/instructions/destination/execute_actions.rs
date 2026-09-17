@@ -23,6 +23,7 @@ use anchor_spl::associated_token::{
 };
 use anchor_spl::token::spl_token::state::AccountState;
 use anchor_spl::token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked};
+use solana_program::sysvar::instructions;
 use sra_common::constants::BPS_DENOMINATOR;
 use sra_common::errors::SraError;
 use sra_common::quote::{action_context_hash, signed_quote_message};
@@ -72,7 +73,7 @@ pub struct ExecuteActions<'info> {
     pub token_program: Program<'info, Token>,
     /// CHECK: instructions sysvar, pinned by address; read to locate the signed
     /// price quote backing a `VerifiedCpi` action's `min_out`.
-    #[account(address = anchor_lang::solana_program::sysvar::instructions::ID)]
+    #[account(address = instructions::ID)]
     pub instructions_sysvar: UncheckedAccount<'info>,
     // Per-action accounts ride in `remaining_accounts`, in action order:
     //   SplTransfer -> [recipient ATA]
@@ -120,7 +121,7 @@ pub(crate) struct ActionAccounts<'a, 'info> {
 }
 
 pub(crate) fn handler<'info>(
-    ctx: Context<'_, '_, '_, 'info, ExecuteActions<'info>>,
+    ctx: Context<'info, ExecuteActions<'info>>,
     fill_id: [u8; 32],
     verified_runtimes: Vec<VerifiedCpiRuntime>,
 ) -> Result<()> {
@@ -401,7 +402,7 @@ pub(crate) fn run_committed_actions<'info>(
             } => {
                 transfer_checked(
                     CpiContext::new_with_signer(
-                        token_program_info.clone(),
+                        token_program_info.key(),
                         TransferChecked {
                             from: execution_vault_info.clone(),
                             mint: expected_mint_info.clone(),

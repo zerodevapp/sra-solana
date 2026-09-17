@@ -74,7 +74,6 @@ mod tests {
                 &mut self.data,
                 &self.owner,
                 self.executable,
-                0,
             )
         }
     }

@@ -46,9 +46,8 @@ pub fn adapter_authority_signer_seeds<'a>(
 /// Pure hash. Callers must `validate()` separately — bundling validation here
 /// would panic during PDA seed derivation.
 pub fn handler_data_hash(handler_data: &SourceHandlerData) -> [u8; 32] {
-    let serialized = handler_data
-        .try_to_vec()
-        .expect("SourceHandlerData serialization should not fail");
+    let serialized =
+        borsh::to_vec(handler_data).expect("SourceHandlerData serialization should not fail");
     keccak_hash(&serialized).to_bytes()
 }
 
@@ -88,9 +87,8 @@ pub fn route_config_hash(
     data.extend_from_slice(&source_chain_id.to_le_bytes());
     data.extend_from_slice(expected_mint.as_ref());
     // Borsh-serialize the action_config Vec
-    let serialized = action_config
-        .try_to_vec()
-        .expect("SolanaAction serialization should not fail");
+    let serialized =
+        borsh::to_vec(action_config).expect("SolanaAction serialization should not fail");
     data.extend_from_slice(&serialized);
     Ok(keccak_hash(&data).to_bytes())
 }

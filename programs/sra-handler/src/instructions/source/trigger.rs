@@ -1,8 +1,9 @@
-use anchor_lang::{prelude::*, solana_program::sysvar::instructions};
+use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
     token::{Mint, Token, TokenAccount},
 };
+use solana_program::sysvar::instructions;
 use sra_common::{
     errors::SraError,
     fees::compute_protocol_fee,

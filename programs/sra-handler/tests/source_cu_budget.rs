@@ -2,10 +2,10 @@ mod common;
 
 use common::*;
 use litesvm::LiteSVM;
-use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, instruction::Instruction, pubkey::Pubkey,
-    signature::Keypair,
-};
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_instruction::Instruction;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
 use sra_common::source_deposit::AcrossDepositParams;
 
 fn assert_under_budget(

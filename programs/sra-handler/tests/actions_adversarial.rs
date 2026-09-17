@@ -20,7 +20,10 @@ mod common;
 
 use anchor_spl::token::ID as TOKEN_PROGRAM_ID;
 use common::*;
-use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey, signature::Keypair, signer::Signer};
+use solana_instruction::AccountMeta;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use sra_common::{
     errors::SraError,
     types::{CreateRouteParams, ExecutionStatus, MinOut, SolanaAction},
@@ -821,9 +824,9 @@ impl StagedVerified {
 
 /// `exec_error` for the VerifiedCpi path: the execute instruction sits at index 1
 /// (the ed25519 quote is index 0).
-fn verified_exec_error(err: SraError) -> solana_sdk::transaction::TransactionError {
-    use solana_sdk::instruction::InstructionError;
-    solana_sdk::transaction::TransactionError::InstructionError(
+fn verified_exec_error(err: SraError) -> solana_transaction_error::TransactionError {
+    use solana_instruction_error::InstructionError;
+    solana_transaction_error::TransactionError::InstructionError(
         1,
         InstructionError::Custom(err.into()),
     )
