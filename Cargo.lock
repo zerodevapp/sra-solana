@@ -6042,7 +6042,6 @@ dependencies = [
  "solana-address 2.6.1",
  "solana-clock",
  "solana-commitment-config",
- "solana-compute-budget-interface",
  "solana-ed25519-program",
  "solana-hash 4.5.0",
  "solana-instruction",
