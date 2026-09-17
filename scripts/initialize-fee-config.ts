@@ -1,4 +1,4 @@
-import { AnchorProvider, Idl, Program, web3 } from "@coral-xyz/anchor";
+import { AnchorProvider, Idl, Program, web3 } from "@anchor-lang/core";
 
 const idl = require("../idl/sra_handler.json") as Idl;
 const MAINNET_GENESIS_HASH = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
