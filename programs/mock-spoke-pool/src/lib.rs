@@ -113,7 +113,7 @@ pub mod mock_spoke_pool {
         let delegate_seeds: &[&[u8]] = &[DELEGATE_SEED_PREFIX, seed_hash.as_ref(), &[bump]];
         transfer_checked(
             CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 TransferChecked {
                     from: ctx.accounts.depositor_token_account.to_account_info(),
                     mint: ctx.accounts.mint.to_account_info(),
@@ -141,7 +141,7 @@ pub mod mock_spoke_pool {
 
         transfer_checked(
             CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 TransferChecked {
                     from: ctx.accounts.relayer_token_account.to_account_info(),
                     mint: ctx.accounts.mint.to_account_info(),

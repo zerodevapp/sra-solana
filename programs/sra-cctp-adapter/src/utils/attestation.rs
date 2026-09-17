@@ -78,7 +78,7 @@ fn recover_attester(message_hash: &keccak::Hash, signature: &[u8]) -> Result<Pub
     let pubkey = secp256k1_recover(message_hash.as_ref(), recovery_id - 27, &signature[..64])
         .map_err(|_| error!(CctpAdapterError::InvalidAttestation))?;
 
-    let mut address = keccak::hash(&pubkey.to_bytes()).0;
+    let mut address = keccak::hash(&pubkey.to_bytes()).to_bytes();
     address[..12].fill(0);
     Ok(Pubkey::new_from_array(address))
 }
@@ -163,13 +163,13 @@ mod tests {
     /// derives it (uncompressed pubkey without the 0x04 prefix).
     fn attester(sk: &SecretKey) -> Pubkey {
         let pubkey = PublicKey::from_secret_key(sk).serialize();
-        let mut address = keccak::hash(&pubkey[1..]).0;
+        let mut address = keccak::hash(&pubkey[1..]).to_bytes();
         address[..12].fill(0);
         Pubkey::new_from_array(address)
     }
 
     fn sign_one(hash: &keccak::Hash, sk: &SecretKey) -> Vec<u8> {
-        let (signature, recovery_id) = sign(&Message::parse(&hash.0), sk);
+        let (signature, recovery_id) = sign(&Message::parse(&hash.to_bytes()), sk);
         let mut out = signature.serialize().to_vec();
         out.push(recovery_id.serialize() + 27);
         out
@@ -275,7 +275,7 @@ mod tests {
         let sk = key(0x42);
         // Forge the malleable twin: s → n − s, recovery-id parity flipped. It
         // recovers the same signer, so only the high-s check can reject it.
-        let (mut signature, recovery_id) = sign(&Message::parse(&hash().0), &sk);
+        let (mut signature, recovery_id) = sign(&Message::parse(&hash().to_bytes()), &sk);
         signature.s = -signature.s;
         let mut attestation = signature.serialize().to_vec();
         attestation.push((recovery_id.serialize() ^ 1) + 27);

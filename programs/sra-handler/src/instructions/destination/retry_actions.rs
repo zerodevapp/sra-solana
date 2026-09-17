@@ -6,6 +6,7 @@
 
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
+use solana_program::sysvar::instructions;
 use sra_common::errors::SraError;
 use sra_common::seeds::{SEED_EXECUTION, SEED_FILL_RECEIPT};
 use sra_common::types::{ExecutionStatus, FillReceipt, SolanaSraRoute, VerifiedCpiRuntime};
@@ -42,13 +43,13 @@ pub struct RetryActions<'info> {
     pub execution_vault: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
     /// CHECK: instructions sysvar; locates the `VerifiedCpi` signed price quote.
-    #[account(address = anchor_lang::solana_program::sysvar::instructions::ID)]
+    #[account(address = instructions::ID)]
     pub instructions_sysvar: UncheckedAccount<'info>,
     // Per-action accounts ride in `remaining_accounts`, identical to `ExecuteActions`.
 }
 
 pub(crate) fn handler<'info>(
-    ctx: Context<'_, '_, '_, 'info, RetryActions<'info>>,
+    ctx: Context<'info, RetryActions<'info>>,
     fill_id: [u8; 32],
     verified_runtimes: Vec<VerifiedCpiRuntime>,
 ) -> Result<()> {

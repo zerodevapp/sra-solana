@@ -1,13 +1,11 @@
-use anchor_lang::{
-    prelude::*,
-    solana_program::{
-        instruction::Instruction,
-        sysvar::{
-            self,
-            instructions::{
-                construct_instructions_data, store_current_index_checked, BorrowedAccountMeta,
-                BorrowedInstruction, ID as INSTRUCTIONS_ID,
-            },
+use anchor_lang::prelude::*;
+use solana_program::{
+    instruction::Instruction,
+    sysvar::{
+        self,
+        instructions::{
+            construct_instructions_data, BorrowedAccountMeta, BorrowedInstruction,
+            ID as INSTRUCTIONS_ID,
         },
     },
 };
@@ -31,7 +29,8 @@ impl InstructionsSysvarFixture {
     pub fn new(current_index: u16, ixs: &[Instruction]) -> Self {
         let borrowed = ixs.iter().map(borrow_instruction).collect::<Vec<_>>();
         let mut data = construct_instructions_data(&borrowed);
-        store_current_index_checked(&mut data, current_index).unwrap();
+        let current_index_offset = data.len() - 2;
+        data[current_index_offset..].copy_from_slice(&current_index.to_le_bytes());
         Self {
             key: INSTRUCTIONS_ID,
             owner: sysvar::ID,
@@ -49,7 +48,6 @@ impl InstructionsSysvarFixture {
             &mut self.data,
             &self.owner,
             false,
-            0,
         )
     }
 }

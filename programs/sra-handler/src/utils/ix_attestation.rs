@@ -1,4 +1,5 @@
-use anchor_lang::{error, prelude::*, solana_program::sysvar::instructions};
+use anchor_lang::{error, prelude::*};
+use solana_program::sysvar::instructions;
 use sra_common::{errors::SraError, instruction_data::instruction_data_hash};
 
 // Safety-critical invariant: these indices must exactly mirror the account ordering of the
@@ -48,10 +49,8 @@ pub(crate) fn verify_next_adapter_ix(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anchor_lang::{
-        error,
-        solana_program::instruction::{AccountMeta, Instruction},
-    };
+    use anchor_lang::error;
+    use solana_program::instruction::{AccountMeta, Instruction};
     use sra_common::{
         instruction_data::encode_anchor_instruction_data,
         source_deposit::PrepareParams,
@@ -71,10 +70,7 @@ mod tests {
             program_id: adapter_program,
             accounts: vec![
                 AccountMeta::new(Pubkey::new_unique(), true),
-                AccountMeta::new_readonly(
-                    anchor_lang::solana_program::sysvar::instructions::ID,
-                    false,
-                ),
+                AccountMeta::new_readonly(instructions::ID, false),
                 AccountMeta::new_readonly(sra_config, false),
                 AccountMeta::new_readonly(Pubkey::new_unique(), false),
                 AccountMeta::new(Pubkey::new_unique(), false),
@@ -97,10 +93,7 @@ mod tests {
             program_id: adapter_program,
             accounts: vec![
                 AccountMeta::new(Pubkey::new_unique(), true),
-                AccountMeta::new_readonly(
-                    anchor_lang::solana_program::sysvar::instructions::ID,
-                    false,
-                ),
+                AccountMeta::new_readonly(instructions::ID, false),
                 AccountMeta::new_readonly(sra_config, false),
                 AccountMeta::new_readonly(Pubkey::new_unique(), false),
                 AccountMeta::new(Pubkey::new_unique(), false),

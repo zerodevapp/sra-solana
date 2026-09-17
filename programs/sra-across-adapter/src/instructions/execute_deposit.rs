@@ -1,8 +1,9 @@
-use anchor_lang::{prelude::*, solana_program::sysvar::instructions};
+use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
     token::{approve_checked, ApproveChecked, Mint, Token, TokenAccount},
 };
+use solana_program::sysvar::instructions;
 use sra_common::{
     constants::ACROSS_SPOKE_POOL_ID, seeds::SEED_ADAPTER_AUTHORITY,
     source_deposit::AcrossDepositParams, types::SraConfig,
@@ -102,7 +103,7 @@ pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) 
     );
     approve_checked(
         CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
+            ctx.accounts.token_program.key(),
             ApproveChecked {
                 to: ctx.accounts.adapter_custody.to_account_info(),
                 mint: ctx.accounts.input_mint.to_account_info(),
@@ -129,7 +130,7 @@ pub fn handler(ctx: Context<ExecuteDepositAcross>, params: AcrossDepositParams) 
         program: ctx.accounts.across_program.to_account_info(),
     };
     crate::utils::svm_spoke::cpi::deposit_now(
-        CpiContext::new(ctx.accounts.across_program.to_account_info(), cpi_accounts),
+        CpiContext::new(ctx.accounts.across_program.key(), cpi_accounts),
         deposit.params.depositor,
         deposit.params.recipient,
         deposit.params.input_token,

@@ -11,6 +11,6 @@
 // scope (outer `#[allow]` on the macro invocation is ignored by rustc).
 #![allow(clippy::too_many_arguments)]
 
-use anchor_lang::declare_program;
+use anchor_lang::{declare_program, prelude::anchor_lang};
 
 declare_program!(svm_spoke);

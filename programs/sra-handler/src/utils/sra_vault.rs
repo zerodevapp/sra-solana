@@ -23,7 +23,7 @@ pub(crate) fn transfer_from_sra_vault<'info>(
     ];
     transfer_checked(
         CpiContext::new_with_signer(
-            token_program.to_account_info(),
+            token_program.key(),
             TransferChecked {
                 from: sra_vault.to_account_info(),
                 mint: source_mint.to_account_info(),

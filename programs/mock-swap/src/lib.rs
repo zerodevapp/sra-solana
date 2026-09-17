@@ -34,7 +34,7 @@ pub mod mock_swap {
         if in_amount > 0 {
             transfer_checked(
                 CpiContext::new(
-                    ctx.accounts.token_program.to_account_info(),
+                    ctx.accounts.token_program.key(),
                     TransferChecked {
                         from: ctx.accounts.source.to_account_info(),
                         mint: ctx.accounts.input_mint.to_account_info(),
@@ -61,7 +61,7 @@ pub mod mock_swap {
             let signer_seeds: &[&[&[u8]]] = &[&[POOL_AUTHORITY_SEED, &[bump]]];
             transfer_checked(
                 CpiContext::new_with_signer(
-                    ctx.accounts.output_token_program.to_account_info(),
+                    ctx.accounts.output_token_program.key(),
                     TransferChecked {
                         from: ctx.accounts.pool_output.to_account_info(),
                         mint: ctx.accounts.output_mint.to_account_info(),

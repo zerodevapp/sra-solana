@@ -23,9 +23,9 @@ test-utils = []
 devnet = ["sra-common/devnet"]
 
 [dependencies]
-anchor-lang = "0.32.1"
-anchor-spl = "0.32.1"
-solana-program = "2.3"
+anchor-lang = "=1.2.0"
+anchor-spl = "=1.2.0"
+solana-program = "3.0.0"
 sra-common = { path = "../../crates/sra-common" }
 
 [lints.rust]

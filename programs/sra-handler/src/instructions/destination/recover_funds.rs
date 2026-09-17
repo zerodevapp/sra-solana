@@ -69,7 +69,7 @@ pub(crate) fn handler(ctx: Context<RecoverFunds>) -> Result<()> {
     let signer_seeds: &[&[&[u8]]] = &[seeds];
     transfer_checked(
         CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
+            ctx.accounts.token_program.key(),
             TransferChecked {
                 from: ctx.accounts.execution_vault.to_account_info(),
                 mint: ctx.accounts.expected_mint.to_account_info(),

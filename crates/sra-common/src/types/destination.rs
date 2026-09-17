@@ -172,14 +172,14 @@ mod tests {
             recipient: Pubkey::new_unique(),
             amount_bps: 7_500,
         };
-        let bytes = action.try_to_vec().unwrap();
+        let bytes = borsh::to_vec(&action).unwrap();
         assert_eq!(SolanaAction::try_from_slice(&bytes).unwrap(), action);
     }
 
     #[test]
     fn solana_action_borsh_round_trip_verified_cpi() {
         let action = sample_verified_cpi();
-        let bytes = action.try_to_vec().unwrap();
+        let bytes = borsh::to_vec(&action).unwrap();
         assert_eq!(SolanaAction::try_from_slice(&bytes).unwrap(), action);
     }
 
