@@ -53,21 +53,20 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: source-e2e-surfpool
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: rust-solana-build
+          save-if: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: yarn
 
       - name: Install yarn deps
         run: yarn install --frozen-lockfile
 
-      - name: Cache Solana + Anchor toolchain
+      - name: Restore Solana + Anchor toolchain
         id: toolchain-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.local/share/solana
