@@ -23,6 +23,7 @@ import {
 
 const idl = require("../idl/sra_handler.json") as Idl;
 const MAINNET_GENESIS_HASH = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+const MAX_SAFE_BLOCK_HEIGHT = BigInt(Number.MAX_SAFE_INTEGER);
 
 export type SendableV1Transaction = SendableTransaction &
   Transaction &
@@ -32,6 +33,18 @@ export type V1LatestBlockhash = Readonly<{
   blockhash: Blockhash;
   lastValidBlockHeight: bigint;
 }>;
+
+export function toSafeBlockHeight(lastValidBlockHeight: bigint): number {
+  if (
+    lastValidBlockHeight < 0n ||
+    lastValidBlockHeight > MAX_SAFE_BLOCK_HEIGHT
+  ) {
+    throw new RangeError(
+      "lastValidBlockHeight must be between 0 and Number.MAX_SAFE_INTEGER"
+    );
+  }
+  return Number(lastValidBlockHeight);
+}
 
 export function toKitInstruction(
   instruction: web3.TransactionInstruction
@@ -143,10 +156,13 @@ export async function main() {
       skipPreflight: false,
     })
     .send();
+  const lastValidBlockHeight = toSafeBlockHeight(
+    latestBlockhash.lastValidBlockHeight
+  );
   const confirmation = await provider.connection.confirmTransaction(
     {
       blockhash: latestBlockhash.blockhash,
-      lastValidBlockHeight: Number(latestBlockhash.lastValidBlockHeight),
+      lastValidBlockHeight,
       signature,
     },
     "finalized"

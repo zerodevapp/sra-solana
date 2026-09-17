@@ -10,6 +10,7 @@ import {
 import {
   compileV1Transaction,
   toKitInstruction,
+  toSafeBlockHeight,
 } from "../scripts/initialize-fee-config";
 
 test("converts account roles and data", () => {
@@ -23,6 +24,16 @@ test("converts account roles and data", () => {
       },
       {
         pubkey: web3.Keypair.generate().publicKey,
+        isSigner: true,
+        isWritable: false,
+      },
+      {
+        pubkey: web3.Keypair.generate().publicKey,
+        isSigner: false,
+        isWritable: true,
+      },
+      {
+        pubkey: web3.Keypair.generate().publicKey,
         isSigner: false,
         isWritable: false,
       },
@@ -32,8 +43,28 @@ test("converts account roles and data", () => {
   const converted = toKitInstruction(instruction);
 
   assert.equal(converted.accounts?.[0].role, AccountRole.WRITABLE_SIGNER);
-  assert.equal(converted.accounts?.[1].role, AccountRole.READONLY);
+  assert.equal(converted.accounts?.[1].role, AccountRole.READONLY_SIGNER);
+  assert.equal(converted.accounts?.[2].role, AccountRole.WRITABLE);
+  assert.equal(converted.accounts?.[3].role, AccountRole.READONLY);
   assert.deepEqual(converted.data, new Uint8Array([1, 2, 3]));
+});
+
+test("narrows valid block heights", () => {
+  assert.equal(toSafeBlockHeight(0n), 0);
+  assert.equal(
+    toSafeBlockHeight(BigInt(Number.MAX_SAFE_INTEGER)),
+    Number.MAX_SAFE_INTEGER
+  );
+});
+
+test("rejects block heights that cannot be safely narrowed", () => {
+  const expected = /must be between 0 and Number\.MAX_SAFE_INTEGER/;
+
+  assert.throws(() => toSafeBlockHeight(-1n), expected);
+  assert.throws(
+    () => toSafeBlockHeight(BigInt(Number.MAX_SAFE_INTEGER) + 1n),
+    expected
+  );
 });
 
 test("builds a 0x81-prefixed transaction", async () => {
