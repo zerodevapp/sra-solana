@@ -529,7 +529,11 @@ fn passive_trigger_rejects_pairing_mismatches_atomically() {
                 params.clone(),
                 &execute,
             ),
-            compute_budget_ix(),
+            solana_system_interface::instruction::transfer(
+                &fx.payer.pubkey(),
+                &fx.payer.pubkey(),
+                0,
+            ),
             execute,
         ],
         &[&fx.initiator, &event],

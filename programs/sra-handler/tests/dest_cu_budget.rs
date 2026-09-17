@@ -43,7 +43,6 @@ mod common;
 use anchor_spl::token::ID as TOKEN_PROGRAM_ID;
 use common::*;
 use litesvm::LiteSVM;
-use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_instruction::AccountMeta;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -189,10 +188,6 @@ impl Staged {
     }
 }
 
-fn cu_limit_ix() -> solana_instruction::Instruction {
-    ComputeBudgetInstruction::set_compute_unit_limit(MEASUREMENT_CU_LIMIT)
-}
-
 #[test]
 fn dest_2ix_flow_under_cu_budget() {
     // The production destination fill tx: verify_across_fill + finalize_fill.
@@ -210,15 +205,12 @@ fn dest_2ix_flow_under_cu_budget() {
         [0x10; 32],
     );
 
-    let consumed = send_instructions(
+    let consumed = send_instructions_with_config(
         &mut svm,
-        &[
-            cu_limit_ix(),
-            s.verify_ix(&payer.pubkey()),
-            s.finalize_ix(&payer.pubkey()),
-        ],
+        &[s.verify_ix(&payer.pubkey()), s.finalize_ix(&payer.pubkey())],
         &payer,
         &[],
+        v1_config_with_compute_limit(MEASUREMENT_CU_LIMIT),
     )
     .expect("destination 2-IX flow must execute")
     .compute_units_consumed;
@@ -254,10 +246,9 @@ fn dest_finalize_execute_spl_under_cu_budget() {
         .map(|r| create_ata(&mut svm, &payer, r, &mint))
         .collect();
 
-    let consumed = send_instructions(
+    let consumed = send_instructions_with_config(
         &mut svm,
         &[
-            cu_limit_ix(),
             s.finalize_ix(&payer.pubkey()),
             execute_actions_ix(
                 &payer.pubkey(),
@@ -269,6 +260,7 @@ fn dest_finalize_execute_spl_under_cu_budget() {
         ],
         &payer,
         &[],
+        v1_config_with_compute_limit(MEASUREMENT_CU_LIMIT),
     )
     .expect("finalize + execute (4x SplTransfer) must execute")
     .compute_units_consumed;
@@ -366,16 +358,16 @@ fn dest_finalize_execute_verified_cpi_under_cu_budget() {
 
     // The engine locates the ed25519 quote record position-independently, so its
     // index in this batch is not load-bearing.
-    let consumed = send_instructions(
+    let consumed = send_instructions_with_config(
         &mut svm,
         &[
-            cu_limit_ix(),
             ed25519_quote_ix(&quoter, &message),
             s.finalize_ix(&payer.pubkey()),
             exec,
         ],
         &payer,
         &[],
+        v1_config_with_compute_limit(MEASUREMENT_CU_LIMIT),
     )
     .expect("finalize + execute (verified-CPI swap) must execute")
     .compute_units_consumed;
@@ -443,10 +435,9 @@ fn cctp_2ix_flow_under_budget(attester_count: usize, label: &str) {
     let attestation = sign_attestation(&message, &sorted);
     let (verified_fill, _) = derive_cctp_verified_fill_pda(&nonce);
 
-    let consumed = send_instructions(
+    let consumed = send_instructions_with_config(
         &mut svm,
         &[
-            cu_limit_ix(),
             verify_cctp_mint_ix(&payer.pubkey(), &route, nonce, message, attestation),
             finalize_fill_ix(
                 &payer.pubkey(),
@@ -459,6 +450,7 @@ fn cctp_2ix_flow_under_budget(attester_count: usize, label: &str) {
         ],
         &payer,
         &[],
+        v1_config_with_compute_limit(MEASUREMENT_CU_LIMIT),
     )
     .expect("CCTP destination 2-IX flow must execute")
     .compute_units_consumed;

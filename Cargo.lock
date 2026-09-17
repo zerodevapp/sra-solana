@@ -6050,7 +6050,6 @@ dependencies = [
  "solana-instruction-error",
  "solana-keypair",
  "solana-message 4.4.1",
- "solana-packet",
  "solana-program",
  "solana-pubkey 3.0.0",
  "solana-rpc-client",
@@ -6063,6 +6062,7 @@ dependencies = [
  "sra-across-adapter",
  "sra-cctp-adapter",
  "sra-common",
+ "wincode",
 ]
 
 [[package]]

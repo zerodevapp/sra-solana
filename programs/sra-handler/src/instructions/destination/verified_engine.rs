@@ -39,7 +39,7 @@ use crate::utils::adapter::is_program_owner;
 const ED25519_PROGRAM_ID: Pubkey = pubkey!("Ed25519SigVerify111111111111111111111111111");
 
 /// Defensive cap on how many transaction instructions the quote scan walks. The
-/// v0 transaction account/instruction budget is far below this; the scan also
+/// supported transaction envelope is far below this; the scan also
 /// stops at the first out-of-range index.
 const MAX_INSTRUCTION_SCAN: usize = 64;
 

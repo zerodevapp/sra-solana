@@ -25,14 +25,14 @@ env:
   SOLANA_VERSION: "3.1.11"
   ANCHOR_VERSION: "1.2.0"
   SURFPOOL_VERSION: "v1.2.0"
-  NODE_VERSION: "20.18.0"
+  NODE_VERSION: "22.12.0"
   CARGO_TERM_COLOR: always
 
 jobs:
   dest-e2e-surfpool:
     name: Destination E2E (Surfpool + real Across)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 

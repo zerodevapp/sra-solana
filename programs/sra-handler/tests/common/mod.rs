@@ -5,8 +5,10 @@ pub mod cctp;
 pub mod dest_e2e;
 pub mod passive;
 pub mod surfpool;
+pub mod v1;
 
 pub use passive::*;
+pub use v1::*;
 
 use anchor_lang::{
     error::ErrorCode, AccountDeserialize, AnchorSerialize, Discriminator, InstructionData,
@@ -21,16 +23,13 @@ use litesvm_token::{
     spl_token::state::Account as SplTokenAccount, CreateAssociatedTokenAccount, CreateMint, MintTo,
 };
 use solana_clock::Clock;
-use solana_compute_budget_interface::ComputeBudgetInstruction;
-use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_instruction_error::InstructionError;
 use solana_keypair::Keypair;
-use solana_message::{v0, AddressLookupTableAccount, Message, VersionedMessage};
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_system_interface::program as system_program;
-use solana_transaction::{versioned::VersionedTransaction, Transaction};
+use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_error::TransactionError;
 use sra_across_adapter::utils::svm_spoke::types::RelayData;
 use sra_common::{
@@ -260,32 +259,6 @@ pub fn sample_prepare_params(target_token: [u8; 32]) -> PrepareParams {
         false,
         sra_common::constants::NO_FEE_BPS_OVERRIDE,
     )
-}
-
-/// SYNTHETIC in-memory lookup table for LiteSVM tx-size/CU shaping — its key
-/// is random and the table never exists on-chain, so it cannot be sent to a
-/// live cluster. For a real, on-chain table (the Surfpool E2E suites) collect
-/// the addresses with [`surfpool::representative_lookup_addresses`] and create
-/// the table via [`surfpool::prepare_lookup_table`].
-pub fn representative_lookup_table(ixs: &[Instruction]) -> AddressLookupTableAccount {
-    AddressLookupTableAccount {
-        key: Pubkey::new_unique(),
-        addresses: surfpool::representative_lookup_addresses(ixs),
-    }
-}
-
-pub fn compile_v0(
-    payer: &Keypair,
-    additional_signers: &[&Keypair],
-    ixs: &[Instruction],
-    lookup_tables: &[AddressLookupTableAccount],
-) -> VersionedTransaction {
-    let message = v0::Message::try_compile(&payer.pubkey(), ixs, lookup_tables, Hash::default())
-        .expect("compile v0 message");
-    let mut signers = vec![payer];
-    signers.extend_from_slice(additional_signers);
-    VersionedTransaction::try_new(VersionedMessage::V0(message), &signers)
-        .expect("sign versioned tx")
 }
 
 pub fn derive_sra_pda(
@@ -563,11 +536,19 @@ pub fn send_instructions(
     payer: &Keypair,
     signers: &[&Keypair],
 ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>> {
+    send_instructions_with_config(svm, ixs, payer, signers, DEFAULT_V1_CONFIG)
+}
+
+pub fn send_instructions_with_config(
+    svm: &mut LiteSVM,
+    ixs: &[Instruction],
+    payer: &Keypair,
+    signers: &[&Keypair],
+    config: solana_message::v1::TransactionConfig,
+) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>> {
     svm.expire_blockhash();
-    let mut all_signers = vec![payer];
-    all_signers.extend_from_slice(signers);
-    let message = Message::new(ixs, Some(&payer.pubkey()));
-    let transaction = Transaction::new(&all_signers, message, svm.latest_blockhash());
+    let transaction = build_v1_transaction(payer, signers, ixs, svm.latest_blockhash(), config)
+        .expect("build valid v1 transaction");
     svm.send_transaction(transaction).map_err(Box::new)
 }
 
@@ -1335,18 +1316,7 @@ pub fn recover_stuck_custody_ix(
     }
 }
 
-/// The compute-unit budget the production source deposit tx requests. The full
-/// 2-IX flow must execute under this — `compute_budget_ix` requests exactly this
-/// much, and `tests/source_cu_budget.rs` asserts consumption stays below it.
-/// Single source of truth so the requested limit and the regression gate can't
-/// drift. Typed `u32` to match the runtime's compute-unit-limit field (max
-/// 1.4M) — no narrowing cast at the call site; the gate widens losslessly to
-/// compare against `u64` CU.
 pub const SOURCE_CU_BUDGET: u32 = 400_000;
-
-pub fn compute_budget_ix() -> Instruction {
-    ComputeBudgetInstruction::set_compute_unit_limit(SOURCE_CU_BUDGET)
-}
 
 pub fn invoke_execute_only(
     fx: &PassiveFixture,

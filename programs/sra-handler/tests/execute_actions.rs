@@ -16,7 +16,6 @@
 mod common;
 
 use common::*;
-use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
@@ -517,7 +516,6 @@ fn execute_actions_cu_exhaustion_leaves_receipt_retryable() {
     let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
 
     // A CU limit far below what execute_actions needs aborts the whole tx.
-    let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_000);
     let exec_ix = execute_actions_ix(
         &s.payer.pubkey(),
         &s.route,
@@ -525,7 +523,13 @@ fn execute_actions_cu_exhaustion_leaves_receipt_retryable() {
         &s.mint,
         &[recipient_ata],
     );
-    let res = send_instructions(&mut svm, &[cu_ix, exec_ix], &s.payer, &[]);
+    let res = send_instructions_with_config(
+        &mut svm,
+        &[exec_ix],
+        &s.payer,
+        &[],
+        v1_config_with_compute_limit(1_000),
+    );
     assert!(res.is_err(), "CU exhaustion must abort the transaction");
 
     // Atomic abort — nothing half-applied.
