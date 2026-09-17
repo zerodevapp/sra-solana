@@ -4,7 +4,7 @@ use solana_keypair::Keypair;
 use solana_message::{v1, VersionedMessage};
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
-use std::error::Error;
+use std::{collections::HashSet, error::Error};
 
 pub type V1Result<T> = Result<T, Box<dyn Error>>;
 
@@ -53,14 +53,9 @@ pub fn build_v1_transaction(
     }
     message.validate()?;
     let mut all_signers = vec![payer];
-    for signer in signers {
-        if all_signers
-            .iter()
-            .all(|existing| existing.pubkey() != signer.pubkey())
-        {
-            all_signers.push(signer);
-        }
-    }
+    all_signers.extend_from_slice(signers);
+    let mut seen = HashSet::new();
+    all_signers.retain(|signer| seen.insert(signer.pubkey()));
     let transaction = VersionedTransaction::try_new(VersionedMessage::V1(message), &all_signers)?;
     let size = serialized_v1_len(&transaction);
     if size > v1::MAX_TRANSACTION_SIZE {
