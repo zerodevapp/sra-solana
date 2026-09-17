@@ -44,7 +44,10 @@ fn sign_trigger(
     )
     .unwrap();
     assert_eq!(tx.signatures.len(), 3);
-    assert!(!signer_keys(&tx).contains(&fx.owner.pubkey()));
+    assert!(!tx
+        .message
+        .static_account_keys()
+        .contains(&fx.owner.pubkey()));
     (tx, event.pubkey())
 }
 
@@ -150,7 +153,7 @@ fn initiator_replacement_first_rejects_presigned_old_initiator() {
     let (mut svm, fx, fee_ata) = race_fixture();
     let replacement = Pubkey::new_unique();
     let (pending, circle_event) = sign_trigger(&svm, &fx, 1_000_000, fee_ata);
-    assert!(!signer_keys(&pending).contains(&replacement));
+    assert!(!pending.message.static_account_keys().contains(&replacement));
     let replace = sign_manage(&svm, &fx, replacement, true);
     svm.send_transaction(replace).unwrap();
     let before = passive_snapshot(&svm, &fx, Some(circle_event));
