@@ -29,8 +29,9 @@
 //! - The runtime CU limit is set to the Solana maximum so a flow that exceeds the
 //!   400k production budget still *executes* and is measured — the assertion, not
 //!   the runtime limit, is the regression gate.
-//! - The reported CU includes the native-v1 resource limits and, for the
-//!   verified-CPI case, the ed25519 verification cost that production pays.
+//! - Measurement runs under the native-v1 `TransactionConfig` resource limits
+//!   and, for the verified-CPI case, includes the ed25519 verification cost that
+//!   production pays.
 //! - LiteSVM uses the mock SpokePool/swap, lighter than real Across/an on-chain
 //!   DEX, so these understate the real fill and swap legs — conservative for a
 //!   regression floor (the true production ceiling requires a real-Across E2E).
