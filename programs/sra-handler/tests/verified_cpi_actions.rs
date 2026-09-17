@@ -14,13 +14,12 @@ mod common;
 
 use anchor_spl::token::ID as TOKEN_PROGRAM_ID;
 use common::*;
-use solana_sdk::{
-    instruction::{AccountMeta, InstructionError},
-    pubkey::Pubkey,
-    signature::Keypair,
-    signer::Signer,
-    transaction::TransactionError,
-};
+use solana_instruction::AccountMeta;
+use solana_instruction_error::InstructionError;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 use sra_common::{
     errors::SraError,
     quote::{action_context_hash, signed_quote_message},

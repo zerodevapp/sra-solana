@@ -9,10 +9,11 @@ mod common;
 use anchor_lang::error::ErrorCode;
 use common::*;
 use litesvm::LiteSVM;
-use solana_sdk::{
-    instruction::Instruction, instruction::InstructionError, pubkey::Pubkey, signer::Signer,
-    transaction::TransactionError,
-};
+use solana_instruction::Instruction;
+use solana_instruction_error::InstructionError;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 
 const STRANDED_AMOUNT: u64 = 500_000;
 

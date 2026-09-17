@@ -3,7 +3,8 @@ mod common;
 use anchor_lang::error::ErrorCode;
 use common::*;
 use litesvm::LiteSVM;
-use solana_sdk::{pubkey::Pubkey, signer::Signer};
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use sra_common::errors::SraError;
 
 fn clone_account(svm: &mut LiteSVM, source: &Pubkey) -> Pubkey {
@@ -115,7 +116,7 @@ fn source_recovery_pins_mint_vault_and_canonical_owner_ata() {
     let other_owner_ata = create_ata(&mut svm, &fx.payer, &fx.payer.pubkey(), &fx.source_mint);
     for (index, substitute, expected) in [
         (2, other_mint, ErrorCode::ConstraintAssociated),
-        (3, fx.owner_ata, ErrorCode::ConstraintTokenOwner),
+        (3, other_owner_ata, ErrorCode::ConstraintTokenOwner),
         (3, noncanonical_vault, ErrorCode::ConstraintAssociated),
         (4, other_owner_ata, ErrorCode::ConstraintTokenOwner),
         (4, noncanonical_owner_ata, ErrorCode::ConstraintAssociated),

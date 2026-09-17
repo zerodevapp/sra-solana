@@ -13,10 +13,12 @@ mod common;
 use anchor_lang::error::ErrorCode;
 use common::*;
 use mock_spoke_pool::FillStatus;
-use solana_sdk::{
-    clock::Clock, instruction::InstructionError, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, transaction::TransactionError,
-};
+use solana_clock::Clock;
+use solana_instruction_error::InstructionError;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 use sra_across_adapter::utils::svm_spoke::types::RelayData;
 use sra_across_adapter::AcrossAdapterError;
 use sra_common::types::ManageRouteParams;
@@ -405,7 +407,7 @@ fn verify_across_fill_fill_status_not_across_owned_rejected() {
     .unwrap();
     svm.set_account(
         fill_status_pda,
-        solana_sdk::account::Account {
+        solana_account::Account {
             lamports: svm.minimum_balance_for_rent_exemption(data.len()),
             data,
             owner: PROGRAM_ID, // handler program, NOT the Across program

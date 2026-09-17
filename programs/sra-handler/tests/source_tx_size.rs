@@ -3,10 +3,12 @@
 mod common;
 
 use common::*;
-use solana_sdk::{
-    instruction::Instruction, packet::PACKET_DATA_SIZE, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, transaction::VersionedTransaction,
-};
+use solana_instruction::Instruction;
+use solana_keypair::Keypair;
+use solana_packet::PACKET_DATA_SIZE;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction::versioned::VersionedTransaction;
 use sra_common::{constants::MAX_ADAPTERS, source_deposit::AcrossDepositParams};
 
 const PROTOCOL_FEE: u64 = 3_000;

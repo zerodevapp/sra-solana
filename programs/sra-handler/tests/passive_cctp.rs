@@ -1,12 +1,11 @@
 mod common;
 
 use common::*;
-use solana_sdk::{
-    instruction::InstructionError,
-    message::{Message, VersionedMessage},
-    signer::Signer,
-    transaction::{TransactionError, VersionedTransaction},
-};
+use solana_instruction_error::InstructionError;
+use solana_message::{Message, VersionedMessage};
+use solana_signer::Signer;
+use solana_transaction::versioned::VersionedTransaction;
+use solana_transaction_error::TransactionError;
 use sra_cctp_adapter::CctpAdapterError;
 use sra_common::{
     abi::u256_from_u64, constants::FINALITY_THRESHOLD_FAST, source_deposit::CctpDepositParams,

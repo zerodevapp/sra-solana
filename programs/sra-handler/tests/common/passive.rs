@@ -1,11 +1,10 @@
 use super::*;
 use anchor_lang::{AccountSerialize, InstructionData, ToAccountMetas};
 use litesvm_token::spl_token::state::{Account, Mint};
-use solana_sdk::{
-    instruction::{Instruction, InstructionError},
-    program_pack::Pack,
-    transaction::TransactionError,
-};
+use solana_instruction::Instruction;
+use solana_instruction_error::InstructionError;
+use solana_program::program_pack::Pack;
+use solana_transaction_error::TransactionError;
 
 pub const SRA_STARTING_BALANCE: u64 = 10_000_000;
 pub const FEE_TEST_OUTPUT: u64 = 995_000;

@@ -3,7 +3,8 @@ mod common;
 use anchor_lang::{error::ErrorCode, AccountSerialize};
 use common::*;
 use litesvm::LiteSVM;
-use solana_sdk::{pubkey::Pubkey, signer::Signer};
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use sra_common::errors::SraError;
 
 fn manage_sra(
@@ -24,7 +25,7 @@ fn manage_sra(
 fn manage_sra_replaces_only_runtime_control() {
     let mut svm = setup_svm();
     let fx = PassiveFixture::new(&mut svm);
-    let replacement = solana_sdk::signature::Keypair::new();
+    let replacement = solana_keypair::Keypair::new();
     mint_to(
         &mut svm,
         &fx.payer,

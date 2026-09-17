@@ -47,7 +47,7 @@ use common::dest_e2e::*;
 use common::surfpool::*;
 use common::*;
 use solana_program::keccak;
-use solana_sdk::signature::Signer;
+use solana_signer::Signer;
 use sra_common::constants::{
     ACROSS_SPOKE_POOL_ID, CCTP_MESSAGE_TRANSMITTER_V2_ID, CCTP_TOKEN_MESSENGER_MINTER_V2_ID,
 };

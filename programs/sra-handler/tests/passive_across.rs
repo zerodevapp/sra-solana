@@ -1,13 +1,12 @@
 mod common;
 
 use common::*;
-use solana_sdk::{
-    instruction::InstructionError,
-    message::{Message, VersionedMessage},
-    pubkey::Pubkey,
-    signer::Signer,
-    transaction::{TransactionError, VersionedTransaction},
-};
+use solana_instruction_error::InstructionError;
+use solana_message::{Message, VersionedMessage};
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction::versioned::VersionedTransaction;
+use solana_transaction_error::TransactionError;
 use sra_across_adapter::AcrossAdapterError;
 use sra_common::source_deposit::AcrossDepositParams;
 

@@ -16,9 +16,10 @@
 mod common;
 
 use common::*;
-use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, pubkey::Pubkey, signature::Keypair, signer::Signer,
-};
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use sra_common::{
     errors::SraError,
     types::{
@@ -32,8 +33,8 @@ const SOURCE_CHAIN_ID: u64 = 42_161;
 const FILL_ID: [u8; 32] = [7u8; 32];
 
 struct Staged {
-    payer: solana_sdk::signature::Keypair,
-    owner: solana_sdk::signature::Keypair,
+    payer: Keypair,
+    owner: Keypair,
     mint: Pubkey,
     route: Pubkey,
     execution_vault: Pubkey,

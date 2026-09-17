@@ -14,26 +14,25 @@
 //! WITHIN a binary (each open handle contends), replacing the old file-local
 //! `SURFPOOL_TEST_MUTEX`. The lock releases on drop, including on panic.
 
-use anchor_lang::{prelude::borsh, AccountDeserialize, AccountSerialize, AnchorSerialize};
+use anchor_lang::{AccountDeserialize, AccountSerialize, AnchorSerialize};
 use fslock::LockFile;
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
-use solana_client::rpc_client::RpcClient;
-use solana_program::address_lookup_table::{
+use solana_address_lookup_table_interface::{
     instruction::{create_lookup_table, extend_lookup_table},
     state::AddressLookupTable,
-    AddressLookupTableAccount,
 };
-use solana_sdk::{
-    clock::{Clock, Slot},
-    commitment_config::CommitmentConfig,
-    instruction::{AccountMeta, Instruction},
-    message::{v0, VersionedMessage},
-    pubkey::Pubkey,
-    signature::{Keypair, Signature, Signer},
-    transaction::{Transaction, VersionedTransaction},
-};
+use solana_clock::{Clock, Slot};
+use solana_commitment_config::CommitmentConfig;
+use solana_instruction::{AccountMeta, Instruction};
+use solana_keypair::Keypair;
+use solana_message::{v0, AddressLookupTableAccount, VersionedMessage};
+use solana_pubkey::Pubkey;
+use solana_rpc_client::rpc_client::RpcClient;
+use solana_signature::Signature;
+use solana_signer::Signer;
 use solana_system_interface::program as system_program;
+use solana_transaction::{versioned::VersionedTransaction, Transaction};
 use sra_cctp_adapter::utils::cctp_state::{
     deserialize_message_transmitter, MESSAGE_TRANSMITTER_DISCRIMINATOR,
 };
@@ -495,7 +494,7 @@ pub fn read_anchor_account<T: AccountDeserialize>(
 /// The fork's current unix time, from the on-chain `Clock` sysvar — the time
 /// base the real Across program checks fill deadlines against.
 pub fn clock_unix_timestamp(rpc: &RpcClient) -> TestResult<i64> {
-    let data = rpc.get_account_data(&solana_sdk::sysvar::clock::ID)?;
+    let data = rpc.get_account_data(&solana_program::sysvar::clock::ID)?;
     let clock: Clock = bincode::deserialize(&data)?;
     Ok(clock.unix_timestamp)
 }

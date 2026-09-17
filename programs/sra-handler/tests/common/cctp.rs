@@ -10,9 +10,11 @@
 use anchor_lang::{AccountDeserialize, AnchorSerialize, InstructionData, ToAccountMetas};
 use libsecp256k1::{sign, Message, PublicKey, SecretKey};
 use litesvm::LiteSVM;
-use solana_sdk::{
-    instruction::Instruction, keccak, pubkey::Pubkey, signature::Keypair, signer::Signer,
-};
+use solana_instruction::Instruction;
+use solana_keypair::Keypair;
+use solana_program::keccak;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use solana_system_interface::program as system_program;
 use sra_cctp_adapter::utils::cctp_state::{
     MessageTransmitterState, UsedNonce, MESSAGE_TRANSMITTER_DISCRIMINATOR, USED_NONCE_DISCRIMINATOR,
@@ -61,7 +63,7 @@ pub fn test_attester() -> (SecretKey, Pubkey) {
 /// last 20 bytes of `keccak(uncompressed pubkey)`, left-zero-padded to 32.
 pub fn attester_address(secret: &SecretKey) -> Pubkey {
     let pubkey = PublicKey::from_secret_key(secret).serialize();
-    let mut address = keccak::hash(&pubkey[1..]).0;
+    let mut address = keccak::hash(&pubkey[1..]).to_bytes();
     address[..12].fill(0);
     Pubkey::new_from_array(address)
 }
@@ -73,7 +75,7 @@ pub fn sign_attestation(message: &[u8], keys: &[&SecretKey]) -> Vec<u8> {
     let hash = keccak::hash(message);
     let mut out = Vec::with_capacity(65 * keys.len());
     for secret in keys {
-        let (signature, recovery_id) = sign(&Message::parse(&hash.0), secret);
+        let (signature, recovery_id) = sign(&Message::parse(&hash.to_bytes()), secret);
         out.extend_from_slice(&signature.serialize());
         out.push(recovery_id.serialize() + 27);
     }
@@ -83,7 +85,7 @@ pub fn sign_attestation(message: &[u8], keys: &[&SecretKey]) -> Vec<u8> {
 fn plant_account(svm: &mut LiteSVM, address: Pubkey, owner: Pubkey, data: Vec<u8>) {
     svm.set_account(
         address,
-        solana_sdk::account::Account {
+        solana_account::Account {
             lamports: svm.minimum_balance_for_rent_exemption(data.len()),
             data,
             owner,

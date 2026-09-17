@@ -3,7 +3,9 @@ mod common;
 use anchor_lang::error::ErrorCode;
 use common::*;
 use litesvm::LiteSVM;
-use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use sra_common::{constants::MAX_FEE_BPS, errors::SraError};
 
 const DEFAULT_FEE_BPS: u16 = 30;

@@ -19,7 +19,9 @@
 mod common;
 
 use common::*;
-use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use sra_common::{errors::SraError, types::ExecutionStatus};
 
 const AMOUNT_A: u64 = 3_000_000;

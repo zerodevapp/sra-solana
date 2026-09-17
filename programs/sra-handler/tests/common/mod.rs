@@ -20,18 +20,18 @@ use litesvm::LiteSVM;
 use litesvm_token::{
     spl_token::state::Account as SplTokenAccount, CreateAssociatedTokenAccount, CreateMint, MintTo,
 };
-use solana_sdk::{
-    clock::Clock,
-    compute_budget::ComputeBudgetInstruction,
-    hash::Hash,
-    instruction::{AccountMeta, Instruction, InstructionError},
-    message::{v0, AddressLookupTableAccount, Message, VersionedMessage},
-    pubkey::Pubkey,
-    signature::Keypair,
-    signer::Signer,
-    transaction::{Transaction, TransactionError, VersionedTransaction},
-};
+use solana_clock::Clock;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_hash::Hash;
+use solana_instruction::{AccountMeta, Instruction};
+use solana_instruction_error::InstructionError;
+use solana_keypair::Keypair;
+use solana_message::{v0, AddressLookupTableAccount, Message, VersionedMessage};
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use solana_system_interface::program as system_program;
+use solana_transaction::{versioned::VersionedTransaction, Transaction};
+use solana_transaction_error::TransactionError;
 use sra_across_adapter::utils::svm_spoke::types::RelayData;
 use sra_common::{
     abi::u256_from_u64,
@@ -545,14 +545,7 @@ pub fn send_ix(
     payer: &Keypair,
     signers: &[&Keypair],
 ) -> Result<(), Box<litesvm::types::FailedTransactionMetadata>> {
-    svm.expire_blockhash();
-    let blockhash = svm.latest_blockhash();
-    let msg = Message::new(&[ix], Some(&payer.pubkey()));
-    let mut tx = Transaction::new_unsigned(msg);
-    let mut all_signers: Vec<&Keypair> = vec![payer];
-    all_signers.extend_from_slice(signers);
-    tx.sign(&all_signers, blockhash);
-    svm.send_transaction(tx).map(|_| ()).map_err(Box::new)
+    send_instructions(svm, &[ix], payer, signers).map(|_| ())
 }
 
 pub fn send_ix_with_meta(
@@ -571,13 +564,11 @@ pub fn send_instructions(
     signers: &[&Keypair],
 ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>> {
     svm.expire_blockhash();
-    let blockhash = svm.latest_blockhash();
-    let msg = Message::new(ixs, Some(&payer.pubkey()));
-    let mut tx = Transaction::new_unsigned(msg);
-    let mut all_signers: Vec<&Keypair> = vec![payer];
+    let mut all_signers = vec![payer];
     all_signers.extend_from_slice(signers);
-    tx.sign(&all_signers, blockhash);
-    svm.send_transaction(tx).map_err(Box::new)
+    let message = Message::new(ixs, Some(&payer.pubkey()));
+    let transaction = Transaction::new(&all_signers, message, svm.latest_blockhash());
+    svm.send_transaction(transaction).map_err(Box::new)
 }
 
 pub fn send_ix_expect_err(
@@ -840,7 +831,7 @@ pub fn assert_token_account(
     owner: Pubkey,
     amount: u64,
 ) {
-    use solana_sdk::program_pack::Pack;
+    use solana_program::program_pack::Pack;
 
     let account = svm.get_account(address).expect("token account exists");
     assert_eq!(account.owner, TOKEN_PROGRAM_ID);
@@ -862,7 +853,7 @@ pub fn restamp_mint_as_token_2022(svm: &mut LiteSVM, mint: &Pubkey) {
 
 pub fn freeze_token_account(svm: &mut LiteSVM, ata: &Pubkey) {
     use litesvm_token::spl_token::state::AccountState;
-    use solana_sdk::program_pack::Pack;
+    use solana_program::program_pack::Pack;
 
     let mut account = svm.get_account(ata).expect("token account exists");
     let mut token = SplTokenAccount::unpack(&account.data).expect("initialized SPL token account");
@@ -909,7 +900,7 @@ pub fn mint_to(
 /// Current supply of `mint` — the CCTP burn leg is asserted as a supply
 /// decrease (no destination vault exists on the source chain).
 pub fn fetch_mint_supply(svm: &LiteSVM, mint: &Pubkey) -> u64 {
-    use solana_sdk::program_pack::Pack;
+    use solana_program::program_pack::Pack;
     let account = svm.get_account(mint).expect("mint account exists");
     litesvm_token::spl_token::state::Mint::unpack(&account.data)
         .expect("initialized mint")
@@ -1193,7 +1184,7 @@ pub fn trigger_ix(
             token_program: TOKEN_PROGRAM_ID,
             associated_token_program: ATA_PROGRAM_ID,
             system_program: system_program::ID,
-            instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
+            instructions_sysvar: solana_program::sysvar::instructions::ID,
         }
         .to_account_metas(None),
         data: sra_handler::instruction::Trigger {
@@ -1233,7 +1224,7 @@ pub fn execute_deposit_cctp_ix(
         program_id: CCTP_ADAPTER_PROGRAM_ID,
         accounts: sra_cctp_adapter::accounts::ExecuteDepositCctp {
             fee_payer: *fee_payer,
-            instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
+            instructions_sysvar: solana_program::sysvar::instructions::ID,
             sra_config: fx.sra_config,
             adapter_authority: fx.accounts.adapter_authority,
             adapter_custody: fx.accounts.adapter_custody,
@@ -1295,7 +1286,7 @@ pub fn execute_deposit_across_ix(
         program_id: ADAPTER_PROGRAM_ID,
         accounts: sra_across_adapter::accounts::ExecuteDepositAcross {
             fee_payer: *fee_payer,
-            instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
+            instructions_sysvar: solana_program::sysvar::instructions::ID,
             sra_config: fx.sra_config,
             adapter_authority: fx.accounts.adapter_authority,
             adapter_custody: fx.accounts.adapter_custody,
@@ -1566,7 +1557,7 @@ pub fn plant_non_executable_account(svm: &mut LiteSVM) -> Pubkey {
 /// bogus account at a committed program id so the loader-owned-executable check (not
 /// just the identity check) is the one that fires.
 pub fn plant_non_executable_at(svm: &mut LiteSVM, key: Pubkey) {
-    let account = solana_sdk::account::Account {
+    let account = solana_account::Account {
         lamports: svm.minimum_balance_for_rent_exemption(8),
         data: vec![0u8; 8],
         owner: system_program::ID,
@@ -1632,7 +1623,7 @@ pub fn seed_route_with_config(
     route.serialize(&mut data).unwrap();
 
     let address = Pubkey::new_unique();
-    let account = solana_sdk::account::Account {
+    let account = solana_account::Account {
         lamports: svm.minimum_balance_for_rent_exemption(data.len()),
         data,
         owner: PROGRAM_ID,
@@ -1663,7 +1654,7 @@ pub fn seed_fill_receipt_with_status(
     let mut data = <FillReceipt as Discriminator>::DISCRIMINATOR.to_vec();
     receipt.serialize(&mut data).unwrap();
 
-    let account = solana_sdk::account::Account {
+    let account = solana_account::Account {
         lamports: svm.minimum_balance_for_rent_exemption(data.len()),
         data,
         owner: PROGRAM_ID,
@@ -1865,7 +1856,7 @@ pub fn fabricate_verified_fill_at(
 ) -> Pubkey {
     svm.set_account(
         address,
-        solana_sdk::account::Account {
+        solana_account::Account {
             lamports: svm.minimum_balance_for_rent_exemption(data.len().max(1)),
             data,
             owner,
@@ -1935,7 +1926,7 @@ pub fn execute_actions_ix_full(
         execution_authority,
         execution_vault,
         token_program: TOKEN_PROGRAM_ID,
-        instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
+        instructions_sysvar: solana_program::sysvar::instructions::ID,
     }
     .to_account_metas(None);
     accounts.extend(remaining);
@@ -1985,7 +1976,7 @@ pub fn retry_actions_ix_full(
         execution_authority,
         execution_vault,
         token_program: TOKEN_PROGRAM_ID,
-        instructions_sysvar: anchor_lang::solana_program::sysvar::instructions::ID,
+        instructions_sysvar: solana_program::sysvar::instructions::ID,
     }
     .to_account_metas(None);
     accounts.extend(remaining);
@@ -2025,7 +2016,7 @@ pub fn derive_mock_swap_pool(
 /// transaction, it is what the handler's signed-quote check locates.
 pub fn ed25519_quote_ix(quoter: &Keypair, message: &[u8]) -> Instruction {
     let signature = quoter.sign_message(message);
-    solana_sdk::ed25519_instruction::new_ed25519_instruction_with_signature(
+    solana_ed25519_program::new_ed25519_instruction_with_signature(
         message,
         signature.as_ref().try_into().expect("64-byte ed25519 sig"),
         &quoter.pubkey().to_bytes(),
