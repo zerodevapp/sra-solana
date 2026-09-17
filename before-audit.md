@@ -303,19 +303,19 @@ Toolchain: Rust 1.93.1 (pinned), Anchor 1.2.0, Solana CLI 3.1.11, Node.js 20.18+
 
 ```bash
 yarn install
-NO_DNA=1 anchor build --program-name sra_handler
-NO_DNA=1 anchor build --program-name sra_cctp_adapter
-NO_DNA=1 anchor build --program-name sra_across_adapter
-NO_DNA=1 anchor build --program-name mock_cctp
-NO_DNA=1 anchor build --program-name mock_spoke_pool
-NO_DNA=1 anchor build --program-name mock_swap
+NO_DNA=1 anchor build --program-name sra_handler --arch v0
+NO_DNA=1 anchor build --program-name sra_cctp_adapter --arch v0
+NO_DNA=1 anchor build --program-name sra_across_adapter --arch v0
+NO_DNA=1 anchor build --program-name mock_cctp --arch v0
+NO_DNA=1 anchor build --program-name mock_spoke_pool --arch v0
+NO_DNA=1 anchor build --program-name mock_swap --arch v0
 ```
 
 Three test surfaces:
 
 ```bash
 # 1. LiteSVM Rust tests (in-process, primary behavioural coverage).
-#    Requires `anchor build` first — the suite loads target/deploy/*.so.
+#    Requires the program build first — the suite loads target/deploy/*.so.
 cargo test --workspace
 cargo test -p sra-handler --test manage_sra
 cargo test -p sra-handler --test passive_trigger
@@ -326,13 +326,18 @@ cargo test -p sra-handler --test passive_across
 NO_DNA=1 anchor test --skip-build --validator legacy
 
 # 3. Surfpool E2E against the real Across svm-spoke (heavier).
-NO_DNA=1 anchor build --ignore-keys
+NO_DNA=1 anchor build --ignore-keys --arch v0
 NO_DNA=1 surfpool start --ci --network mainnet --legacy-anchor-compatibility
+```
+
+After the RPC health check succeeds, run the exact `Install branch programs` stage from the [source workflow](./.github/workflows/source-e2e-surfpool.yml) or [destination workflow](./.github/workflows/dest-e2e-surfpool.yml). It clones placeholder accounts, assigns the local upgrade authority, and deploys the handler plus both adapters.
+
+```bash
 NO_DNA=1 cargo test -p sra-handler --test source_e2e_surfpool -- --ignored --nocapture
 NO_DNA=1 cargo test -p sra-handler --test dest_e2e_surfpool -- --ignored --nocapture
 ```
 
-The Rust LiteSVM tests are the source of truth for behaviour; the TS suite is a thin client-surface smoke test. The Surfpool suites cover the existing ALT-backed v0 source transaction and destination fill path; transaction-v1 coverage is not part of this baseline. A Foundry golden-vector suite cross-validates the ABI encoding against the EVM implementation.
+The Rust LiteSVM tests are the source of truth for behaviour; the TS suite is a thin client-surface smoke test. The Surfpool suites target the existing ALT-backed v0 source transaction and destination fill path; transaction-v1 coverage is not part of this baseline. A Foundry golden-vector suite cross-validates the ABI encoding against the EVM implementation.
 
 ---
 
