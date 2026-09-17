@@ -51,7 +51,7 @@ sra_cctp_adapter    2bXAvxF3U4FtWAnJtcL9LDnwM7qnErf3y3m6USLRKpRw
 
 ### 3.1 Source: Solana → EVM
 
-One atomic native-v1 transaction contains handler `trigger` followed immediately by one adapter instruction. It uses inline account addresses and explicit `TransactionConfig` resource limits; the largest supported source shape is 1,477 serialized bytes with 28 addresses, within the v1 limits without an Address Lookup Table.
+One atomic native-v1 transaction contains handler `trigger` followed immediately by one adapter instruction. It uses inline account addresses and explicit `TransactionConfig` resource limits. The fee-disabled CCTP source canary is 1,477 serialized bytes with 28 addresses; enabling the optional fee-recipient account yields 1,509 bytes with 29 addresses. Both remain within the v1 limits without an Address Lookup Table.
 
 1. **`trigger` (handler)**
    - Require the SRA to be active and the signer to equal the owner-configured `initiator`; the owner is not a per-deposit signer.
