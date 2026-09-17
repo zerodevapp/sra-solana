@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, cctpV2]
   pull_request:
   workflow_dispatch:
 
@@ -33,7 +33,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: rust-host
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' }}
 
       - name: cargo fmt
         run: cargo fmt --all -- --check
@@ -77,12 +77,12 @@ jobs:
       - name: Cache Rust build (BPF target)
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rust-bpf
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: rust-solana-build
+          save-if: ${{ github.event_name == 'push' }}
 
-      - name: Cache Solana + Anchor toolchain
+      - name: Restore Solana + Anchor toolchain
         id: toolchain-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.local/share/solana
@@ -111,6 +111,17 @@ jobs:
           solana --version
           anchor --version
           rustc --version
+
+      - name: Save Solana + Anchor toolchain
+        if: github.event_name == 'push' && steps.toolchain-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.local/share/solana
+            ~/.avm
+            ~/.cargo/bin/avm
+            ~/.cargo/bin/anchor
+          key: ${{ steps.toolchain-cache.outputs.cache-primary-key }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
