@@ -13,6 +13,7 @@ concurrency:
 env:
   SOLANA_VERSION: "3.1.11"
   ANCHOR_VERSION: "1.2.0"
+  E2E_ANCHOR_VERSION: "0.32.1"
   NODE_VERSION: "20.18.0"
   CARGO_TERM_COLOR: always
 
@@ -163,6 +164,37 @@ jobs:
 
       - name: anchor test
         run: NO_DNA=1 anchor test --skip-build --validator legacy
+
+      - name: Restore E2E Solana + Anchor toolchain
+        if: github.event_name == 'push'
+        id: e2e-toolchain-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.local/share/solana
+            ~/.avm
+            ~/.cargo/bin/avm
+            ~/.cargo/bin/anchor
+          key: toolchain-solana-${{ env.SOLANA_VERSION }}-anchor-${{ env.E2E_ANCHOR_VERSION }}-v1
+
+      - name: Install E2E avm + Anchor
+        if: github.event_name == 'push' && steps.e2e-toolchain-cache.outputs.cache-hit != 'true'
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor --tag v${E2E_ANCHOR_VERSION} avm --force
+          avm install ${E2E_ANCHOR_VERSION}
+          avm use ${E2E_ANCHOR_VERSION}
+          anchor --version
+
+      - name: Save E2E Solana + Anchor toolchain
+        if: github.event_name == 'push' && steps.e2e-toolchain-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.local/share/solana
+            ~/.avm
+            ~/.cargo/bin/avm
+            ~/.cargo/bin/anchor
+          key: ${{ steps.e2e-toolchain-cache.outputs.cache-primary-key }}
 
   ts:
     name: TypeScript (prettier)
