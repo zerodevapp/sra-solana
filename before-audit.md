@@ -51,7 +51,7 @@ sra_cctp_adapter    2bXAvxF3U4FtWAnJtcL9LDnwM7qnErf3y3m6USLRKpRw
 
 ### 3.1 Source: Solana → EVM
 
-One atomic transaction contains handler `trigger` followed immediately by one adapter instruction. An Address Lookup Table is **mandatory** — the transaction exceeds the 1232-byte packet limit without one; CI machine-checks this.
+One atomic native-v1 transaction contains handler `trigger` followed immediately by one adapter instruction. It uses inline account addresses and explicit `TransactionConfig` resource limits; the largest supported source shape is 1,477 serialized bytes with 28 addresses, within the v1 limits without an Address Lookup Table.
 
 1. **`trigger` (handler)**
    - Require the SRA to be active and the signer to equal the owner-configured `initiator`; the owner is not a per-deposit signer.
@@ -293,7 +293,7 @@ Flagged proactively so they are not mistaken for findings. Some are deliberate S
 - **Permissioned Token-2022 output** (permanent-delegate / pausable / default-frozen) can be frozen or clawed back by its issuer; routes must opt in explicitly to accept such mints.
 - **CPI depth.** Solana's ~4–5 level CPI stack is a hard ceiling; deep swap routes plus token-hook accounts can exhaust it.
 - **Closed fill-status account.** If Across lets a relayer close the `FillStatusAccount` after the deadline, on-chain fill verification is no longer possible; a signed relay-attestation fallback is designed but not shipped.
-- **ALT-mandatory source tx.** The source transaction requires an Address Lookup Table to fit the packet size (CI-enforced).
+- **Unsupported maximum verified-CPI envelope.** A destination transaction with four maximum-size `VerifiedCpi` actions is intentionally invalid and machine-measured at 6,830 bytes and 139 addresses, exceeding the native-v1 limits of 4,096 bytes and 64 inline addresses. Supported source and destination shapes remain within both limits without Address Lookup Tables.
 
 ---
 
@@ -337,7 +337,7 @@ NO_DNA=1 cargo test -p sra-handler --test source_e2e_surfpool -- --ignored --noc
 NO_DNA=1 cargo test -p sra-handler --test dest_e2e_surfpool -- --ignored --nocapture
 ```
 
-The Rust LiteSVM tests are the source of truth for behaviour; the TS suite is a thin client-surface smoke test. The Surfpool suites target the existing ALT-backed v0 source transaction and destination fill path; transaction-v1 coverage is not part of this baseline. A Foundry golden-vector suite cross-validates the ABI encoding against the EVM implementation.
+The Rust LiteSVM tests are the source of truth for behaviour; the TS suite is a thin client-surface smoke test. Repository-constructed application and test transactions use native transaction v1 with inline account addresses and explicit `TransactionConfig` compute-unit and loaded-account-data limits. Dependency-owned `litesvm-token` fixture APIs and `LiteSVM::airdrop` still use internal legacy setup transactions. The Surfpool suites cover the native-v1 source and destination application paths without Address Lookup Tables. Stock Anchor/Solana loader deployment remains the sole repository-controlled legacy transaction exception. A Foundry golden-vector suite cross-validates the ABI encoding against the EVM implementation.
 
 ---
 

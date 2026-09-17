@@ -1,11 +1,12 @@
 //! Destination compute-unit regression assertions.
 //!
-//! The production destination fill is a versioned transaction over an ALT that
-//! batches the two-instruction flow `[verify_across_fill (adapter, IX 1),
-//! finalize_fill (handler, IX 2)]`, requesting a 400k CU limit — the same budget
-//! the source deposit requests. The owner's route-committed actions then run in a
-//! follow-up `execute_actions` transaction (the fill receipt gates the sequence,
-//! so they need not share a transaction).
+//! The production destination fill is a native-v1 transaction with inline
+//! addresses and explicit `TransactionConfig` resource limits. It batches the
+//! two-instruction flow `[verify_across_fill (adapter, IX 1), finalize_fill
+//! (handler, IX 2)]` with the same 400k CU limit as the source deposit. The
+//! owner's route-committed actions then run in a follow-up `execute_actions`
+//! transaction (the fill receipt gates the sequence, so they need not share a
+//! transaction).
 //!
 //! These tests drive the genuine flow through real instructions (relayer fill via
 //! the mock SpokePool → adapter `verify_across_fill` → handler `finalize_fill` →
@@ -28,12 +29,8 @@
 //! - The runtime CU limit is set to the Solana maximum so a flow that exceeds the
 //!   400k production budget still *executes* and is measured — the assertion, not
 //!   the runtime limit, is the regression gate.
-//! - The reported CU includes the compute-budget instruction's own fixed cost
-//!   (and, for the verified-CPI case, the ed25519 verification cost), which
-//!   production pays identically — so the comparison is apples-to-apples.
-//! - ALTs compress account *addresses* in the serialized message (tx *size* is a
-//!   separate concern); execution CU is unaffected, so a legacy tx here measures
-//!   the production CU faithfully.
+//! - The reported CU includes the native-v1 resource limits and, for the
+//!   verified-CPI case, the ed25519 verification cost that production pays.
 //! - LiteSVM uses the mock SpokePool/swap, lighter than real Across/an on-chain
 //!   DEX, so these understate the real fill and swap legs — conservative for a
 //!   regression floor (the true production ceiling requires a real-Across E2E).

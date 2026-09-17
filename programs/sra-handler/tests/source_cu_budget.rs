@@ -1,3 +1,6 @@
+//! Source compute-unit regression assertions for native-v1 transactions with
+//! inline addresses and explicit `TransactionConfig` resource limits.
+
 mod common;
 
 use common::*;

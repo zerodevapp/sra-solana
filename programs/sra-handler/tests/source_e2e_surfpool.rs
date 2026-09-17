@@ -1,8 +1,9 @@
 //! Source E2E against the REAL bridge programs on a Surfpool mainnet fork:
 //! the Across SVM Spoke Pool and the CCTP v2 TokenMessengerMinter /
 //! MessageTransmitter. One fixture drives the paired
-//! `trigger` + `execute_deposit_*` v0 transaction (compute
-//! budget + ALT) for whichever adapter it was bootstrapped with.
+//! `trigger` + `execute_deposit_*` native-v1 transaction with inline addresses
+//! and explicit `TransactionConfig` resource limits for whichever adapter it
+//! was bootstrapped with.
 //!
 //! KEEPER SPEC (Solana → EVM over CCTP; this suite is the reference for the
 //! on-chain leg): (1) submit the paired deposit transaction below — the
@@ -191,9 +192,8 @@ impl SurfpoolSourceFixture {
         Ok(fixture)
     }
 
-    /// Pair `trigger` with the given adapter leg and submit the
-    /// production shape: one v0 transaction, compute budget first, all
-    /// non-signer accounts resolved through a real address lookup table.
+    /// Pair `trigger` with the given adapter leg and submit the production
+    /// native-v1 shape with inline account addresses.
     fn submit_source_flow(
         &self,
         params: &PrepareParams,
