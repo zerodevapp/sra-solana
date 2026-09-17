@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { web3 } from "@anchor-lang/core";
+import { AnchorProvider, Idl, Program, web3 } from "@anchor-lang/core";
 import {
   AccountRole,
   getBase64EncodedWireTransaction,
@@ -9,9 +9,13 @@ import {
 } from "@solana/kit";
 import {
   compileV1Transaction,
+  decodeFeeConfig,
+  formatRpcError,
   toKitInstruction,
   toSafeBlockHeight,
 } from "../scripts/initialize-fee-config";
+
+const idl = require("../idl/sra_handler.json") as Idl;
 
 test("converts account roles and data", () => {
   const instruction = new web3.TransactionInstruction({
@@ -64,6 +68,57 @@ test("rejects block heights that cannot be safely narrowed", () => {
   assert.throws(
     () => toSafeBlockHeight(BigInt(Number.MAX_SAFE_INTEGER) + 1n),
     expected
+  );
+});
+
+test("decodes fee config with the normalized Anchor account name", async () => {
+  const admin = new web3.PublicKey(new Uint8Array(32).fill(1));
+  const pendingAdmin = new web3.PublicKey(new Uint8Array(32).fill(2));
+  const feeRecipient = new web3.PublicKey(new Uint8Array(32).fill(3));
+  const wallet = {
+    publicKey: admin,
+    signTransaction: async <
+      T extends web3.Transaction | web3.VersionedTransaction
+    >(
+      transaction: T
+    ) => transaction,
+    signAllTransactions: async <
+      T extends web3.Transaction | web3.VersionedTransaction
+    >(
+      transactions: T[]
+    ) => transactions,
+  };
+  const provider = new AnchorProvider(
+    new web3.Connection("http://127.0.0.1:8899"),
+    wallet,
+    AnchorProvider.defaultOptions()
+  );
+  const program = new Program(idl, provider);
+  const data = await program.coder.accounts.encode("feeConfig", {
+    admin,
+    pendingAdmin,
+    feeRecipient,
+    bump: 253,
+  });
+
+  assert.throws(
+    () => program.coder.accounts.decode("FeeConfig", data),
+    /Account not found: FeeConfig/
+  );
+  const decoded = decodeFeeConfig(program, data);
+
+  assert(decoded.admin.equals(admin));
+  assert(decoded.pendingAdmin.equals(pendingAdmin));
+  assert(decoded.feeRecipient.equals(feeRecipient));
+  assert.equal(decoded.bump, 253);
+});
+
+test("formats bigint RPC errors without losing the diagnostic", () => {
+  const error = { InstructionError: [0n, { Custom: 6000n }] };
+
+  assert.equal(
+    formatRpcError(error),
+    '{"InstructionError":["0",{"Custom":"6000"}]}'
   );
 });
 

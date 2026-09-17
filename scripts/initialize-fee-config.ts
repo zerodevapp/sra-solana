@@ -34,6 +34,28 @@ export type V1LatestBlockhash = Readonly<{
   lastValidBlockHeight: bigint;
 }>;
 
+type FeeConfigAccount = Readonly<{
+  admin: web3.PublicKey;
+  pendingAdmin: web3.PublicKey;
+  feeRecipient: web3.PublicKey;
+  bump: number;
+}>;
+
+export function decodeFeeConfig(
+  program: Pick<Program, "coder">,
+  data: Buffer
+): FeeConfigAccount {
+  return program.coder.accounts.decode<FeeConfigAccount>("feeConfig", data);
+}
+
+export function formatRpcError(error: unknown): string {
+  return (
+    JSON.stringify(error, (_key, value) =>
+      typeof value === "bigint" ? value.toString() : value
+    ) ?? String(error)
+  );
+}
+
 export function toSafeBlockHeight(lastValidBlockHeight: bigint): number {
   if (
     lastValidBlockHeight < 0n ||
@@ -140,7 +162,7 @@ export async function main() {
   for (const log of simulation.value.logs ?? []) console.log(log);
   if (simulation.value.err) {
     throw new Error(
-      "Simulation failed: " + JSON.stringify(simulation.value.err)
+      "Simulation failed: " + formatRpcError(simulation.value.err)
     );
   }
 
@@ -169,7 +191,7 @@ export async function main() {
   );
   if (confirmation.value.err) {
     throw new Error(
-      "Transaction failed: " + JSON.stringify(confirmation.value.err)
+      "Transaction failed: " + formatRpcError(confirmation.value.err)
     );
   }
   const accountInfo = await provider.connection.getAccountInfo(
@@ -179,12 +201,7 @@ export async function main() {
   if (!accountInfo || !accountInfo.owner.equals(program.programId)) {
     throw new Error("Fee config post-state verification failed");
   }
-  const initialized = program.coder.accounts.decode<{
-    admin: web3.PublicKey;
-    pendingAdmin: web3.PublicKey;
-    feeRecipient: web3.PublicKey;
-    bump: number;
-  }>("FeeConfig", accountInfo.data);
+  const initialized = decodeFeeConfig(program, accountInfo.data);
   if (
     !initialized.admin.equals(payer) ||
     !initialized.pendingAdmin.equals(web3.PublicKey.default) ||
