@@ -72,7 +72,7 @@ sra-solana/
 - **Solana CLI** 3.1.11
 - **Anchor** 1.2.0 (`avm install 1.2.0 --from-source && avm use 1.2.0`)
 - **Yarn** (the Anchor toolchain is configured for yarn, not npm)
-- **Node.js** 20.18 or newer for the TS test harness
+- **Node.js** 22.12 or newer for the TS test harness
 - **LiteSVM** 0.16.0 (pinned as a Rust development dependency; no separate binary required)
 
 Optional but useful:
