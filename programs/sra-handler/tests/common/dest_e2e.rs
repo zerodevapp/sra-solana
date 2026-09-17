@@ -355,7 +355,7 @@ impl SurfpoolDestFixture {
             representative_lookup_addresses(&[verify_ix.clone(), finalize_ix.clone()]);
         let lookup_table = prepare_lookup_table(&self.rpc, &self.payer, lookup_addresses)?;
 
-        send_versioned_transaction(
+        let tx = build_versioned_transaction(
             &self.rpc,
             "verify_and_finalize",
             &self.payer,
@@ -363,6 +363,7 @@ impl SurfpoolDestFixture {
             &[compute_budget_ix(), verify_ix, finalize_ix],
             &[lookup_table],
         )?;
+        send_versioned_transaction(&self.rpc, "verify_and_finalize", &tx)?;
         Ok(())
     }
 
@@ -499,7 +500,7 @@ impl SurfpoolDestFixture {
         );
         let lookup_addresses = representative_lookup_addresses(std::slice::from_ref(&execute_ix));
         let lookup_table = prepare_lookup_table(&self.rpc, &self.payer, lookup_addresses)?;
-        send_versioned_transaction(
+        let tx = build_versioned_transaction(
             &self.rpc,
             "execute_actions",
             &self.payer,
@@ -507,6 +508,7 @@ impl SurfpoolDestFixture {
             &[compute_budget_ix(), execute_ix],
             &[lookup_table],
         )?;
+        send_versioned_transaction(&self.rpc, "execute_actions", &tx)?;
         Ok(())
     }
 
