@@ -127,7 +127,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: yarn
 
       - name: Install yarn deps
         run: yarn install --frozen-lockfile
@@ -175,7 +174,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: yarn
 
       - name: Install deps
         run: yarn install --frozen-lockfile
