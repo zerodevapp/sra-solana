@@ -1,5 +1,8 @@
 {
   "license": "ISC",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "fee-config:initialize": "ts-node scripts/initialize-fee-config.ts",
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",

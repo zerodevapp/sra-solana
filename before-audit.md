@@ -299,7 +299,7 @@ Flagged proactively so they are not mistaken for findings. Some are deliberate S
 
 ## 13. Building, testing, reproducing
 
-Toolchain: Rust 1.93.1 (pinned), Anchor 1.2.0, Solana CLI 3.1.11, Node.js 20.18+, Yarn, LiteSVM 0.16.0.
+Toolchain: Rust 1.93.1 (pinned), Anchor 1.2.0, Solana CLI 3.1.11, Node.js 22.12+, Yarn, LiteSVM 0.16.0.
 
 ```bash
 yarn install
