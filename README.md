@@ -70,7 +70,7 @@ sra-solana/
 
 - **Rust** 1.93.1 (pinned via `rust-toolchain.toml`)
 - **Solana CLI** 3.1.11
-- **Anchor** 1.2.0 (`avm install 1.2.0 && avm use 1.2.0`)
+- **Anchor** 1.2.0 (`avm install 1.2.0 --from-source && avm use 1.2.0`)
 - **Yarn** (the Anchor toolchain is configured for yarn, not npm)
 - **Node.js** 20.18 or newer for the TS test harness
 - **LiteSVM** 0.16.0 (pinned as a Rust development dependency; no separate binary required)
@@ -96,13 +96,13 @@ rustc --version   # should report 1.93.1
 
 ```bash
 # Build all programs + generate IDL
-NO_DNA=1 anchor build --ignore-keys
+NO_DNA=1 anchor build --ignore-keys --arch v0
 
 # Or just build the Rust workspace (no IDL generation)
 cargo build
 ```
 
-`anchor build` writes program binaries to `target/deploy/` and IDL JSON to `target/idl/`. When the checked-in IDL changes, copy the generated files from `target/idl/` into `idl/`.
+The build command above writes program binaries to `target/deploy/` and IDL JSON to `target/idl/`. When the checked-in IDL changes, copy the generated files from `target/idl/` into `idl/`.
 
 ## Test
 
@@ -124,12 +124,12 @@ cargo test -p sra-handler --test passive_cctp
 cargo test -p sra-handler --test passive_across
 ```
 
-These exercise instruction handlers against an in-process LiteSVM runtime. No validator required, but `anchor build` must run first because the suite loads `target/deploy/*.so` artifacts directly.
+These exercise instruction handlers against an in-process LiteSVM runtime. No validator required, but the program build must run first because the suite loads `target/deploy/*.so` artifacts directly.
 
 **2. Anchor + mocha smoke tests** (runs against a local validator)
 
 ```bash
-# After `anchor build`, run the same generated-client gate as CI
+# After the program build, run the same generated-client gate as CI
 NO_DNA=1 anchor test --skip-build --validator legacy
 ```
 
@@ -138,8 +138,13 @@ The current TS suite (`tests/sra-handler.ts`) is a smoke test that asserts the g
 **3. Surfpool E2E** (real Across paths, heavier)
 
 ```bash
-NO_DNA=1 anchor build --ignore-keys
+NO_DNA=1 anchor build --ignore-keys --arch v0
 NO_DNA=1 surfpool start --ci --network mainnet --legacy-anchor-compatibility
+```
+
+After the RPC health check succeeds, run the exact `Install branch programs` stage from the [source workflow](./.github/workflows/source-e2e-surfpool.yml) or [destination workflow](./.github/workflows/dest-e2e-surfpool.yml). That stage clones placeholder program accounts, assigns the local upgrade authority, and deploys `sra-handler` plus both adapters before either suite runs.
+
+```bash
 NO_DNA=1 cargo test -p sra-handler --test source_e2e_surfpool -- --ignored --nocapture
 NO_DNA=1 cargo test -p sra-handler --test dest_e2e_surfpool -- --ignored --nocapture
 ```
