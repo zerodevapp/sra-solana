@@ -2,9 +2,7 @@ mod common;
 
 use common::*;
 use solana_instruction_error::InstructionError;
-use solana_message::{Message, VersionedMessage};
 use solana_signer::Signer;
-use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_error::TransactionError;
 use sra_cctp_adapter::CctpAdapterError;
 use sra_common::{
@@ -33,13 +31,12 @@ fn passive_cctp_happy_path() {
         &execute_ix,
     );
     svm.expire_blockhash();
-    let tx = VersionedTransaction::try_new(
-        VersionedMessage::Legacy(Message::new_with_blockhash(
-            &[trigger, execute_ix],
-            Some(&fx.payer.pubkey()),
-            &svm.latest_blockhash(),
-        )),
-        &[&fx.payer, &fx.initiator, &event_data],
+    let tx = build_v1_transaction(
+        &fx.payer,
+        &[&fx.initiator, &event_data],
+        &[trigger, execute_ix],
+        svm.latest_blockhash(),
+        DEFAULT_V1_CONFIG,
     )
     .unwrap();
     assert!(!signer_keys(&tx).contains(&fx.owner.pubkey()));

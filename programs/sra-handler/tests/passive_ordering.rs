@@ -4,7 +4,7 @@ use common::*;
 use litesvm::{types::TransactionMetadata, LiteSVM};
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use solana_transaction::Transaction;
+use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_error::TransactionError;
 use sra_common::{abi::u256_from_u64, errors::SraError};
 
@@ -28,36 +28,45 @@ fn sign_trigger(
     fx: &PassiveFixture,
     amount: u64,
     fee_ata: Pubkey,
-) -> (Transaction, Pubkey) {
+) -> (VersionedTransaction, Pubkey) {
     let mut params = sample_prepare_params(fx.target_token);
     params.input_amount = amount;
     params.protocol_fee_amount = protocol_fee(amount);
     params.output_amount = u256_from_u64(amount * 995 / 1_000);
     let (trigger, execute, event) =
         cctp_pair(fx, params.clone(), cctp_params_for(&params), Some(fee_ata));
-    let tx = Transaction::new_signed_with_payer(
+    let tx = build_v1_transaction(
+        &fx.payer,
+        &[&fx.initiator, &event],
         &[trigger, execute],
-        Some(&fx.payer.pubkey()),
-        &[&fx.payer, &fx.initiator, &event],
         svm.latest_blockhash(),
-    );
+        DEFAULT_V1_CONFIG,
+    )
+    .unwrap();
     assert_eq!(tx.signatures.len(), 3);
-    assert!(!tx.message.account_keys.contains(&fx.owner.pubkey()));
+    assert!(!signer_keys(&tx).contains(&fx.owner.pubkey()));
     (tx, event.pubkey())
 }
 
-fn sign_manage(svm: &LiteSVM, fx: &PassiveFixture, initiator: Pubkey, active: bool) -> Transaction {
-    Transaction::new_signed_with_payer(
+fn sign_manage(
+    svm: &LiteSVM,
+    fx: &PassiveFixture,
+    initiator: Pubkey,
+    active: bool,
+) -> VersionedTransaction {
+    build_v1_transaction(
+        &fx.payer,
+        &[&fx.owner],
         &[manage_sra_ix(
             fx.owner.pubkey(),
             fx.sra_config,
             initiator,
             active,
         )],
-        Some(&fx.payer.pubkey()),
-        &[&fx.payer, &fx.owner],
         svm.latest_blockhash(),
+        DEFAULT_V1_CONFIG,
     )
+    .unwrap()
 }
 
 fn assert_deposit(
@@ -141,7 +150,7 @@ fn initiator_replacement_first_rejects_presigned_old_initiator() {
     let (mut svm, fx, fee_ata) = race_fixture();
     let replacement = Pubkey::new_unique();
     let (pending, circle_event) = sign_trigger(&svm, &fx, 1_000_000, fee_ata);
-    assert!(!pending.message.account_keys.contains(&replacement));
+    assert!(!signer_keys(&pending).contains(&replacement));
     let replace = sign_manage(&svm, &fx, replacement, true);
     svm.send_transaction(replace).unwrap();
     let before = passive_snapshot(&svm, &fx, Some(circle_event));

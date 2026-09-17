@@ -2,7 +2,6 @@ mod common;
 
 use common::*;
 use litesvm::LiteSVM;
-use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -16,15 +15,12 @@ fn assert_under_budget(
     [trigger, execute]: [Instruction; 2],
     signers: &[&Keypair],
 ) {
-    let consumed = send_instructions(
+    let consumed = send_instructions_with_config(
         svm,
-        &[
-            ComputeBudgetInstruction::set_compute_unit_limit(1_400_000),
-            trigger,
-            execute,
-        ],
+        &[trigger, execute],
         &fx.payer,
         signers,
+        v1_config_with_compute_limit(1_400_000),
     )
     .expect("passive source flow must execute")
     .compute_units_consumed;

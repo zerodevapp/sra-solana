@@ -69,6 +69,12 @@ pub const CCTP_MAX_FEE: u64 = 5_000;
 pub const ARBITRUM_USDC: [u8; 32] =
     hex!("000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e5831");
 
+fn compute_budget_ix() -> Instruction {
+    solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_limit(
+        SOURCE_CU_BUDGET,
+    )
+}
+
 /// The delegate signer the real `fill_relay` moves relayer funds through:
 /// `["delegate", keccak256(borsh(relay_hash ‖ repayment_chain_id ‖
 /// repayment_address))]` under the spoke program. The relayer must approve it

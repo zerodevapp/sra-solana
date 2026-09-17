@@ -55,6 +55,7 @@ solana-signer = "3.0.0"
 solana-system-interface = { version = "3.2.0", features = ["bincode"] }
 solana-transaction = { version = "4.1.5", features = ["wincode"] }
 solana-transaction-error = "3.3.1"
+wincode = "0.5.0"
 bs58 = "0.5"
 five8_core = { version = "0.1.2", features = ["std"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
