@@ -50,7 +50,7 @@ sra-solana/
 ├── Anchor.toml              # Anchor workspace + localnet program IDs
 ├── Cargo.toml               # Rust workspace (programs/* + crates/*)
 ├── package.json             # TS toolchain (anchor, mocha, prettier)
-├── rust-toolchain.toml      # Pinned to Rust 1.89.0
+├── rust-toolchain.toml      # Pinned to Rust 1.93.1
 ├── crates/
 │   └── sra-common/          # Shared types, seeds, ABI encoder, constants
 ├── programs/
@@ -68,11 +68,12 @@ sra-solana/
 
 ## Prerequisites
 
-- **Rust** 1.89.0 (pinned via `rust-toolchain.toml`)
-- **Solana CLI** ≥ 2.3 (matches the `solana-program`/`solana-sdk` versions in `Cargo.toml`)
-- **Anchor** 0.32.1 (`avm install 0.32.1 && avm use 0.32.1`)
+- **Rust** 1.93.1 (pinned via `rust-toolchain.toml`)
+- **Solana CLI** 3.1.11
+- **Anchor** 1.2.0 (`avm install 1.2.0 && avm use 1.2.0`)
 - **Yarn** (the Anchor toolchain is configured for yarn, not npm)
-- **Node.js** ≥ 18 for the TS test harness
+- **Node.js** 20.18 or newer for the TS test harness
+- **LiteSVM** 0.16.0 (pinned as a Rust development dependency; no separate binary required)
 
 Optional but useful:
 
@@ -88,14 +89,14 @@ yarn install
 # Verify your toolchain
 solana --version
 anchor --version
-rustc --version   # should report 1.89.0
+rustc --version   # should report 1.93.1
 ```
 
 ## Build
 
 ```bash
 # Build all programs + generate IDL
-anchor build
+NO_DNA=1 anchor build --ignore-keys
 
 # Or just build the Rust workspace (no IDL generation)
 cargo build
@@ -129,20 +130,21 @@ These exercise instruction handlers against an in-process LiteSVM runtime. No va
 
 ```bash
 # After `anchor build`, run the same generated-client gate as CI
-anchor test --skip-build
+NO_DNA=1 anchor test --skip-build --validator legacy
 ```
 
 The current TS suite (`tests/sra-handler.ts`) is a smoke test that asserts the generated IDL/client surface — most coverage lives in the Rust LiteSVM tests.
 
-**3. Surfpool source E2E** (real Across path, heavier)
+**3. Surfpool E2E** (real Across paths, heavier)
 
 ```bash
-NO_DNA=1 anchor build
+NO_DNA=1 anchor build --ignore-keys
 NO_DNA=1 surfpool start --ci --network mainnet --legacy-anchor-compatibility
-cargo test -p sra-handler --test source_e2e_surfpool -- --ignored --nocapture
+NO_DNA=1 cargo test -p sra-handler --test source_e2e_surfpool -- --ignored --nocapture
+NO_DNA=1 cargo test -p sra-handler --test dest_e2e_surfpool -- --ignored --nocapture
 ```
 
-This uses Surfpool's auto-deploy path to load the local `sra-handler` and `sra-across-adapter` programs at their declared Anchor IDs, then runs the source deposit flow against the real Across `svm-spoke` program/state.
+These suites load the local `sra-handler` and adapter programs at their declared Anchor IDs, then exercise the existing ALT-backed v0 source transaction and destination fill flow against the real Across `svm-spoke` program/state.
 
 ## Running on localnet
 

@@ -299,7 +299,7 @@ Flagged proactively so they are not mistaken for findings. Some are deliberate S
 
 ## 13. Building, testing, reproducing
 
-Toolchain: Rust 1.89.0 (pinned), Solana CLI ≥ 2.3, Anchor 0.32.1, Yarn, Node ≥ 18.
+Toolchain: Rust 1.93.1 (pinned), Anchor 1.2.0, Solana CLI 3.1.11, Node.js 20.18+, Yarn, LiteSVM 0.16.0.
 
 ```bash
 yarn install
@@ -323,15 +323,16 @@ cargo test -p sra-handler --test passive_cctp
 cargo test -p sra-handler --test passive_across
 
 # 2. Anchor + mocha smoke test (asserts the generated client surface).
-anchor test --skip-build
+NO_DNA=1 anchor test --skip-build --validator legacy
 
 # 3. Surfpool E2E against the real Across svm-spoke (heavier).
-NO_DNA=1 anchor build
+NO_DNA=1 anchor build --ignore-keys
 NO_DNA=1 surfpool start --ci --network mainnet --legacy-anchor-compatibility
-cargo test -p sra-handler --test source_e2e_surfpool -- --ignored --nocapture
+NO_DNA=1 cargo test -p sra-handler --test source_e2e_surfpool -- --ignored --nocapture
+NO_DNA=1 cargo test -p sra-handler --test dest_e2e_surfpool -- --ignored --nocapture
 ```
 
-The Rust LiteSVM tests are the source of truth for behaviour; the TS suite is a thin client-surface smoke test. A Foundry golden-vector suite cross-validates the ABI encoding against the EVM implementation.
+The Rust LiteSVM tests are the source of truth for behaviour; the TS suite is a thin client-surface smoke test. The Surfpool suites cover the existing ALT-backed v0 source transaction and destination fill path; transaction-v1 coverage is not part of this baseline. A Foundry golden-vector suite cross-validates the ABI encoding against the EVM implementation.
 
 ---
 
