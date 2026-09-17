@@ -127,7 +127,7 @@ jobs:
           solana-keygen new --no-bip39-passphrase --force --silent --outfile ~/.config/solana/id.json
 
       - name: anchor build
-        run: NO_DNA=1 anchor build --ignore-keys
+        run: NO_DNA=1 anchor build --ignore-keys --arch v0
 
       - name: cargo test --workspace
         run: cargo test --workspace
