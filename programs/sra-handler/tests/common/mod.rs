@@ -23,11 +23,9 @@ use litesvm_token::{
     spl_token::state::Account as SplTokenAccount, CreateAssociatedTokenAccount, CreateMint, MintTo,
 };
 use solana_clock::Clock;
-use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_instruction_error::InstructionError;
 use solana_keypair::Keypair;
-use solana_message::{v0, AddressLookupTableAccount, VersionedMessage};
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_system_interface::program as system_program;
@@ -261,32 +259,6 @@ pub fn sample_prepare_params(target_token: [u8; 32]) -> PrepareParams {
         false,
         sra_common::constants::NO_FEE_BPS_OVERRIDE,
     )
-}
-
-/// SYNTHETIC in-memory lookup table for LiteSVM tx-size/CU shaping — its key
-/// is random and the table never exists on-chain, so it cannot be sent to a
-/// live cluster. For a real, on-chain table (the Surfpool E2E suites) collect
-/// the addresses with [`surfpool::representative_lookup_addresses`] and create
-/// the table via [`surfpool::prepare_lookup_table`].
-pub fn representative_lookup_table(ixs: &[Instruction]) -> AddressLookupTableAccount {
-    AddressLookupTableAccount {
-        key: Pubkey::new_unique(),
-        addresses: surfpool::representative_lookup_addresses(ixs),
-    }
-}
-
-pub fn compile_v0(
-    payer: &Keypair,
-    additional_signers: &[&Keypair],
-    ixs: &[Instruction],
-    lookup_tables: &[AddressLookupTableAccount],
-) -> VersionedTransaction {
-    let message = v0::Message::try_compile(&payer.pubkey(), ixs, lookup_tables, Hash::default())
-        .expect("compile v0 message");
-    let mut signers = vec![payer];
-    signers.extend_from_slice(additional_signers);
-    VersionedTransaction::try_new(VersionedMessage::V0(message), &signers)
-        .expect("sign versioned tx")
 }
 
 pub fn derive_sra_pda(
