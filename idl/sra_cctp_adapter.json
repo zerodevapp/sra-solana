@@ -268,10 +268,12 @@
           "signer": true
         },
         {
-          "name": "message_transmitter_program"
+          "name": "message_transmitter_program",
+          "address": "CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC"
         },
         {
-          "name": "cctp_program"
+          "name": "cctp_program",
+          "address": "CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe"
         },
         {
           "name": "cctp_event_authority",
@@ -843,32 +845,6 @@
     }
   ],
   "accounts": [
-    {
-      "name": "SolanaSraRoute",
-      "discriminator": [
-        134,
-        92,
-        176,
-        20,
-        31,
-        152,
-        16,
-        120
-      ]
-    },
-    {
-      "name": "SraConfig",
-      "discriminator": [
-        218,
-        163,
-        165,
-        102,
-        168,
-        101,
-        23,
-        222
-      ]
-    },
     {
       "name": "VerifiedFill",
       "discriminator": [

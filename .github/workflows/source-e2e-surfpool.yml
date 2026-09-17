@@ -23,9 +23,9 @@ concurrency:
 
 env:
   SOLANA_VERSION: "3.1.11"
-  ANCHOR_VERSION: "0.32.1"
+  ANCHOR_VERSION: "1.2.0"
   SURFPOOL_VERSION: "v1.2.0"
-  NODE_VERSION: "20"
+  NODE_VERSION: "20.18.0"
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -86,7 +86,7 @@ jobs:
       - name: Install avm + Anchor
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
         run: |
-          cargo install --git https://github.com/coral-xyz/anchor --tag v${ANCHOR_VERSION} avm --force
+          cargo install --git https://github.com/otter-sec/anchor --tag v${ANCHOR_VERSION} avm --force
           avm install ${ANCHOR_VERSION}
           avm use ${ANCHOR_VERSION}
 
@@ -108,7 +108,7 @@ jobs:
           rustc --version
 
       - name: Build local programs
-        run: NO_DNA=1 anchor build
+        run: NO_DNA=1 anchor build --ignore-keys
 
       - name: Start Surfpool
         run: |
