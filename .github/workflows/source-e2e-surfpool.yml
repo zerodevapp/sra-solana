@@ -108,7 +108,7 @@ jobs:
           rustc --version
 
       - name: Build local programs
-        run: NO_DNA=1 anchor build --ignore-keys
+        run: NO_DNA=1 anchor build --ignore-keys --arch v0
 
       - name: Start Surfpool
         run: |
