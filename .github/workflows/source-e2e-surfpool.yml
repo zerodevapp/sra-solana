@@ -87,7 +87,7 @@ jobs:
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
         run: |
           cargo install --git https://github.com/otter-sec/anchor --tag v${ANCHOR_VERSION} avm --force
-          avm install ${ANCHOR_VERSION}
+          avm install ${ANCHOR_VERSION} --from-source
           avm use ${ANCHOR_VERSION}
 
       - name: Generate local keypair
