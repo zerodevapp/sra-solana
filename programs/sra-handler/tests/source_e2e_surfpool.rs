@@ -45,6 +45,12 @@ const TARGET_TOKEN_DECIMALS: u8 = 6;
 const FILL_DEADLINE_OFFSET_SECS: u32 = 3_600;
 const EXCLUSIVITY_PERIOD_SECS: u32 = 900;
 
+fn compute_budget_ix() -> Instruction {
+    solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_limit(
+        SOURCE_CU_BUDGET,
+    )
+}
+
 fn default_prepare_params_rpc(fx: &SurfpoolSourceFixture) -> PrepareParams {
     let mut params = sample_prepare_params(fx.source.target_token);
     params.input_amount = INPUT_AMOUNT;

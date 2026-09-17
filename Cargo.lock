@@ -6063,6 +6063,7 @@ dependencies = [
  "sra-across-adapter",
  "sra-cctp-adapter",
  "sra-common",
+ "wincode",
 ]
 
 [[package]]

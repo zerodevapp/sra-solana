@@ -13,6 +13,12 @@ use sra_common::{constants::MAX_ADAPTERS, source_deposit::AcrossDepositParams};
 
 const PROTOCOL_FEE: u64 = 3_000;
 
+fn compute_budget_ix() -> Instruction {
+    solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_limit(
+        SOURCE_CU_BUDGET,
+    )
+}
+
 fn assert_packet_budget(
     label: &str,
     payer: &Keypair,
