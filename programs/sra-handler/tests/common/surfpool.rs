@@ -4,9 +4,10 @@
 //! target the SAME Surfpool instance at `SURFPOOL_RPC_URL` — a mainnet fork
 //! carrying the real Across SVM Spoke Pool, the real CCTP v2 programs, and
 //! real USDC. Everything here is transport plumbing: readiness/deploy
-//! polling, transaction submission, address-lookup-table lifecycle, Surfpool
-//! cheat-code RPC, log retrieval, and the CCTP fork setup (attester takeover
-//! + the keeper-reference `receive_message` builder).
+//! polling, native-v1 transaction submission with inline addresses and
+//! TransactionConfig resource limits, Surfpool cheat-code RPC, log retrieval,
+//! and the CCTP fork setup (attester takeover + the keeper-reference
+//! `receive_message` builder).
 //!
 //! Serialization: the suites live in separate test binaries, i.e. separate
 //! processes, so an in-process mutex cannot serialize them. [`surfpool_lock`]
@@ -18,21 +19,17 @@ use anchor_lang::{AccountDeserialize, AccountSerialize, AnchorSerialize};
 use fslock::LockFile;
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
-use solana_address_lookup_table_interface::{
-    instruction::{create_lookup_table, extend_lookup_table},
-    state::AddressLookupTable,
-};
-use solana_clock::{Clock, Slot};
+use solana_clock::Clock;
 use solana_commitment_config::CommitmentConfig;
+use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
-use solana_message::{v0, AddressLookupTableAccount, VersionedMessage};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_system_interface::program as system_program;
-use solana_transaction::{versioned::VersionedTransaction, Transaction};
+use solana_transaction::versioned::VersionedTransaction;
 use sra_cctp_adapter::utils::cctp_state::{
     deserialize_message_transmitter, MESSAGE_TRANSMITTER_DISCRIMINATOR,
 };
@@ -44,6 +41,7 @@ use sra_common::{
 use std::{env, error::Error, path::PathBuf, thread::sleep, time::Duration};
 
 use super::cctp::{derive_transmitter_state_pda, derive_used_nonce_pda};
+use super::v1::{build_v1_transaction, DEFAULT_V1_CONFIG};
 use super::{
     derive_ata, derive_fee_config_pda, initialize_fee_config_ix, set_fee_recipient_ix,
     set_protocol_fee_ix,
@@ -166,157 +164,29 @@ pub fn request_and_confirm_airdrop(
     Err(format!("airdrop for {label} ({key}) did not confirm: {signature}").into())
 }
 
-pub fn send_legacy_transaction(
-    rpc: &RpcClient,
-    label: &str,
+pub fn build_surfpool_v1_transaction(
     payer: &Keypair,
     signers: &[&Keypair],
-    ixs: &[Instruction],
-) -> TestResult<Signature> {
-    let blockhash = rpc.get_latest_blockhash()?;
-    let mut all_signers = vec![payer];
-    all_signers.extend_from_slice(signers);
-    let tx =
-        Transaction::new_signed_with_payer(ixs, Some(&payer.pubkey()), &all_signers, blockhash);
-    surfpool_log(format!(
-        "send_legacy_transaction[{label}]: sending {} instruction(s)",
-        ixs.len()
-    ));
-    let signature = rpc.send_and_confirm_transaction(&tx)?;
-    surfpool_log(format!(
-        "send_legacy_transaction[{label}]: confirmed signature {signature}"
-    ));
-    Ok(signature)
-}
-
-pub fn build_versioned_transaction(
-    rpc: &RpcClient,
-    label: &str,
-    payer: &Keypair,
-    signers: &[&Keypair],
-    ixs: &[Instruction],
-    lookup_tables: &[AddressLookupTableAccount],
+    instructions: &[Instruction],
+    blockhash: Hash,
 ) -> TestResult<VersionedTransaction> {
-    let blockhash = rpc.get_latest_blockhash()?;
-    let message = v0::Message::try_compile(&payer.pubkey(), ixs, lookup_tables, blockhash)?;
-    // A caller passing lookup tables is claiming an ALT-resolved shape; if the
-    // compiled message drew nothing from them, the test would silently stop
-    // exercising lookup-table account resolution — fail instead.
-    if !lookup_tables.is_empty() && message.address_table_lookups.is_empty() {
-        return Err(format!(
-            "build_versioned_transaction[{label}]: no address was resolved through the provided lookup table(s)"
-        )
-        .into());
-    }
-    let mut all_signers = vec![payer];
-    all_signers.extend_from_slice(signers);
-    Ok(VersionedTransaction::try_new(
-        VersionedMessage::V0(message),
-        &all_signers,
-    )?)
+    build_v1_transaction(payer, signers, instructions, blockhash, DEFAULT_V1_CONFIG)
 }
 
-pub fn send_versioned_transaction(
+pub fn send_v1_transaction(
     rpc: &RpcClient,
     label: &str,
-    tx: &VersionedTransaction,
+    payer: &Keypair,
+    signers: &[&Keypair],
+    instructions: &[Instruction],
 ) -> TestResult<Signature> {
+    let transaction =
+        build_surfpool_v1_transaction(payer, signers, instructions, rpc.get_latest_blockhash()?)?;
+    let signature = rpc.send_and_confirm_transaction(&transaction)?;
     surfpool_log(format!(
-        "send_versioned_transaction[{label}]: sending {} instruction(s)",
-        tx.message.instructions().len()
-    ));
-    let signature = rpc.send_and_confirm_transaction(tx)?;
-    surfpool_log(format!(
-        "send_versioned_transaction[{label}]: confirmed signature {signature}"
+        "send_v1_transaction[{label}]: confirmed signature {signature}"
     ));
     Ok(signature)
-}
-
-/// Every distinct non-signer account across `ixs` — the address set a real
-/// deployment would place in a lookup table for this transaction shape.
-pub fn representative_lookup_addresses(ixs: &[Instruction]) -> Vec<Pubkey> {
-    let mut addresses = Vec::new();
-
-    for ix in ixs {
-        for meta in &ix.accounts {
-            if meta.is_signer || addresses.contains(&meta.pubkey) {
-                continue;
-            }
-            addresses.push(meta.pubkey);
-        }
-    }
-
-    addresses
-}
-
-pub fn lookup_table_is_active(current_slot: Slot, last_extended_slot: Slot) -> bool {
-    current_slot > last_extended_slot
-}
-
-pub fn lookup_table_account_from_rpc(
-    rpc: &RpcClient,
-    lookup_table_address: &Pubkey,
-) -> TestResult<(AddressLookupTableAccount, Slot)> {
-    let account = rpc.get_account(lookup_table_address)?;
-    let table = AddressLookupTable::deserialize(account.data.as_slice())
-        .map_err(|err| format!("failed to deserialize ALT: {err:?}"))?;
-    Ok((
-        AddressLookupTableAccount {
-            key: *lookup_table_address,
-            addresses: table.addresses.into_owned(),
-        },
-        table.meta.last_extended_slot,
-    ))
-}
-
-/// Create + extend a real address lookup table holding `addresses`, then poll
-/// until Solana activates it (newly extended addresses are usable only in a
-/// slot AFTER `last_extended_slot`). Returns the active table, ready for
-/// `send_versioned_transaction`.
-pub fn prepare_lookup_table(
-    rpc: &RpcClient,
-    payer: &Keypair,
-    addresses: Vec<Pubkey>,
-) -> TestResult<AddressLookupTableAccount> {
-    let recent_slot: Slot = rpc.get_slot()?;
-    let (create_lookup_table_ix, lookup_table_address) =
-        create_lookup_table(payer.pubkey(), payer.pubkey(), recent_slot);
-    surfpool_log(format!(
-        "prepare_lookup_table: creating lookup table {} at recent slot {} with {} address(es)",
-        lookup_table_address,
-        recent_slot,
-        addresses.len()
-    ));
-    let extend_lookup_table_ix = extend_lookup_table(
-        lookup_table_address,
-        payer.pubkey(),
-        Some(payer.pubkey()),
-        addresses,
-    );
-    send_legacy_transaction(
-        rpc,
-        "create_and_extend_lookup_table",
-        payer,
-        &[],
-        &[create_lookup_table_ix, extend_lookup_table_ix],
-    )?;
-
-    for attempt in 1..=SURFPOOL_RETRY_COUNT {
-        let current_slot = rpc.get_slot()?;
-        let (candidate_lookup_table, last_extended_slot) =
-            lookup_table_account_from_rpc(rpc, &lookup_table_address)?;
-        surfpool_log(format!(
-            "prepare_lookup_table: ALT activation attempt {attempt}/{SURFPOOL_RETRY_COUNT} current_slot={current_slot} last_extended_slot={last_extended_slot}"
-        ));
-        if lookup_table_is_active(current_slot, last_extended_slot) {
-            surfpool_log(format!(
-                "prepare_lookup_table: ALT {lookup_table_address} active on attempt {attempt}/{SURFPOOL_RETRY_COUNT}"
-            ));
-            return Ok(candidate_lookup_table);
-        }
-        sleep(Duration::from_millis(200));
-    }
-    Err("lookup table did not become active".into())
 }
 
 /// Call a Surfpool cheat-code / extension RPC method (e.g.
@@ -368,7 +238,7 @@ pub fn configure_protocol_fee(
         config.try_serialize(&mut data)?;
         surfpool_set_account_data(http, &fee_config, &data)?;
     } else {
-        send_legacy_transaction(
+        send_v1_transaction(
             rpc,
             "initialize_fee_config",
             payer,
@@ -385,7 +255,7 @@ pub fn configure_protocol_fee(
     } else {
         Pubkey::new_unique()
     };
-    send_legacy_transaction(
+    send_v1_transaction(
         rpc,
         "configure_protocol_fee",
         payer,

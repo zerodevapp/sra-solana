@@ -45,26 +45,10 @@ const TARGET_TOKEN_DECIMALS: u8 = 6;
 const FILL_DEADLINE_OFFSET_SECS: u32 = 3_600;
 const EXCLUSIVITY_PERIOD_SECS: u32 = 900;
 
-fn compute_budget_ix() -> Instruction {
-    solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_limit(
-        SOURCE_CU_BUDGET,
-    )
-}
-
 fn default_prepare_params_rpc(fx: &SurfpoolSourceFixture) -> PrepareParams {
     let mut params = sample_prepare_params(fx.source.target_token);
     params.input_amount = INPUT_AMOUNT;
     params
-}
-
-// Pins the SHARED `common::surfpool::lookup_table_is_active` helper. It lives
-// here (not in `common/`) because a `#[test]` in `common/` would re-run in
-// every test binary that includes the module.
-#[test]
-fn lookup_table_activation_waits_for_last_extended_slot() {
-    assert!(!lookup_table_is_active(10, 10));
-    assert!(!lookup_table_is_active(10, 11));
-    assert!(lookup_table_is_active(12, 11));
 }
 
 struct SurfpoolSourceFixture {
@@ -122,7 +106,7 @@ impl SurfpoolSourceFixture {
             &owner.pubkey(),
             &address_book_root_pubkey,
         );
-        send_legacy_transaction(
+        send_v1_transaction(
             &rpc,
             "initialize_address_book_root",
             &payer,
@@ -146,7 +130,7 @@ impl SurfpoolSourceFixture {
             initiator.pubkey(),
             USDC_MINT,
         );
-        send_legacy_transaction(&rpc, "initialize_sra", &payer, &[&owner], &[initialize_ix])?;
+        send_v1_transaction(&rpc, "initialize_sra", &payer, &[&owner], &[initialize_ix])?;
         surfpool_log(format!("bootstrap: initialized SRA config {}", sra_config));
 
         let source = PassiveFixture::from_existing_accounts(
@@ -172,7 +156,7 @@ impl SurfpoolSourceFixture {
             target_token,
             TARGET_TOKEN_DECIMALS,
         );
-        send_legacy_transaction(
+        send_v1_transaction(
             &rpc,
             "set_address_book_entry",
             &payer,
@@ -224,19 +208,13 @@ impl SurfpoolSourceFixture {
             params.output_amount,
             self.current_nonce()?
         ));
-        let lookup_addresses =
-            representative_lookup_addresses(&[trigger.clone(), execute_ix.clone()]);
-        let lookup_table = prepare_lookup_table(&self.rpc, &self.source.payer, lookup_addresses)?;
-
         let mut signers = vec![&self.source.initiator];
         signers.extend_from_slice(extra_signers);
-        let tx = build_versioned_transaction(
-            &self.rpc,
-            "source_flow",
+        let tx = build_surfpool_v1_transaction(
             &self.source.payer,
             &signers,
-            &[compute_budget_ix(), trigger, execute_ix],
-            &[lookup_table],
+            &[trigger.clone(), execute_ix.clone()],
+            self.rpc.get_latest_blockhash()?,
         )?;
         let mut actual_signers = signer_keys(&tx).to_vec();
         let mut expected_signers = vec![self.source.payer.pubkey(), self.source.initiator.pubkey()];
@@ -245,7 +223,13 @@ impl SurfpoolSourceFixture {
         actual_signers.sort_unstable();
         expected_signers.sort_unstable();
         assert_eq!(actual_signers, expected_signers);
-        let signature = send_versioned_transaction(&self.rpc, "source_flow", &tx)?;
+        let signature = send_v1_transaction(
+            &self.rpc,
+            "source_flow",
+            &self.source.payer,
+            &signers,
+            &[trigger, execute_ix],
+        )?;
 
         let logs = logs_for_signature(&self.http, &signature)?;
         surfpool_log(format!(

@@ -11,7 +11,8 @@
 //! evidence accounts the adapters verify:
 //!
 //!   fill_relay / receive_message   (real program escrows into the route vault)
-//!     → verify_*_ + finalize_fill  (one v0 tx, real ALT, 400k CU)
+//!     → verify_*_ + finalize_fill  (one native-v1 tx, inline addresses,
+//!                                   TransactionConfig resource limits)
 //!     → execute_actions            (happy path: committed 60/40 SplTransfer split)
 //!     → recover_funds              (recovery path: owner drains execution vault)
 //!     → settle again               (replay: rejected per evidence layer while
@@ -232,7 +233,7 @@ fn dest_e2e_real_across_replay_rejected() {
     // makes the second finalize's `init` fail — funds cannot be drawn twice
     // for one fill.
     let (verified_fill, _) = derive_verified_fill_pda(&fill_id);
-    let replay = send_legacy_transaction(
+    let replay = send_v1_transaction(
         &fx.rpc,
         "finalize_fill_replay",
         &fx.payer,
@@ -515,7 +516,7 @@ fn dest_e2e_real_cctp_replay_rejected() {
     // Replay the verify leg: the evidence account is `init` — the existing
     // VerifiedFill for this nonce makes the second verification collide.
     let (verified_fill, _) = derive_cctp_verified_fill_pda(&msg.nonce);
-    let verify_replay = send_legacy_transaction(
+    let verify_replay = send_v1_transaction(
         &fx.rpc,
         "verify_cctp_mint_replay",
         &fx.payer,
@@ -542,7 +543,7 @@ fn dest_e2e_real_cctp_replay_rejected() {
     // but the persistent FillReceipt at ["fill_receipt", route, fill_id]
     // makes the second finalize's `init` fail — funds cannot be drawn twice
     // for one mint.
-    let replay = send_legacy_transaction(
+    let replay = send_v1_transaction(
         &fx.rpc,
         "finalize_fill_replay",
         &fx.payer,
