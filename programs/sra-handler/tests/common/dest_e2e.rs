@@ -69,12 +69,6 @@ pub const CCTP_MAX_FEE: u64 = 5_000;
 pub const ARBITRUM_USDC: [u8; 32] =
     hex!("000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e5831");
 
-fn compute_budget_ix() -> Instruction {
-    solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_limit(
-        SOURCE_CU_BUDGET,
-    )
-}
-
 /// The delegate signer the real `fill_relay` moves relayer funds through:
 /// `["delegate", keccak256(borsh(relay_hash ‖ repayment_chain_id ‖
 /// repayment_address))]` under the spoke program. The relayer must approve it
@@ -177,7 +171,7 @@ impl SurfpoolDestFixture {
             params,
             &[adapter_program],
         );
-        send_legacy_transaction(&rpc, "create_route", &payer, &[&owner], &[create_route])?;
+        send_v1_transaction(&rpc, "create_route", &payer, &[&owner], &[create_route])?;
         surfpool_log(format!("bootstrap: created route {route}"));
 
         let (execution_authority, _) = derive_execution_authority_pda(&route);
@@ -208,7 +202,7 @@ impl SurfpoolDestFixture {
             )
         })
         .collect();
-        send_legacy_transaction(&rpc, "create_atas", &payer, &[], &create_atas)?;
+        send_v1_transaction(&rpc, "create_atas", &payer, &[], &create_atas)?;
         surfpool_log("bootstrap: ensured relayer/owner/recipient/fee-recipient ATAs");
 
         surfpool_rpc(
@@ -334,7 +328,7 @@ impl SurfpoolDestFixture {
             .data(),
         };
 
-        let signature = send_legacy_transaction(
+        let signature = send_v1_transaction(
             &self.rpc,
             "fill_relay",
             &self.relayer,
@@ -357,19 +351,13 @@ impl SurfpoolDestFixture {
         verify_ix: Instruction,
         finalize_ix: Instruction,
     ) -> TestResult<()> {
-        let lookup_addresses =
-            representative_lookup_addresses(&[verify_ix.clone(), finalize_ix.clone()]);
-        let lookup_table = prepare_lookup_table(&self.rpc, &self.payer, lookup_addresses)?;
-
-        let tx = build_versioned_transaction(
+        send_v1_transaction(
             &self.rpc,
             "verify_and_finalize",
             &self.payer,
             &[],
-            &[compute_budget_ix(), verify_ix, finalize_ix],
-            &[lookup_table],
+            &[verify_ix, finalize_ix],
         )?;
-        send_versioned_transaction(&self.rpc, "verify_and_finalize", &tx)?;
         Ok(())
     }
 
@@ -441,8 +429,7 @@ impl SurfpoolDestFixture {
             ARBITRUM_USDC,
             &self.route_vault,
         );
-        let signature =
-            send_legacy_transaction(&self.rpc, "receive_message", &self.payer, &[], &[ix])?;
+        let signature = send_v1_transaction(&self.rpc, "receive_message", &self.payer, &[], &[ix])?;
         logs_for_signature(&self.http, &signature)
     }
 
@@ -484,7 +471,7 @@ impl SurfpoolDestFixture {
             &[],
             ROUTE_VAULT_DUST,
         )?;
-        send_legacy_transaction(
+        send_v1_transaction(
             &self.rpc,
             "seed_route_vault_dust",
             &self.relayer,
@@ -504,17 +491,13 @@ impl SurfpoolDestFixture {
             &USDC_MINT,
             &[self.recipient_a_ata, self.recipient_b_ata],
         );
-        let lookup_addresses = representative_lookup_addresses(std::slice::from_ref(&execute_ix));
-        let lookup_table = prepare_lookup_table(&self.rpc, &self.payer, lookup_addresses)?;
-        let tx = build_versioned_transaction(
+        send_v1_transaction(
             &self.rpc,
             "execute_actions",
             &self.payer,
             &[],
-            &[compute_budget_ix(), execute_ix],
-            &[lookup_table],
+            &[execute_ix],
         )?;
-        send_versioned_transaction(&self.rpc, "execute_actions", &tx)?;
         Ok(())
     }
 
@@ -526,7 +509,7 @@ impl SurfpoolDestFixture {
             &USDC_MINT,
             &self.owner_ata,
         );
-        send_legacy_transaction(
+        send_v1_transaction(
             &self.rpc,
             "recover_funds",
             &self.payer,

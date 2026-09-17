@@ -6040,7 +6040,6 @@ dependencies = [
  "serde_json",
  "solana-account 4.3.2",
  "solana-address 2.6.1",
- "solana-address-lookup-table-interface",
  "solana-clock",
  "solana-commitment-config",
  "solana-compute-budget-interface",

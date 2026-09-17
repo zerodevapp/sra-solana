@@ -1,5 +1,6 @@
 mod common;
 
+use common::surfpool::build_surfpool_v1_transaction;
 use common::v1::*;
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
@@ -82,4 +83,13 @@ fn accepts_the_payer_in_the_additional_signer_set() {
             .expect("deduplicate payer");
 
     assert_eq!(transaction.signatures.len(), 1);
+}
+
+#[test]
+fn builds_surfpool_transactions_as_v1() {
+    let payer = Keypair::new();
+    let transaction = build_surfpool_v1_transaction(&payer, &[], &[], Hash::default())
+        .expect("build Surfpool v1 transaction");
+
+    assert!(matches!(transaction.message, VersionedMessage::V1(_)));
 }
