@@ -18,9 +18,7 @@ fn passive_cctp_happy_path() {
     let fx = PassiveFixture::new(&mut svm);
     set_source_balance(&mut svm, &fx, 2_000_000);
     let fee_ata = enable_protocol_fee(&mut svm, &fx, 30, false, false);
-    let mut params = sample_prepare_params(fx.target_token);
-    params.protocol_fee_amount = 3_000;
-    params.output_amount = u256_from_u64(995_000);
+    let params = fee_params(&fx, 3_000);
     let (execute_ix, event_data) = execute_deposit_cctp_ix(
         &fx.payer.pubkey(),
         &fx,
@@ -45,12 +43,7 @@ fn passive_cctp_happy_path() {
         &[&fx.payer, &fx.initiator, &event_data],
     )
     .unwrap();
-    let owner_index = tx
-        .message
-        .static_account_keys()
-        .iter()
-        .position(|key| key == &fx.owner.pubkey());
-    assert!(owner_index.is_none_or(|index| !tx.message.is_signer(index)));
+    assert!(!signer_keys(&tx).contains(&fx.owner.pubkey()));
     assert_eq!(tx.signatures.len(), 3);
     let fee_before = fetch_token_balance(&svm, &fee_ata);
     let metadata = svm.send_transaction(tx).unwrap();
@@ -70,7 +63,7 @@ fn passive_cctp_happy_path() {
     assert_eq!(triggered.nonce, 0);
     assert_eq!(triggered.input_amount, 1_000_000);
     assert_eq!(triggered.protocol_fee_amount, 3_000);
-    assert_eq!(triggered.output_amount, u256_from_u64(995_000));
+    assert_eq!(triggered.output_amount, u256_from_u64(FEE_TEST_OUTPUT));
     assert_eq!(triggered.target_chain_id, params.target_chain_id);
     assert_eq!(triggered.recipient, params.recipient);
     assert_eq!(triggered.target_token, params.target_token);

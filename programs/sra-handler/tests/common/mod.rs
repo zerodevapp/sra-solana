@@ -23,12 +23,13 @@ use litesvm_token::{
 use solana_sdk::{
     clock::Clock,
     compute_budget::ComputeBudgetInstruction,
+    hash::Hash,
     instruction::{AccountMeta, Instruction, InstructionError},
-    message::{AddressLookupTableAccount, Message},
+    message::{v0, AddressLookupTableAccount, Message, VersionedMessage},
     pubkey::Pubkey,
     signature::Keypair,
     signer::Signer,
-    transaction::{Transaction, TransactionError},
+    transaction::{Transaction, TransactionError, VersionedTransaction},
 };
 use solana_system_interface::program as system_program;
 use sra_across_adapter::utils::svm_spoke::types::RelayData;
@@ -271,6 +272,20 @@ pub fn representative_lookup_table(ixs: &[Instruction]) -> AddressLookupTableAcc
         key: Pubkey::new_unique(),
         addresses: surfpool::representative_lookup_addresses(ixs),
     }
+}
+
+pub fn compile_v0(
+    payer: &Keypair,
+    additional_signers: &[&Keypair],
+    ixs: &[Instruction],
+    lookup_tables: &[AddressLookupTableAccount],
+) -> VersionedTransaction {
+    let message = v0::Message::try_compile(&payer.pubkey(), ixs, lookup_tables, Hash::default())
+        .expect("compile v0 message");
+    let mut signers = vec![payer];
+    signers.extend_from_slice(additional_signers);
+    VersionedTransaction::try_new(VersionedMessage::V0(message), &signers)
+        .expect("sign versioned tx")
 }
 
 pub fn derive_sra_pda(

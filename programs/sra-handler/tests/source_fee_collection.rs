@@ -18,27 +18,15 @@ use solana_sdk::{
 use sra_common::abi::u256_from_u64;
 use sra_common::constants::NO_FEE_BPS_OVERRIDE;
 use sra_common::errors::SraError;
-use sra_common::source_deposit::PrepareParams;
 
 const INPUT: u64 = 1_000_000;
 const DEFAULT_FEE_BPS: u16 = 30;
 const DEFAULT_FEE: u64 = 3_000; // 1_000_000 * 30 / 10_000
-/// Exactly the 50 bps gross slippage floor, and at or under the net for every
-/// fee level exercised here — a fee-bearing quote must also satisfy the CCTP
-/// adapter's `output ≤ net − max_fee` invariant (max_fee = 0 in the fixture).
-const FEE_TEST_OUTPUT: u64 = 995_000;
 
 /// Anchor framework error codes pinned by the substitution suites.
 const ANCHOR_CONSTRAINT_SEEDS: u32 = ErrorCode::ConstraintSeeds as u32;
 const ANCHOR_CONSTRAINT_TOKEN_OWNER: u32 = ErrorCode::ConstraintTokenOwner as u32;
 const ANCHOR_ACCOUNT_NOT_INITIALIZED: u32 = ErrorCode::AccountNotInitialized as u32;
-
-fn fee_params(fx: &PassiveFixture, protocol_fee_amount: u64) -> PrepareParams {
-    let mut params = sample_prepare_params(fx.target_token);
-    params.protocol_fee_amount = protocol_fee_amount;
-    params.output_amount = u256_from_u64(FEE_TEST_OUTPUT);
-    params
-}
 
 fn expect_custom_error(
     result: Result<

@@ -35,14 +35,11 @@ mod common;
 
 use common::*;
 use solana_sdk::{
-    hash::Hash,
     instruction::{AccountMeta, Instruction},
-    message::{v0, AddressLookupTableAccount, VersionedMessage},
     packet::PACKET_DATA_SIZE,
     pubkey::Pubkey,
     signature::Keypair,
     signer::Signer,
-    transaction::VersionedTransaction,
 };
 use sra_common::{
     constants::{MAX_ACTION_IDXS, MAX_TEMPLATE_SLOTS},
@@ -88,22 +85,6 @@ fn dest() -> Dest {
         route_config_hash,
         mint,
     }
-}
-
-/// Compile `ixs` into a v0 transaction (optionally with lookup tables) and sign it
-/// with `payer` — the sole signer across every destination shape.
-fn compile_v0(
-    payer: &Keypair,
-    ixs: &[Instruction],
-    lookup_tables: &[AddressLookupTableAccount],
-) -> VersionedTransaction {
-    let msg = v0::Message::try_compile(&payer.pubkey(), ixs, lookup_tables, Hash::default())
-        .expect("compile v0 message");
-    VersionedTransaction::try_new(VersionedMessage::V0(msg), &[payer]).expect("sign versioned tx")
-}
-
-fn serialized_len(tx: &VersionedTransaction) -> usize {
-    bincode::serialize(tx).expect("bincode serialize tx").len()
 }
 
 // --- Shape builders ------------------------------------------------------------
@@ -215,11 +196,11 @@ fn dest_verify_finalize_2ix_fits_within_packet_limit_with_alt() {
     let d = dest();
     let ixs = verify_finalize_ixs(&d);
     let alt = representative_lookup_table(&ixs);
-    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt]));
+    let size = bincode::serialized_size(&compile_v0(&d.payer, &[], &ixs, &[alt])).unwrap();
 
     println!("dest verify+finalize 2-IX with ALT: {size} / {PACKET_DATA_SIZE} bytes");
     assert!(
-        size <= PACKET_DATA_SIZE,
+        size <= PACKET_DATA_SIZE as u64,
         "verify+finalize with ALT is {size} bytes, exceeds {PACKET_DATA_SIZE}-byte packet limit",
     );
 }
@@ -228,13 +209,13 @@ fn dest_verify_finalize_2ix_fits_within_packet_limit_with_alt() {
 fn dest_verify_finalize_2ix_fits_without_alt() {
     let d = dest();
     let ixs = verify_finalize_ixs(&d);
-    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[]));
+    let size = bincode::serialized_size(&compile_v0(&d.payer, &[], &ixs, &[])).unwrap();
 
     // Unlike the source pair, verify+finalize touches few accounts and fits
     // unaided — an address lookup table is not mandatory for this shape.
     println!("dest verify+finalize 2-IX without ALT: {size} / {PACKET_DATA_SIZE} bytes");
     assert!(
-        size <= PACKET_DATA_SIZE,
+        size <= PACKET_DATA_SIZE as u64,
         "verify+finalize without ALT is {size} bytes, exceeds {PACKET_DATA_SIZE}-byte packet limit",
     );
 }
@@ -246,11 +227,11 @@ fn dest_finalize_plus_max_spl_execute_actions_fits_with_alt() {
     let d = dest();
     let ixs = vec![finalize_only_ix(&d), max_spl_execute_ix(&d)];
     let alt = representative_lookup_table(&ixs);
-    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt]));
+    let size = bincode::serialized_size(&compile_v0(&d.payer, &[], &ixs, &[alt])).unwrap();
 
     println!("dest finalize + execute_actions(max SplTransfer) with ALT: {size} / {PACKET_DATA_SIZE} bytes");
     assert!(
-        size <= PACKET_DATA_SIZE,
+        size <= PACKET_DATA_SIZE as u64,
         "finalize + max-SplTransfer execute_actions with ALT is {size} bytes, exceeds {PACKET_DATA_SIZE}-byte packet limit",
     );
 }
@@ -262,11 +243,11 @@ fn dest_single_verified_cpi_execute_actions_fits_with_alt() {
     let d = dest();
     let ixs = verified_cpi_ixs(&d, 1);
     let alt = representative_lookup_table(&ixs);
-    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt]));
+    let size = bincode::serialized_size(&compile_v0(&d.payer, &[], &ixs, &[alt])).unwrap();
 
     println!("dest execute_actions(1 VerifiedCpi, max template) with ALT: {size} / {PACKET_DATA_SIZE} bytes");
     assert!(
-        size <= PACKET_DATA_SIZE,
+        size <= PACKET_DATA_SIZE as u64,
         "single-VerifiedCpi execute_actions with ALT is {size} bytes, exceeds {PACKET_DATA_SIZE}-byte packet limit",
     );
 }
@@ -275,13 +256,13 @@ fn dest_single_verified_cpi_execute_actions_fits_with_alt() {
 fn dest_single_verified_cpi_execute_actions_exceeds_without_alt() {
     let d = dest();
     let ixs = verified_cpi_ixs(&d, 1);
-    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[]));
+    let size = bincode::serialized_size(&compile_v0(&d.payer, &[], &ixs, &[])).unwrap();
 
     // The Jupiter-scale account list pushes even a single verified swap past the
     // limit unaided — an address lookup table is mandatory for it.
     println!("dest execute_actions(1 VerifiedCpi, max template) without ALT: {size} / {PACKET_DATA_SIZE} bytes");
     assert!(
-        size > PACKET_DATA_SIZE,
+        size > PACKET_DATA_SIZE as u64,
         "single-VerifiedCpi execute_actions without ALT is {size} bytes, expected to exceed the {PACKET_DATA_SIZE}-byte packet limit (ALT-mandatory shape)",
     );
 }
@@ -294,11 +275,11 @@ fn dest_finalize_plus_single_verified_cpi_execute_actions_fits_with_alt() {
     let mut ixs = verified_cpi_ixs(&d, 1);
     ixs.insert(1, finalize_only_ix(&d));
     let alt = representative_lookup_table(&ixs);
-    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt]));
+    let size = bincode::serialized_size(&compile_v0(&d.payer, &[], &ixs, &[alt])).unwrap();
 
     println!("dest finalize + execute_actions(1 VerifiedCpi, max template) with ALT: {size} / {PACKET_DATA_SIZE} bytes");
     assert!(
-        size <= PACKET_DATA_SIZE,
+        size <= PACKET_DATA_SIZE as u64,
         "finalize + 1-VerifiedCpi execute_actions with ALT is {size} bytes, exceeds {PACKET_DATA_SIZE}-byte packet limit — split into separate transactions (FillReceipt gates the sequence)",
     );
 }
@@ -318,7 +299,7 @@ fn dest_max_verified_cpi_execute_actions_exceeds_packet_limit_even_with_alt() {
     let d = dest();
     let ixs = verified_cpi_ixs(&d, MAX_ACTION_IDXS as u8);
     let alt = representative_lookup_table(&ixs);
-    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt]));
+    let size = bincode::serialized_size(&compile_v0(&d.payer, &[], &ixs, &[alt])).unwrap();
 
     // FINDING: the program permits routes whose single, atomic `execute_actions`
     // cannot fit in one transaction even with an address lookup table — an ALT
@@ -330,7 +311,7 @@ fn dest_max_verified_cpi_execute_actions_exceeds_packet_limit_even_with_alt() {
     // bound a route's action + account + data budget so its `execute_actions` fits.
     println!("dest execute_actions({MAX_ACTION_IDXS} VerifiedCpi, max template) with ALT: {size} / {PACKET_DATA_SIZE} bytes");
     assert!(
-        size > PACKET_DATA_SIZE,
+        size > PACKET_DATA_SIZE as u64,
         "max-action VerifiedCpi execute_actions with ALT is {size} bytes; if this now fits, the heaviest-route assumption changed — re-derive the per-route action/account/data budget",
     );
 }
@@ -362,11 +343,11 @@ fn dest_cctp_verify_finalize_2ix_fits_within_packet_limit_with_alt() {
         ),
     ];
     let alt = representative_lookup_table(&ixs);
-    let size = serialized_len(&compile_v0(&d.payer, &ixs, &[alt]));
+    let size = bincode::serialized_size(&compile_v0(&d.payer, &[], &ixs, &[alt])).unwrap();
 
     println!("dest CCTP verify+finalize 2-IX with ALT: {size} / {PACKET_DATA_SIZE} bytes");
     assert!(
-        size <= PACKET_DATA_SIZE,
+        size <= PACKET_DATA_SIZE as u64,
         "CCTP verify+finalize with ALT is {size} bytes, exceeds {PACKET_DATA_SIZE}-byte packet limit",
     );
 }
