@@ -4,9 +4,10 @@
 //! target the SAME Surfpool instance at `SURFPOOL_RPC_URL` — a mainnet fork
 //! carrying the real Across SVM Spoke Pool, the real CCTP v2 programs, and
 //! real USDC. Everything here is transport plumbing: readiness/deploy
-//! polling, transaction submission, address-lookup-table lifecycle, Surfpool
-//! cheat-code RPC, log retrieval, and the CCTP fork setup (attester takeover
-//! + the keeper-reference `receive_message` builder).
+//! polling, native-v1 transaction submission with inline addresses and
+//! TransactionConfig resource limits, Surfpool cheat-code RPC, log retrieval,
+//! and the CCTP fork setup (attester takeover + the keeper-reference
+//! `receive_message` builder).
 //!
 //! Serialization: the suites live in separate test binaries, i.e. separate
 //! processes, so an in-process mutex cannot serialize them. [`surfpool_lock`]

@@ -11,7 +11,8 @@
 //! evidence accounts the adapters verify:
 //!
 //!   fill_relay / receive_message   (real program escrows into the route vault)
-//!     → verify_*_ + finalize_fill  (one v0 tx, real ALT, 400k CU)
+//!     → verify_*_ + finalize_fill  (one native-v1 tx, inline addresses,
+//!                                   TransactionConfig resource limits)
 //!     → execute_actions            (happy path: committed 60/40 SplTransfer split)
 //!     → recover_funds              (recovery path: owner drains execution vault)
 //!     → settle again               (replay: rejected per evidence layer while
