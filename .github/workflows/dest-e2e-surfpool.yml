@@ -131,11 +131,9 @@ jobs:
       - name: Install branch programs
         run: |
           authority=$(solana address)
-          for program_id in 7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5 8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU 2bXAvxF3U4FtWAnJtcL9LDnwM7qnErf3y3m6USLRKpRw; do
-            # The rotated program IDs may not exist on mainnet (yet), so the fork
-            # has nothing to take over. Seed each ID by cloning the Across
-            # SpokePool program as a placeholder — the branch deploy below
-            # overwrites its bytes either way.
+          for program_id in GqGSLQKCfuz672dmsNuCusgdwzRubm5iFQ6LbGki51Pk 8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU HBfktmY2oiAmP1m6baQAy9ACJ9uKuyTFyJtHdVYRBL4; do
+            # Seed each target ID with a placeholder so future rotations remain
+            # testable before their program accounts exist on mainnet.
             curl -sf http://127.0.0.1:8899 \
               -H 'content-type: application/json' \
               -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"surfnet_cloneProgramAccount\",\"params\":[\"DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru\",\"${program_id}\"]}" \
@@ -145,9 +143,9 @@ jobs:
               -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"surfnet_setProgramAuthority\",\"params\":[\"${program_id}\",\"${authority}\"]}" \
               | jq -e 'has("result")' >/dev/null
           done
-          NO_DNA=1 solana program deploy --use-rpc --url http://127.0.0.1:8899 --program-id 7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5 --upgrade-authority ~/.config/solana/id.json target/deploy/sra_handler.so
+          NO_DNA=1 solana program deploy --use-rpc --url http://127.0.0.1:8899 --program-id GqGSLQKCfuz672dmsNuCusgdwzRubm5iFQ6LbGki51Pk --upgrade-authority ~/.config/solana/id.json target/deploy/sra_handler.so
           NO_DNA=1 solana program deploy --use-rpc --url http://127.0.0.1:8899 --program-id 8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU --upgrade-authority ~/.config/solana/id.json target/deploy/sra_across_adapter.so
-          NO_DNA=1 solana program deploy --use-rpc --url http://127.0.0.1:8899 --program-id 2bXAvxF3U4FtWAnJtcL9LDnwM7qnErf3y3m6USLRKpRw --upgrade-authority ~/.config/solana/id.json target/deploy/sra_cctp_adapter.so
+          NO_DNA=1 solana program deploy --use-rpc --url http://127.0.0.1:8899 --program-id HBfktmY2oiAmP1m6baQAy9ACJ9uKuyTFyJtHdVYRBL4 --upgrade-authority ~/.config/solana/id.json target/deploy/sra_cctp_adapter.so
 
       - name: Run destination Surfpool E2E
         run: NO_DNA=1 cargo test -p sra-handler --test dest_e2e_surfpool -- --ignored --nocapture
