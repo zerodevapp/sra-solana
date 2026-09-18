@@ -678,6 +678,82 @@ export async function executeWithSendGate(
   return { mode: "sent", id };
 }
 
+export type CommandStage = Readonly<{
+  simulate: () => Promise<unknown>;
+  broadcast: () => Promise<string>;
+  writeArtifact: (id: string) => Promise<unknown>;
+  confirm: (id: string) => Promise<unknown>;
+  verifyPostState: () => Promise<unknown>;
+}>;
+
+async function executeCommandStage(send: boolean, stage: CommandStage) {
+  await stage.simulate();
+  if (!send) return { mode: "simulation" as const };
+  const id = await stage.broadcast();
+  await stage.writeArtifact(id);
+  await stage.confirm(id);
+  await stage.verifyPostState();
+  return { mode: "sent" as const, id };
+}
+
+export async function executeDestinationSettlementWorkflow(
+  options: Readonly<{
+    send: boolean;
+    combinedFits: boolean;
+    alreadyReceived: boolean;
+  }>,
+  stages: Readonly<{
+    combined: CommandStage;
+    receive: CommandStage;
+    finalize: CommandStage;
+    reportDeferredFinalize: () => void;
+  }>
+) {
+  if (options.combinedFits || options.alreadyReceived) {
+    return executeCommandStage(options.send, stages.combined);
+  }
+  if (!options.send) {
+    await stages.receive.simulate();
+    stages.reportDeferredFinalize();
+    return { mode: "simulation" as const, finalizeDeferred: true as const };
+  }
+  const receive = await executeCommandStage(true, stages.receive);
+  const finalize = await executeCommandStage(true, stages.finalize);
+  if (receive.mode !== "sent" || finalize.mode !== "sent") {
+    throw new Error("destination fallback send did not return signatures");
+  }
+  return {
+    mode: "sent" as const,
+    receiveId: receive.id,
+    finalizeId: finalize.id,
+  };
+}
+
+export async function verifyEvmBoundary(
+  expected: Readonly<{ expectedChainId: bigint; expectedSigner?: string }>,
+  boundary: Readonly<{
+    readChainId: () => Promise<bigint>;
+    resolveSigner?: () => Promise<string>;
+  }>
+) {
+  const chainId = await boundary.readChainId();
+  if (chainId !== expected.expectedChainId) {
+    throw new Error(
+      `EVM RPC chain id ${chainId} does not match expected ${expected.expectedChainId}`
+    );
+  }
+  if (!expected.expectedSigner) return { chainId };
+  if (!boundary.resolveSigner)
+    throw new Error("cast signer resolver is required");
+  const signer = await boundary.resolveSigner();
+  if (signer.toLowerCase() !== expected.expectedSigner.toLowerCase()) {
+    throw new Error(
+      `cast account resolves to ${signer}, expected ${expected.expectedSigner}`
+    );
+  }
+  return { chainId, signer: expected.expectedSigner };
+}
+
 export function parseCliArguments(argv: readonly string[]): Readonly<{
   command: CctpCommand;
   configPath?: string;
@@ -878,6 +954,37 @@ function createRuntime(args: ReturnType<typeof parseCliArguments>): Runtime {
   };
 }
 
+async function verifyConfiguredEvmBoundary(
+  runtime: Runtime,
+  requireSigner: boolean
+) {
+  return verifyEvmBoundary(
+    {
+      expectedChainId: BigInt(ARBITRUM_CHAIN_ID),
+      ...(requireSigner
+        ? { expectedSigner: runtime.config.arbitrum.canaryAddress }
+        : {}),
+    },
+    {
+      readChainId: async () =>
+        BigInt(
+          runCast(["chain-id", "--rpc-url", runtime.config.arbitrum.rpcUrl])
+        ),
+      ...(requireSigner
+        ? {
+            resolveSigner: async () =>
+              runCast([
+                "wallet",
+                "address",
+                "--account",
+                runtime.config.arbitrum.account,
+              ]),
+          }
+        : {}),
+    }
+  );
+}
+
 function printSummary(
   runtime: Runtime,
   plan: Readonly<{
@@ -891,18 +998,17 @@ function printSummary(
     recipient: string;
   }>,
   genesis: string,
+  evmChainId: bigint,
   instructionOrder: readonly string[]
 ) {
   const destinationFlow = plan.command.startsWith("destination-");
   console.log(`command: ${plan.command}`);
   console.log(`cluster genesis: ${genesis}`);
   console.log(
-    `source chain id: ${destinationFlow ? ARBITRUM_CHAIN_ID : SOLANA_CHAIN_ID}`
+    `source chain id: ${destinationFlow ? evmChainId : SOLANA_CHAIN_ID}`
   );
   console.log(
-    `destination chain id: ${
-      destinationFlow ? SOLANA_CHAIN_ID : ARBITRUM_CHAIN_ID
-    }`
+    `destination chain id: ${destinationFlow ? SOLANA_CHAIN_ID : evmChainId}`
   );
   console.log(`handler program: ${HANDLER_PROGRAM}`);
   console.log(`CCTP adapter program: ${CCTP_ADAPTER_PROGRAM}`);
@@ -941,18 +1047,19 @@ function formatRpcError(value: unknown) {
   );
 }
 
-async function runSolanaPlan(
+async function prepareSolanaStage(
   runtime: Runtime,
   plan: SolanaPlan,
-  send: boolean,
   onSignature: (signature: string) => void,
   verifyPostState: () => Promise<void>
-) {
+): Promise<CommandStage> {
   const genesis = await runtime.connection.getGenesisHash();
+  const evm = await verifyConfiguredEvmBoundary(runtime, false);
   printSummary(
     runtime,
     plan,
     genesis,
+    evm.chainId,
     plan.instructions.map((item) => item.label)
   );
   if (genesis !== MAINNET_GENESIS)
@@ -970,7 +1077,7 @@ async function runSolanaPlan(
     `transaction config: computeUnitLimit=${compiled.config.computeUnitLimit} loadedAccountsDataSizeLimit=${compiled.config.loadedAccountsDataSizeLimit}`
   );
   const wire = getBase64EncodedWireTransaction(compiled.transaction);
-  const result = await executeWithSendGate(send, {
+  return {
     simulate: async () => {
       const simulation = await rpc
         .simulateTransaction(wire, {
@@ -986,8 +1093,8 @@ async function runSolanaPlan(
         );
       }
     },
-    send: async () => {
-      const signature = String(
+    broadcast: async () =>
+      String(
         await rpc
           .sendTransaction(wire, {
             encoding: "base64",
@@ -995,11 +1102,11 @@ async function runSolanaPlan(
             skipPreflight: false,
           })
           .send()
-      );
+      ),
+    writeArtifact: async (signature) => {
       onSignature(signature);
-      return signature;
     },
-    verify: async (signature) => {
+    confirm: async (signature) => {
       const confirmation = await runtime.connection.confirmTransaction(
         {
           signature,
@@ -1013,9 +1120,25 @@ async function runSolanaPlan(
           `transaction failed: ${formatRpcError(confirmation.value.err)}`
         );
       }
-      await verifyPostState();
     },
-  });
+    verifyPostState,
+  };
+}
+
+async function runSolanaPlan(
+  runtime: Runtime,
+  plan: SolanaPlan,
+  send: boolean,
+  onSignature: (signature: string) => void,
+  verifyPostState: () => Promise<void>
+) {
+  const stage = await prepareSolanaStage(
+    runtime,
+    plan,
+    onSignature,
+    verifyPostState
+  );
+  const result = await executeCommandStage(send, stage);
   console.log(
     result.mode === "simulation"
       ? "simulation succeeded; no transaction sent"
@@ -1536,6 +1659,55 @@ function createAtaIdempotent(
   });
 }
 
+export function validateDestinationTransferAction(
+  actionConfig: unknown,
+  expectedRecipient: web3.PublicKey
+) {
+  if (!Array.isArray(actionConfig) || actionConfig.length !== 1) {
+    throw new Error("destination route must contain one transfer action");
+  }
+  const action = objectAt(actionConfig[0], "destination action");
+  const transfer = objectAt(
+    action.splTransfer,
+    "destination action.splTransfer"
+  );
+  if (
+    !(transfer.recipient instanceof web3.PublicKey) ||
+    !transfer.recipient.equals(expectedRecipient)
+  ) {
+    throw new Error("destination transfer recipient does not match config");
+  }
+  if (transfer.amountBps !== 10_000) {
+    throw new Error("destination transfer amountBps must be 10000");
+  }
+}
+
+export function validateSettlementPostState(
+  state: Readonly<{
+    amount: bigint;
+    receivedInThisCommand: boolean;
+    preRouteBalance: bigint;
+    postRouteBalance: bigint;
+    preExecutionBalance: bigint;
+    postExecutionBalance: bigint;
+    receiptAmount: bigint;
+  }>
+) {
+  if (state.postExecutionBalance !== state.preExecutionBalance + state.amount) {
+    throw new Error(
+      "execution vault balance does not include the settled amount"
+    );
+  }
+  const availableRouteBalance =
+    state.preRouteBalance + (state.receivedInThisCommand ? state.amount : 0n);
+  if (state.postRouteBalance !== availableRouteBalance - state.amount) {
+    throw new Error("route vault conservation check failed");
+  }
+  if (state.receiptAmount !== state.amount) {
+    throw new Error("fill receipt amount does not match the settled amount");
+  }
+}
+
 function updateRuntimeState(
   runtime: Runtime,
   update: (state: CctpState) => CctpState
@@ -1648,10 +1820,12 @@ async function destinationSetup(runtime: Runtime, send: boolean) {
         owner: web3.PublicKey;
         sourceChainId: BN;
         expectedMint: web3.PublicKey;
+        actionConfig: unknown;
         allowedAdapters: web3.PublicKey[];
         allowedExecutors: web3.PublicKey[];
         paused: boolean;
       }>("solanaSraRoute", routeInfo.data);
+      validateDestinationTransferAction(route.actionConfig, values.recipient);
       if (
         !route.owner.equals(values.owner.publicKey) ||
         !route.sourceChainId.eq(new BN(values.destination.sourceChainId)) ||
@@ -1850,10 +2024,14 @@ async function verifyReceiptStatus(
   );
   const decoded = runtime.handler.coder.accounts.decode<{
     executionStatus: unknown;
+    route: web3.PublicKey;
+    fillId: number[];
+    amount: BN;
   }>("fillReceipt", info.data);
   if (executionStatusName(decoded.executionStatus) !== expected) {
     throw new Error(`fill receipt status is not ${expected}`);
   }
+  return decoded;
 }
 
 async function destinationSettlementInstructions(runtime: Runtime) {
@@ -1929,6 +2107,56 @@ async function destinationReceiveFinalize(runtime: Runtime, send: boolean) {
   const alreadyReceived = Boolean(
     runtime.state.destination?.solanaReceiveSignature
   );
+  const amount = BigInt(settlement.values.destination.amount);
+  const preRouteBalance = await tokenAmountOrZero(
+    runtime.connection,
+    settlement.values.routeVault
+  );
+  const preExecutionBalance = await tokenAmountOrZero(
+    runtime.connection,
+    settlement.values.executionVault
+  );
+  const verifyReceivePostState = async () => {
+    await verifyUsedNonce(runtime, settlement.nonce);
+    const postRouteBalance = await tokenAmountOrZero(
+      runtime.connection,
+      settlement.values.routeVault
+    );
+    if (postRouteBalance !== preRouteBalance + amount) {
+      throw new Error("route vault did not receive the expected Circle amount");
+    }
+  };
+  const verifySettlementPostState = async (receivedInThisCommand: boolean) => {
+    await verifyUsedNonce(runtime, settlement.nonce);
+    const receipt = await verifyReceiptStatus(
+      runtime,
+      settlement.fillReceipt,
+      "finalized"
+    );
+    if (
+      !receipt.route.equals(settlement.values.route) ||
+      !Buffer.from(receipt.fillId).equals(settlement.nonce)
+    ) {
+      throw new Error(
+        "fill receipt route or fill id does not match the CCTP mint"
+      );
+    }
+    validateSettlementPostState({
+      amount,
+      receivedInThisCommand,
+      preRouteBalance,
+      postRouteBalance: await tokenAmountOrZero(
+        runtime.connection,
+        settlement.values.routeVault
+      ),
+      preExecutionBalance,
+      postExecutionBalance: await tokenAmountOrZero(
+        runtime.connection,
+        settlement.values.executionVault
+      ),
+      receiptAmount: BigInt(receipt.amount.toString()),
+    });
+  };
   const combined = alreadyReceived
     ? [
         { label: "verify_cctp_mint", instruction: settlement.verify },
@@ -1982,14 +2210,11 @@ async function destinationReceiveFinalize(runtime: Runtime, send: boolean) {
           },
         }));
       },
-      async () => {
-        await verifyUsedNonce(runtime, settlement.nonce);
-        await verifyReceiptStatus(runtime, settlement.fillReceipt, "finalized");
-      }
+      async () => verifySettlementPostState(!alreadyReceived)
     );
     return;
   }
-  await runSolanaPlan(
+  const receiveStage = await prepareSolanaStage(
     runtime,
     {
       command: "destination-receive-finalize",
@@ -2005,7 +2230,6 @@ async function destinationReceiveFinalize(runtime: Runtime, send: boolean) {
       amount: settlement.values.destination.amount,
       recipient: settlement.values.routeVault.toBase58(),
     },
-    send,
     (signature) => {
       updateRuntimeState(runtime, (state) => ({
         ...state,
@@ -2015,9 +2239,9 @@ async function destinationReceiveFinalize(runtime: Runtime, send: boolean) {
         },
       }));
     },
-    async () => verifyUsedNonce(runtime, settlement.nonce)
+    verifyReceivePostState
   );
-  await runSolanaPlan(
+  const finalizeStage = await prepareSolanaStage(
     runtime,
     {
       command: "destination-receive-finalize",
@@ -2035,7 +2259,6 @@ async function destinationReceiveFinalize(runtime: Runtime, send: boolean) {
       amount: settlement.values.destination.amount,
       recipient: settlement.values.routeVault.toBase58(),
     },
-    send,
     (signature) => {
       updateRuntimeState(runtime, (state) => ({
         ...state,
@@ -2045,9 +2268,24 @@ async function destinationReceiveFinalize(runtime: Runtime, send: boolean) {
         },
       }));
     },
-    async () =>
-      verifyReceiptStatus(runtime, settlement.fillReceipt, "finalized")
+    async () => verifySettlementPostState(true)
   );
+  const result = await executeDestinationSettlementWorkflow(
+    { send, combinedFits: false, alreadyReceived: false },
+    {
+      combined: finalizeStage,
+      receive: receiveStage,
+      finalize: finalizeStage,
+      reportDeferredFinalize: () =>
+        console.log(
+          "receive_message simulation succeeded; verify_cctp_mint + finalize_fill is compiled but cannot be simulated until receive_message is confirmed; no transaction sent"
+        ),
+    }
+  );
+  if (result.mode === "sent" && "receiveId" in result) {
+    console.log(`confirmed receive: ${result.receiveId}`);
+    console.log(`confirmed finalize: ${result.finalizeId}`);
+  }
 }
 
 async function destinationActions(runtime: Runtime, send: boolean) {
@@ -2249,6 +2487,8 @@ async function preflight(runtime: Runtime) {
   const source = sourceValues(runtime);
   const destination = destinationValues(runtime);
   const genesis = await runtime.connection.getGenesisHash();
+  const evm = await verifyConfiguredEvmBoundary(runtime, true);
+  if (!("signer" in evm)) throw new Error("cast signer verification failed");
   printSummary(
     runtime,
     {
@@ -2258,6 +2498,10 @@ async function preflight(runtime: Runtime) {
         { role: "source owner", keypair: source.owner },
         { role: "initiator", keypair: source.initiator },
         { role: "destination owner", keypair: destination.owner },
+        {
+          role: `cast account ${runtime.config.arbitrum.account}`,
+          address: evm.signer,
+        },
       ],
       addresses: {
         sraConfig: source.sraConfig.toBase58(),
@@ -2271,6 +2515,7 @@ async function preflight(runtime: Runtime) {
       recipient: runtime.config.source.recipient,
     },
     genesis,
+    evm.chainId,
     []
   );
   if (genesis !== MAINNET_GENESIS)
@@ -2290,8 +2535,6 @@ async function preflight(runtime: Runtime) {
   if (!accounts[4] || !accounts[4].owner.equals(TOKEN_PROGRAM)) {
     throw new Error("Solana USDC mint verification failed");
   }
-  const cast = spawnSync("cast", ["--version"], { encoding: "utf8" });
-  if (cast.error || cast.status !== 0) throw new Error("cast is not installed");
   saveRuntimeState(runtime, runtime.state);
   console.log("preflight passed");
 }
@@ -2409,6 +2652,8 @@ async function arbitrumReceive(runtime: Runtime, send: boolean) {
     stage.message,
     stage.attestation,
   ];
+  const evm = await verifyConfiguredEvmBoundary(runtime, true);
+  if (!("signer" in evm)) throw new Error("cast signer verification failed");
   const recipient = evmAddressFromBytes32(runtime.config.source.recipient);
   const targetToken = evmAddressFromBytes32(runtime.config.source.targetToken);
   const readRecipientBalance = () =>
@@ -2432,7 +2677,7 @@ async function arbitrumReceive(runtime: Runtime, send: boolean) {
       signers: [
         {
           role: `cast account ${runtime.config.arbitrum.account}`,
-          address: runtime.config.arbitrum.canaryAddress,
+          address: evm.signer,
         },
       ],
       addresses: {
@@ -2447,6 +2692,7 @@ async function arbitrumReceive(runtime: Runtime, send: boolean) {
       recipient: runtime.config.source.recipient,
     },
     genesis,
+    evm.chainId,
     ["cast call receiveMessage", "cast send receiveMessage"]
   );
   console.log(`source SRA: ${source.sraConfig}`);

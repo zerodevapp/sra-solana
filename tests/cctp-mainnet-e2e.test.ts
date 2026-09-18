@@ -247,6 +247,196 @@ test("state-changing commands simulate by default and verify after send", async 
   assert.deepEqual(sent, { mode: "sent", id: "signature" });
 });
 
+test("destination fallback dry-run reports the state-dependent finalize stage", async () => {
+  const module = await import("../scripts/cctp-mainnet-e2e");
+  assert.equal(typeof module.executeDestinationSettlementWorkflow, "function");
+  const events: string[] = [];
+  const stage = (name: string) => ({
+    simulate: async () => events.push(`${name}:simulate`),
+    broadcast: async () => {
+      events.push(`${name}:broadcast`);
+      return `${name}-signature`;
+    },
+    writeArtifact: async () => events.push(`${name}:artifact`),
+    confirm: async () => events.push(`${name}:confirm`),
+    verifyPostState: async () => events.push(`${name}:verify`),
+  });
+
+  const result = await module.executeDestinationSettlementWorkflow(
+    { send: false, combinedFits: false, alreadyReceived: false },
+    {
+      combined: stage("combined"),
+      receive: stage("receive"),
+      finalize: stage("finalize"),
+      reportDeferredFinalize: () => events.push("finalize:deferred"),
+    }
+  );
+
+  assert.deepEqual(events, ["receive:simulate", "finalize:deferred"]);
+  assert.deepEqual(result, { mode: "simulation", finalizeDeferred: true });
+});
+
+test("destination fallback send persists and verifies each transaction before advancing", async () => {
+  const module = await import("../scripts/cctp-mainnet-e2e");
+  const events: string[] = [];
+  const stage = (name: string) => ({
+    simulate: async () => events.push(`${name}:simulate`),
+    broadcast: async () => {
+      events.push(`${name}:broadcast`);
+      return `${name}-signature`;
+    },
+    writeArtifact: async (id: string) => events.push(`${name}:artifact:${id}`),
+    confirm: async (id: string) => events.push(`${name}:confirm:${id}`),
+    verifyPostState: async () => events.push(`${name}:verify`),
+  });
+
+  const result = await module.executeDestinationSettlementWorkflow(
+    { send: true, combinedFits: false, alreadyReceived: false },
+    {
+      combined: stage("combined"),
+      receive: stage("receive"),
+      finalize: stage("finalize"),
+      reportDeferredFinalize: () => events.push("finalize:deferred"),
+    }
+  );
+
+  assert.deepEqual(events, [
+    "receive:simulate",
+    "receive:broadcast",
+    "receive:artifact:receive-signature",
+    "receive:confirm:receive-signature",
+    "receive:verify",
+    "finalize:simulate",
+    "finalize:broadcast",
+    "finalize:artifact:finalize-signature",
+    "finalize:confirm:finalize-signature",
+    "finalize:verify",
+  ]);
+  assert.deepEqual(result, {
+    mode: "sent",
+    receiveId: "receive-signature",
+    finalizeId: "finalize-signature",
+  });
+});
+
+test("EVM boundary verification rejects mismatched chain and cast signer", async () => {
+  const module = await import("../scripts/cctp-mainnet-e2e");
+  assert.equal(typeof module.verifyEvmBoundary, "function");
+  const canary = "0x4444444444444444444444444444444444444444";
+  const verified = await module.verifyEvmBoundary(
+    {
+      expectedChainId: 42161n,
+      expectedSigner: canary,
+    },
+    {
+      readChainId: async () => 42161n,
+      resolveSigner: async () => canary.toUpperCase(),
+    }
+  );
+
+  assert.deepEqual(verified, { chainId: 42161n, signer: canary });
+  await assert.rejects(
+    () =>
+      module.verifyEvmBoundary(
+        { expectedChainId: 42161n, expectedSigner: canary },
+        {
+          readChainId: async () => 1n,
+          resolveSigner: async () => canary,
+        }
+      ),
+    /EVM RPC chain id 1 does not match expected 42161/
+  );
+  await assert.rejects(
+    () =>
+      module.verifyEvmBoundary(
+        { expectedChainId: 42161n, expectedSigner: canary },
+        {
+          readChainId: async () => 42161n,
+          resolveSigner: async () =>
+            "0x5555555555555555555555555555555555555555",
+        }
+      ),
+    /cast account resolves to 0x5555555555555555555555555555555555555555, expected 0x4444444444444444444444444444444444444444/
+  );
+});
+
+test("destination route post-state pins the 100 percent transfer recipient", async () => {
+  const module = await import("../scripts/cctp-mainnet-e2e");
+  assert.equal(typeof module.validateDestinationTransferAction, "function");
+  const recipient = web3.Keypair.generate().publicKey;
+  const other = web3.Keypair.generate().publicKey;
+
+  assert.doesNotThrow(() =>
+    module.validateDestinationTransferAction(
+      [{ splTransfer: { recipient, amountBps: 10_000 } }],
+      recipient
+    )
+  );
+  assert.throws(
+    () =>
+      module.validateDestinationTransferAction(
+        [{ splTransfer: { recipient: other, amountBps: 10_000 } }],
+        recipient
+      ),
+    /destination transfer recipient does not match config/
+  );
+  assert.throws(
+    () =>
+      module.validateDestinationTransferAction(
+        [{ splTransfer: { recipient, amountBps: 9_999 } }],
+        recipient
+      ),
+    /destination transfer amountBps must be 10000/
+  );
+});
+
+test("destination settlement post-state enforces amount and vault conservation", async () => {
+  const module = await import("../scripts/cctp-mainnet-e2e");
+  assert.equal(typeof module.validateSettlementPostState, "function");
+  const complete = {
+    amount: 100n,
+    receivedInThisCommand: true,
+    preRouteBalance: 7n,
+    postRouteBalance: 7n,
+    preExecutionBalance: 3n,
+    postExecutionBalance: 103n,
+    receiptAmount: 100n,
+  };
+
+  assert.doesNotThrow(() => module.validateSettlementPostState(complete));
+  assert.doesNotThrow(() =>
+    module.validateSettlementPostState({
+      ...complete,
+      receivedInThisCommand: false,
+      preRouteBalance: 107n,
+    })
+  );
+  assert.throws(
+    () =>
+      module.validateSettlementPostState({
+        ...complete,
+        postExecutionBalance: 102n,
+      }),
+    /execution vault balance does not include the settled amount/
+  );
+  assert.throws(
+    () =>
+      module.validateSettlementPostState({
+        ...complete,
+        postRouteBalance: 8n,
+      }),
+    /route vault conservation check failed/
+  );
+  assert.throws(
+    () =>
+      module.validateSettlementPostState({
+        ...complete,
+        receiptAmount: 99n,
+      }),
+    /fill receipt amount does not match the settled amount/
+  );
+});
+
 test("CLI parsing exposes only the nine CCTP operator commands", async () => {
   const module = await import("../scripts/cctp-mainnet-e2e");
   assert.deepEqual(module.CCTP_COMMANDS, [
