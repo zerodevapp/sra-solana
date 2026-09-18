@@ -37,12 +37,12 @@ Repository-constructed application and test transactions use native transaction 
 
 The source route tuple and adapter allow-list are immutable in `SraConfig.handler_data`; the owner can rotate the initiator or toggle the SRA active state with `manage_sra`. Each successful trigger increments one `deposit_nonce` stored on the SRA, shared across source mints and adapters. The protocol fee is deducted from the gross input, while the handler's decimal-normalized slippage floor is evaluated against that gross input. CCTP additionally checks that the worst-case post-CCTP-fee delivery covers the committed output.
 
-Local program IDs (see `Anchor.toml`):
+Current program identities (see `Anchor.toml`):
 
 ```
-sra_handler         7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5
+sra_handler         GqGSLQKCfuz672dmsNuCusgdwzRubm5iFQ6LbGki51Pk
 sra_across_adapter  8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU
-sra_cctp_adapter    2bXAvxF3U4FtWAnJtcL9LDnwM7qnErf3y3m6USLRKpRw
+sra_cctp_adapter    HBfktmY2oiAmP1m6baQAy9ACJ9uKuyTFyJtHdVYRBL4
 ```
 
 ## Project layout
@@ -211,10 +211,10 @@ yarn lint:fix    # rewrite
 
 ## Known caveats
 
-- Program IDs in `Anchor.toml` and `declare_id!` are dev placeholders; they will rotate before any audited deployment.
+- The handler and CCTP adapter are deployed to Solana mainnet for controlled canary testing. The Across adapter ID is configured but not deployed. These identities may rotate before an audited production launch.
 - The TS test harness is intentionally thin — Rust LiteSVM tests are the source of truth for behavioural coverage today.
 - Source-vault funds currently leave only through an initiator-authorized `trigger`. Owner recovery from the source SRA vault is not implemented yet; adapter `recover_stuck_custody` only recovers funds that already reached adapter custody.
-- No mainnet deployment exists. **Do not** point any production system at these program IDs.
+- The deployed mainnet programs are unaudited and retain an upgrade authority. **Do not** treat this deployment as production-ready.
 - **Launch checklist — burn upgrade authority.** The programs are designed to be immutable in production, but that cannot be enforced from inside the repo: it is a manual deploy-time step. After the verifiable build is deployed and verified on-chain, finalize each program with `solana program set-upgrade-authority <PROGRAM_ID> --final` and confirm the authority reads `none` before routing value through it.
 
 ## Disclaimer

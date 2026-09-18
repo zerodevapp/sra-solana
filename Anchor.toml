@@ -12,8 +12,8 @@ sra_handler = "GqGSLQKCfuz672dmsNuCusgdwzRubm5iFQ6LbGki51Pk"
 
 [programs.mainnet]
 sra_across_adapter = "8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU"
-sra_cctp_adapter = "2bXAvxF3U4FtWAnJtcL9LDnwM7qnErf3y3m6USLRKpRw"
-sra_handler = "7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5"
+sra_cctp_adapter = "HBfktmY2oiAmP1m6baQAy9ACJ9uKuyTFyJtHdVYRBL4"
+sra_handler = "GqGSLQKCfuz672dmsNuCusgdwzRubm5iFQ6LbGki51Pk"
 
 [provider]
 cluster = "localnet"

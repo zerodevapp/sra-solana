@@ -210,5 +210,8 @@ jobs:
       - name: Install deps
         run: yarn install --frozen-lockfile
 
+      - name: Deployment program ID consistency
+        run: yarn test:deployment-program-ids
+
       - name: Prettier check
         run: yarn lint

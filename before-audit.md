@@ -33,17 +33,17 @@ This repo is the Solana counterpart to the EVM SRA contracts in the sibling `sra
 | `programs/mock-spoke-pool` | Test-only program | **No — out of scope** | Minimal Across SVM SpokePool stand-in used by LiteSVM/Surfpool tests. |
 | `programs/mock-swap` | Test-only program | **No — out of scope** | Generic swap target used to exercise the verified-CPI engine in tests. |
 
-`sra-common`'s `declare_id!` is intentionally set to **the handler's program ID** (`7CCh…rno5`). This is not a bug: the handler-owned `#[account]` types live in `sra-common`, and Anchor's owner check derives from `declare_id!`, so both crate and program must agree on the owning program. Each adapter defines its own ID.
+`sra-common`'s `declare_id!` is intentionally set to **the handler's program ID** (`GqGS…51Pk`). This is not a bug: the handler-owned `#[account]` types live in `sra-common`, and Anchor's owner check derives from `declare_id!`, so both crate and program must agree on the owning program. Each adapter defines its own ID.
 
-**Program IDs (current dev/devnet values — will rotate before any audited or mainnet deployment; do not treat as final):**
+**Current program identities (the handler and CCTP adapter are deployed for controlled mainnet canary testing; the Across adapter is not deployed):**
 
 ```
-sra_handler         7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5
+sra_handler         GqGSLQKCfuz672dmsNuCusgdwzRubm5iFQ6LbGki51Pk
 sra_across_adapter  8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU
-sra_cctp_adapter    2bXAvxF3U4FtWAnJtcL9LDnwM7qnErf3y3m6USLRKpRw
+sra_cctp_adapter    HBfktmY2oiAmP1m6baQAy9ACJ9uKuyTFyJtHdVYRBL4
 ```
 
-**The deployed handler program is intended to be immutable (upgrade authority burned) at launch.** This is why source and destination instructions live in a single binary — no new instructions can be added after freeze. Review with the assumption that nothing here is patchable post-deploy.
+**The deployed handler program is intended to be immutable (upgrade authority burned) at launch.** The current canary deployment retains its upgrade authority. Source and destination instructions live in a single binary so no new instructions can be added after the production freeze; review the launch target with the assumption that nothing is patchable post-deploy.
 
 ---
 
