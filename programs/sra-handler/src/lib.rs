@@ -10,7 +10,7 @@ pub mod utils;
 
 use instructions::*;
 
-declare_id!("7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5");
+declare_id!("GqGSLQKCfuz672dmsNuCusgdwzRubm5iFQ6LbGki51Pk");
 
 #[program]
 pub mod sra_handler {
