@@ -41,6 +41,33 @@ const sampleConfig = {
   },
 };
 
+function encodeCircleMessage(fields: {
+  sourceDomain: number;
+  destinationDomain: number;
+  nonce: Buffer;
+  burnToken: Buffer;
+  mintRecipient: Buffer;
+  amount: bigint;
+  maxFee: bigint;
+  feeExecuted: bigint;
+}) {
+  const message = Buffer.alloc(376);
+  message.writeUInt32BE(1, 0);
+  message.writeUInt32BE(fields.sourceDomain, 4);
+  message.writeUInt32BE(fields.destinationDomain, 8);
+  fields.nonce.copy(message, 12);
+  message.writeUInt32BE(2000, 140);
+  message.writeUInt32BE(2000, 144);
+  const body = message.subarray(148);
+  body.writeUInt32BE(1, 0);
+  fields.burnToken.copy(body, 4);
+  fields.mintRecipient.copy(body, 36);
+  body.writeBigUInt64BE(fields.amount, 92);
+  body.writeBigUInt64BE(fields.maxFee, 156);
+  body.writeBigUInt64BE(fields.feeExecuted, 188);
+  return "0x" + message.toString("hex");
+}
+
 test("strict config parsing rejects unknown fields and unsafe amounts", async () => {
   const module = await import("../scripts/cctp-mainnet-e2e");
   assert.equal(typeof module.parseCctpConfig, "function");
@@ -66,7 +93,50 @@ test("strict config parsing rejects unknown fields and unsafe amounts", async ()
       }),
     /config\.source\.targetChainId must be 42161/
   );
+  assert.throws(
+    () =>
+      parseCctpConfig({
+        ...sampleConfig,
+        source: {
+          ...sampleConfig.source,
+          recipient: "0x01" + "00".repeat(11) + "22".repeat(20),
+        },
+      }),
+    /config\.source\.recipient must be a zero-left-padded EVM address/
+  );
+  assert.throws(
+    () =>
+      parseCctpConfig({
+        ...sampleConfig,
+        source: { ...sampleConfig.source, recipient: "0x" + "00".repeat(32) },
+      }),
+    /config\.source\.recipient must not be the zero address/
+  );
   assert.deepEqual(parseCctpConfig(sampleConfig), sampleConfig);
+});
+
+test("config rejects fee-bearing or non-finalized CCTP transfers", async () => {
+  const { parseCctpConfig } = await import("../scripts/cctp-mainnet-e2e");
+  assert.throws(
+    () =>
+      parseCctpConfig({
+        ...sampleConfig,
+        source: {
+          ...sampleConfig.source,
+          outputAmount: "999999",
+          maxFee: "1",
+        },
+      }),
+    /config\.source\.maxFee must be 0 for Standard Transfer/
+  );
+  assert.throws(
+    () =>
+      parseCctpConfig({
+        ...sampleConfig,
+        source: { ...sampleConfig.source, minFinalityThreshold: 1000 },
+      }),
+    /config\.source\.minFinalityThreshold must be 2000 for Standard Transfer/
+  );
 });
 
 test("state parsing validates resumable stage data", async () => {
@@ -173,6 +243,42 @@ test("Iris resumption validates the route and preserves recorded progress", asyn
   );
 });
 
+test("persisted Circle message rejects a stale configured recipient", async () => {
+  const module = await import("../scripts/cctp-mainnet-e2e");
+  assert.equal(typeof module.validatePersistedCircleMessage, "function");
+  const nonce = Buffer.alloc(32, 1);
+  const burnToken = Buffer.alloc(32, 2);
+  const oldRecipient = Buffer.alloc(32, 3);
+  const currentRecipient = Buffer.alloc(32, 4);
+  const message = encodeCircleMessage({
+    sourceDomain: 3,
+    destinationDomain: 5,
+    nonce,
+    burnToken,
+    mintRecipient: oldRecipient,
+    amount: 1_000_000n,
+    maxFee: 0n,
+    feeExecuted: 0n,
+  });
+
+  assert.throws(
+    () =>
+      module.validatePersistedCircleMessage(message, {
+        sourceDomain: 3,
+        destinationDomain: 5,
+        nonce: "0x" + nonce.toString("hex"),
+        burnToken: "0x" + burnToken.toString("hex"),
+        mintRecipient: "0x" + currentRecipient.toString("hex"),
+        amount: 1_000_000n,
+        maxFee: 0n,
+        feeExecuted: 0n,
+        minFinalityThreshold: 2000,
+        finalityThresholdExecuted: 2000,
+      }),
+    /persisted Circle mint recipient does not match current config/
+  );
+});
+
 test("native v1 compilation enforces explicit config and the repository envelope", async () => {
   const module = await import("../scripts/cctp-mainnet-e2e");
   assert.equal(typeof module.compileNativeV1Transaction, "function");
@@ -214,6 +320,30 @@ test("native v1 compilation enforces explicit config and the repository envelope
         lastValidBlockHeight: 1n,
       }),
     /native v1 transaction uses 66 inline addresses; maximum is 64/
+  );
+});
+
+test("oversized native v1 settlement selects the split fallback", async () => {
+  const module = await import("../scripts/cctp-mainnet-e2e");
+  assert.equal(typeof module.selectDestinationSettlementMode, "function");
+  const payer = web3.Keypair.generate();
+  const oversized = new web3.TransactionInstruction({
+    programId: web3.Keypair.generate().publicKey,
+    keys: [],
+    data: Buffer.alloc(5_000, 1),
+  });
+  const latestBlockhash = {
+    blockhash: "11111111111111111111111111111111" as Blockhash,
+    lastValidBlockHeight: 1n,
+  };
+
+  assert.equal(
+    await module.selectDestinationSettlementMode(
+      [oversized],
+      [payer.secretKey],
+      latestBlockhash
+    ),
+    "fallback"
   );
 });
 
@@ -324,6 +454,50 @@ test("destination fallback prepares finalize only after receive confirmation and
     receiveId: "receive-signature",
     finalizeId: "finalize-signature",
   });
+});
+
+test("destination resumption retries failed finalization without reminting", async () => {
+  const module = await import("../scripts/cctp-mainnet-e2e");
+  assert.equal(typeof module.planDestinationResumption, "function");
+
+  assert.equal(
+    module.planDestinationResumption({
+      usedNonce: true,
+      receiptFinalized: false,
+      receiveAttempt: "confirmed",
+      finalizeAttempt: "failed",
+    }),
+    "finalize-only"
+  );
+  assert.equal(
+    module.planDestinationResumption({
+      usedNonce: true,
+      receiptFinalized: false,
+      receiveAttempt: "confirmed",
+      finalizeAttempt: "expired",
+    }),
+    "finalize-only"
+  );
+  assert.throws(
+    () =>
+      module.planDestinationResumption({
+        usedNonce: true,
+        receiptFinalized: false,
+        receiveAttempt: "confirmed",
+        finalizeAttempt: "pending",
+      }),
+    /destination finalization attempt is still pending/
+  );
+  assert.throws(
+    () =>
+      module.planDestinationResumption({
+        usedNonce: true,
+        receiptFinalized: false,
+        receiveAttempt: "confirmed",
+        finalizeAttempt: "confirmed",
+      }),
+    /confirmed finalization attempt has no fill receipt post-state/
+  );
 });
 
 test("EVM boundary verification rejects mismatched chain and cast signer", async () => {

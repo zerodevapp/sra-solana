@@ -154,7 +154,9 @@ export type CctpState = Readonly<{
     attestation?: string;
     nonce?: string;
     solanaReceiveSignature?: string;
+    solanaReceiveLastValidBlockHeight?: string;
     solanaFinalizeSignature?: string;
+    solanaFinalizeLastValidBlockHeight?: string;
     solanaActionsSignature?: string;
     solanaRecoverSignature?: string;
   }>;
@@ -395,6 +397,14 @@ export function parseCctpConfig(value: unknown): CctpConfig {
   if (![1000, 2000].includes(parsed.source.minFinalityThreshold)) {
     throw new Error("config.source.minFinalityThreshold must be 1000 or 2000");
   }
+  if (parsed.source.maxFee !== "0") {
+    throw new Error("config.source.maxFee must be 0 for Standard Transfer");
+  }
+  if (parsed.source.minFinalityThreshold !== 2000) {
+    throw new Error(
+      "config.source.minFinalityThreshold must be 2000 for Standard Transfer"
+    );
+  }
   if (parsed.source.targetChainId !== ARBITRUM_CHAIN_ID) {
     throw new Error("config.source.targetChainId must be 42161");
   }
@@ -403,6 +413,14 @@ export function parseCctpConfig(value: unknown): CctpConfig {
   }
   if (parsed.source.targetDecimals !== 6) {
     throw new Error("config.source.targetDecimals must be 6");
+  }
+  if (!/^0x0{24}[0-9a-fA-F]{40}$/.test(parsed.source.recipient)) {
+    throw new Error(
+      "config.source.recipient must be a zero-left-padded EVM address"
+    );
+  }
+  if (/^0x0{64}$/.test(parsed.source.recipient)) {
+    throw new Error("config.source.recipient must not be the zero address");
   }
   if (parsed.source.targetToken.toLowerCase() !== ARBITRUM_USDC.toLowerCase()) {
     throw new Error(`config.source.targetToken must be ${ARBITRUM_USDC}`);
@@ -487,7 +505,9 @@ export function parseCctpState(value: unknown): CctpState {
       attestation: "hex",
       nonce: "hex32",
       solanaReceiveSignature: "string",
+      solanaReceiveLastValidBlockHeight: "string",
       solanaFinalizeSignature: "string",
+      solanaFinalizeLastValidBlockHeight: "string",
       solanaActionsSignature: "string",
       solanaRecoverSignature: "string",
     });
@@ -575,6 +595,98 @@ export function mergeIrisAttestation(
       };
 }
 
+function readCircleU64Slot(message: Buffer, offset: number) {
+  if (!message.subarray(offset, offset + 24).equals(Buffer.alloc(24))) {
+    throw new Error("persisted Circle amount slot exceeds u64");
+  }
+  return message.readBigUInt64BE(offset + 24);
+}
+
+export function validatePersistedCircleMessage(
+  messageHex: string,
+  expected: Readonly<{
+    sourceDomain: number;
+    destinationDomain: number;
+    nonce: string;
+    burnToken: string;
+    mintRecipient: string;
+    amount: bigint;
+    maxFee: bigint;
+    feeExecuted: bigint;
+    minFinalityThreshold: number;
+    finalityThresholdExecuted: number;
+    messageRecipient?: string;
+    destinationCaller?: string;
+  }>
+) {
+  const message = Buffer.from(
+    hexBlobAt(messageHex, "persisted Circle message").slice(2),
+    "hex"
+  );
+  if (message.length < 376)
+    throw new Error("persisted Circle message is truncated");
+  const body = message.subarray(148);
+  if (message.readUInt32BE(0) !== 1 || body.readUInt32BE(0) !== 1) {
+    throw new Error("persisted Circle message version is unsupported");
+  }
+  if (message.readUInt32BE(4) !== expected.sourceDomain) {
+    throw new Error(
+      "persisted Circle source domain does not match current config"
+    );
+  }
+  if (message.readUInt32BE(8) !== expected.destinationDomain) {
+    throw new Error(
+      "persisted Circle destination domain does not match current config"
+    );
+  }
+  const matches = (actual: Uint8Array, value: string) =>
+    Buffer.from(actual).equals(bytes32(value));
+  if (!matches(message.subarray(12, 44), expected.nonce)) {
+    throw new Error("persisted Circle nonce does not match state");
+  }
+  if (
+    expected.messageRecipient &&
+    !matches(message.subarray(76, 108), expected.messageRecipient)
+  ) {
+    throw new Error("persisted Circle message recipient does not match config");
+  }
+  if (
+    expected.destinationCaller &&
+    !matches(message.subarray(108, 140), expected.destinationCaller)
+  ) {
+    throw new Error(
+      "persisted Circle destination caller does not match config"
+    );
+  }
+  if (
+    message.readUInt32BE(140) !== expected.minFinalityThreshold ||
+    message.readUInt32BE(144) !== expected.finalityThresholdExecuted
+  ) {
+    throw new Error("persisted Circle finality does not match current config");
+  }
+  if (!matches(body.subarray(4, 36), expected.burnToken)) {
+    throw new Error(
+      "persisted Circle burn token does not match current config"
+    );
+  }
+  if (!matches(body.subarray(36, 68), expected.mintRecipient)) {
+    throw new Error(
+      "persisted Circle mint recipient does not match current config"
+    );
+  }
+  if (readCircleU64Slot(body, 68) !== expected.amount) {
+    throw new Error("persisted Circle amount does not match current config");
+  }
+  if (readCircleU64Slot(body, 132) !== expected.maxFee) {
+    throw new Error("persisted Circle max fee does not match current config");
+  }
+  if (readCircleU64Slot(body, 164) !== expected.feeExecuted) {
+    throw new Error(
+      "persisted Circle executed fee does not match current config"
+    );
+  }
+}
+
 export function toKitInstruction(
   instruction: web3.TransactionInstruction
 ): Instruction {
@@ -659,6 +771,31 @@ export async function compileNativeV1Transaction(
     size,
     config,
   };
+}
+
+export async function selectDestinationSettlementMode(
+  instructions: readonly web3.TransactionInstruction[],
+  signerBytes: readonly Uint8Array[],
+  latestBlockhash: V1LatestBlockhash
+) {
+  try {
+    await compileNativeV1Transaction(
+      instructions,
+      signerBytes,
+      latestBlockhash
+    );
+    return "combined" as const;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      /exceeds limit|size limit|inline addresses|maximum|too many account addresses/i.test(
+        message
+      )
+    ) {
+      return "fallback" as const;
+    }
+    throw error;
+  }
 }
 
 export async function executeWithSendGate(
@@ -753,6 +890,35 @@ export async function verifyEvmBoundary(
     );
   }
   return { chainId, signer: expected.expectedSigner };
+}
+
+type AttemptStatus = "none" | "pending" | "failed" | "expired" | "confirmed";
+
+export function planDestinationResumption(
+  state: Readonly<{
+    usedNonce: boolean;
+    receiptFinalized: boolean;
+    receiveAttempt: AttemptStatus;
+    finalizeAttempt: AttemptStatus;
+  }>
+) {
+  if (state.receiptFinalized) return "complete" as const;
+  if (state.finalizeAttempt === "pending") {
+    throw new Error("destination finalization attempt is still pending");
+  }
+  if (state.finalizeAttempt === "confirmed") {
+    throw new Error(
+      "confirmed finalization attempt has no fill receipt post-state"
+    );
+  }
+  if (state.usedNonce) return "finalize-only" as const;
+  if (state.receiveAttempt === "pending") {
+    throw new Error("destination receive attempt is still pending");
+  }
+  if (state.receiveAttempt === "confirmed") {
+    throw new Error("confirmed receive attempt has no used nonce post-state");
+  }
+  return "receive-and-finalize" as const;
 }
 
 export function parseCliArguments(argv: readonly string[]): Readonly<{
@@ -1051,7 +1217,7 @@ function formatRpcError(value: unknown) {
 async function prepareSolanaStage(
   runtime: Runtime,
   plan: SolanaPlan,
-  onSignature: (signature: string) => void,
+  onSignature: (signature: string, lastValidBlockHeight: string) => void,
   verifyPostState: () => Promise<void>
 ): Promise<CommandStage> {
   const genesis = await runtime.connection.getGenesisHash();
@@ -1105,7 +1271,7 @@ async function prepareSolanaStage(
           .send()
       ),
     writeArtifact: async (signature) => {
-      onSignature(signature);
+      onSignature(signature, latestBlockhash.lastValidBlockHeight.toString());
     },
     confirm: async (signature) => {
       const confirmation = await runtime.connection.confirmTransaction(
@@ -1130,7 +1296,7 @@ async function runSolanaPlan(
   runtime: Runtime,
   plan: SolanaPlan,
   send: boolean,
-  onSignature: (signature: string) => void,
+  onSignature: (signature: string, lastValidBlockHeight: string) => void,
   verifyPostState: () => Promise<void>
 ) {
   const stage = await prepareSolanaStage(
@@ -1996,15 +2162,21 @@ function fillReceiptPda(route: web3.PublicKey, nonce: Buffer) {
 }
 
 async function verifyUsedNonce(runtime: Runtime, nonce: Buffer) {
-  const account = await verifyProgramOwnedAccount(
-    runtime.connection,
-    usedNoncePda(nonce),
-    CCTP_MESSAGE_TRANSMITTER,
-    "Circle used_nonce"
-  );
-  if (account.data.length < 9 || account.data[8] !== 1) {
+  if (!(await isUsedNonce(runtime, nonce))) {
     throw new Error("Circle used_nonce is not marked used");
   }
+}
+
+async function isUsedNonce(runtime: Runtime, nonce: Buffer) {
+  const account = await runtime.connection.getAccountInfo(usedNoncePda(nonce));
+  if (!account) return false;
+  if (
+    !account.owner.equals(CCTP_MESSAGE_TRANSMITTER) ||
+    account.data.length < 9
+  ) {
+    throw new Error("Circle used_nonce account is malformed");
+  }
+  return account.data[8] === 1;
 }
 
 function executionStatusName(value: unknown) {
@@ -2035,6 +2207,52 @@ async function verifyReceiptStatus(
   return decoded;
 }
 
+async function isFinalizedReceipt(runtime: Runtime, receipt: web3.PublicKey) {
+  const info = await runtime.connection.getAccountInfo(receipt);
+  if (!info) return false;
+  if (!info.owner.equals(HANDLER_PROGRAM)) {
+    throw new Error("fill receipt has an unexpected owner");
+  }
+  const decoded = runtime.handler.coder.accounts.decode<{
+    executionStatus: unknown;
+  }>("fillReceipt", info.data);
+  return [
+    "finalized",
+    "actionsSucceeded",
+    "actionsFailed",
+    "recovered",
+  ].includes(executionStatusName(decoded.executionStatus));
+}
+
+async function reconcileAttempt(
+  runtime: Runtime,
+  signature?: string,
+  lastValidBlockHeight?: string
+): Promise<AttemptStatus> {
+  if (!signature) return "none";
+  const status = (
+    await runtime.connection.getSignatureStatuses([signature], {
+      searchTransactionHistory: true,
+    })
+  ).value[0];
+  if (status?.err) return "failed";
+  if (
+    status?.confirmationStatus === "confirmed" ||
+    status?.confirmationStatus === "finalized"
+  ) {
+    return "confirmed";
+  }
+  if (
+    !status &&
+    lastValidBlockHeight !== undefined &&
+    BigInt(await runtime.connection.getBlockHeight("confirmed")) >
+      BigInt(lastValidBlockHeight)
+  ) {
+    return "expired";
+  }
+  return "pending";
+}
+
 async function destinationSettlementInstructions(runtime: Runtime) {
   const destinationState = runtime.state.destination;
   if (
@@ -2046,6 +2264,7 @@ async function destinationSettlementInstructions(runtime: Runtime) {
       "destination Iris message, attestation, and nonce are required"
     );
   }
+  validateConfiguredCircleMessage(runtime, "destination", destinationState);
   const values = destinationValues(runtime);
   const nonce = bytes32(destinationState.nonce);
   const message = Buffer.from(destinationState.message.slice(2), "hex");
@@ -2099,15 +2318,27 @@ async function destinationSettlementInstructions(runtime: Runtime) {
 }
 
 async function destinationReceiveFinalize(runtime: Runtime, send: boolean) {
-  if (runtime.state.destination?.solanaFinalizeSignature) {
-    throw new Error(
-      "destination finalization signature already recorded; do not mint again"
-    );
-  }
   const settlement = await destinationSettlementInstructions(runtime);
-  const alreadyReceived = Boolean(
-    runtime.state.destination?.solanaReceiveSignature
-  );
+  const destinationState = runtime.state.destination;
+  const resumption = planDestinationResumption({
+    usedNonce: await isUsedNonce(runtime, settlement.nonce),
+    receiptFinalized: await isFinalizedReceipt(runtime, settlement.fillReceipt),
+    receiveAttempt: await reconcileAttempt(
+      runtime,
+      destinationState?.solanaReceiveSignature,
+      destinationState?.solanaReceiveLastValidBlockHeight
+    ),
+    finalizeAttempt: await reconcileAttempt(
+      runtime,
+      destinationState?.solanaFinalizeSignature,
+      destinationState?.solanaFinalizeLastValidBlockHeight
+    ),
+  });
+  if (resumption === "complete") {
+    console.log("destination fill is already finalized");
+    return;
+  }
+  const alreadyReceived = resumption === "finalize-only";
   const amount = BigInt(settlement.values.destination.amount);
   const preRouteBalance = await tokenAmountOrZero(
     runtime.connection,
@@ -2168,21 +2399,15 @@ async function destinationReceiveFinalize(runtime: Runtime, send: boolean) {
         { label: "verify_cctp_mint", instruction: settlement.verify },
         { label: "finalize_fill", instruction: settlement.finalize },
       ];
-  let fitsCombined = true;
-  try {
-    await compileNativeV1Transaction(
+  const fitsCombined =
+    (await selectDestinationSettlementMode(
       combined.map((item) => item.instruction),
       [runtime.payer.secretKey],
       {
         blockhash: "11111111111111111111111111111111" as Blockhash,
         lastValidBlockHeight: 1n,
       }
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/maximum|size limit|inline addresses/.test(message)) throw error;
-    fitsCombined = false;
-  }
+    )) === "combined";
   if (fitsCombined || alreadyReceived) {
     await runSolanaPlan(
       runtime,
@@ -2201,13 +2426,19 @@ async function destinationReceiveFinalize(runtime: Runtime, send: boolean) {
         recipient: settlement.values.routeVault.toBase58(),
       },
       send,
-      (signature) => {
+      (signature, lastValidBlockHeight) => {
         updateRuntimeState(runtime, (state) => ({
           ...state,
           destination: {
             ...state.destination,
-            ...(alreadyReceived ? {} : { solanaReceiveSignature: signature }),
+            ...(alreadyReceived
+              ? {}
+              : {
+                  solanaReceiveSignature: signature,
+                  solanaReceiveLastValidBlockHeight: lastValidBlockHeight,
+                }),
             solanaFinalizeSignature: signature,
+            solanaFinalizeLastValidBlockHeight: lastValidBlockHeight,
           },
         }));
       },
@@ -2231,12 +2462,13 @@ async function destinationReceiveFinalize(runtime: Runtime, send: boolean) {
       amount: settlement.values.destination.amount,
       recipient: settlement.values.routeVault.toBase58(),
     },
-    (signature) => {
+    (signature, lastValidBlockHeight) => {
       updateRuntimeState(runtime, (state) => ({
         ...state,
         destination: {
           ...state.destination,
           solanaReceiveSignature: signature,
+          solanaReceiveLastValidBlockHeight: lastValidBlockHeight,
         },
       }));
     },
@@ -2261,12 +2493,13 @@ async function destinationReceiveFinalize(runtime: Runtime, send: boolean) {
         amount: settlement.values.destination.amount,
         recipient: settlement.values.routeVault.toBase58(),
       },
-      (signature) => {
+      (signature, lastValidBlockHeight) => {
         updateRuntimeState(runtime, (state) => ({
           ...state,
           destination: {
             ...state.destination,
             solanaFinalizeSignature: signature,
+            solanaFinalizeLastValidBlockHeight: lastValidBlockHeight,
           },
         }));
       },
@@ -2558,6 +2791,50 @@ function irisDirection(runtime: Runtime, requested?: "source" | "destination") {
   return sourceReady ? ("source" as const) : ("destination" as const);
 }
 
+function validateConfiguredCircleMessage(
+  runtime: Runtime,
+  direction: "source" | "destination",
+  stage = runtime.state[direction]
+) {
+  if (!stage?.message || !stage.nonce) {
+    throw new Error(`${direction} Circle message and nonce are required`);
+  }
+  const zero = `0x${"00".repeat(32)}`;
+  if (direction === "source") {
+    validatePersistedCircleMessage(stage.message, {
+      sourceDomain: SOLANA_CCTP_DOMAIN,
+      destinationDomain: ARBITRUM_CCTP_DOMAIN,
+      nonce: stage.nonce,
+      burnToken: hex(USDC_MINT.toBytes()),
+      mintRecipient: runtime.config.source.recipient,
+      amount:
+        BigInt(runtime.config.source.inputAmount) -
+        BigInt(runtime.config.source.protocolFeeAmount),
+      maxFee: 0n,
+      feeExecuted: 0n,
+      minFinalityThreshold: 2000,
+      finalityThresholdExecuted: 2000,
+      destinationCaller: zero,
+    });
+    return;
+  }
+  const values = destinationValues(runtime);
+  validatePersistedCircleMessage(stage.message, {
+    sourceDomain: ARBITRUM_CCTP_DOMAIN,
+    destinationDomain: SOLANA_CCTP_DOMAIN,
+    nonce: stage.nonce,
+    burnToken: runtime.config.destination.remoteUsdc,
+    mintRecipient: hex(values.routeVault.toBytes()),
+    amount: BigInt(runtime.config.destination.amount),
+    maxFee: 0n,
+    feeExecuted: 0n,
+    minFinalityThreshold: 2000,
+    finalityThresholdExecuted: 2000,
+    messageRecipient: hex(CCTP_TOKEN_MESSENGER.toBytes()),
+    destinationCaller: zero,
+  });
+}
+
 async function irisWait(
   runtime: Runtime,
   requested?: "source" | "destination"
@@ -2566,6 +2843,7 @@ async function irisWait(
   const values = destinationValues(runtime);
   const stage = runtime.state[direction];
   if (stage?.message && stage.attestation && stage.nonce) {
+    validateConfiguredCircleMessage(runtime, direction, stage);
     console.log(`${direction} Iris attestation already recorded`);
     return;
   }
@@ -2616,6 +2894,7 @@ async function irisWait(
         payload,
         expectation
       );
+      validateConfiguredCircleMessage(runtime, direction, merged[direction]);
       saveRuntimeState(runtime, merged);
       console.log(
         `${direction} Iris attestation saved to ${runtime.statePath}`
@@ -2648,6 +2927,7 @@ async function arbitrumReceive(runtime: Runtime, send: boolean) {
   if (!stage?.message || !stage.attestation || !stage.nonce) {
     throw new Error("source Iris message, attestation, and nonce are required");
   }
+  validateConfiguredCircleMessage(runtime, "source", stage);
   const receiveArgs = [
     runtime.config.arbitrum.messageTransmitter,
     "receiveMessage(bytes,bytes)(bool)",
