@@ -7,16 +7,13 @@ skip-lint = false
 
 [programs.localnet]
 sra_across_adapter = "8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU"
-sra_cctp_adapter = "2bXAvxF3U4FtWAnJtcL9LDnwM7qnErf3y3m6USLRKpRw"
-sra_handler = "7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5"
+sra_cctp_adapter = "HBfktmY2oiAmP1m6baQAy9ACJ9uKuyTFyJtHdVYRBL4"
+sra_handler = "GqGSLQKCfuz672dmsNuCusgdwzRubm5iFQ6LbGki51Pk"
 
 [programs.mainnet]
 sra_across_adapter = "8Fb9Mk2PLcpMjBxd8RWa7TUNMDL2GevMuVEzAbK7YGyU"
 sra_cctp_adapter = "2bXAvxF3U4FtWAnJtcL9LDnwM7qnErf3y3m6USLRKpRw"
 sra_handler = "7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5"
-
-[registry]
-url = "https://api.apr.dev"
 
 [provider]
 cluster = "localnet"
@@ -27,3 +24,5 @@ build-devnet = "anchor build --program-name sra_handler -- --features devnet && 
 build-mainnet = "anchor build"
 deploy-devnet = "cp deploy/keys/*-keypair.json target/deploy/ && anchor deploy --provider.cluster devnet --provider.wallet ../../solana/fee-payer.json --program-name sra_handler && anchor deploy --provider.cluster devnet --provider.wallet ../../solana/fee-payer.json --program-name sra_across_adapter"
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 \"tests/**/*.ts\""
+
+[hooks]
