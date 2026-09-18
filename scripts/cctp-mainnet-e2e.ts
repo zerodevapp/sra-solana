@@ -705,7 +705,7 @@ export async function executeDestinationSettlementWorkflow(
   stages: Readonly<{
     combined: CommandStage;
     receive: CommandStage;
-    finalize: CommandStage;
+    prepareFinalize: () => Promise<CommandStage>;
     reportDeferredFinalize: () => void;
   }>
 ) {
@@ -718,7 +718,8 @@ export async function executeDestinationSettlementWorkflow(
     return { mode: "simulation" as const, finalizeDeferred: true as const };
   }
   const receive = await executeCommandStage(true, stages.receive);
-  const finalize = await executeCommandStage(true, stages.finalize);
+  const finalizeStage = await stages.prepareFinalize();
+  const finalize = await executeCommandStage(true, finalizeStage);
   if (receive.mode !== "sent" || finalize.mode !== "sent") {
     throw new Error("destination fallback send did not return signatures");
   }
@@ -2241,44 +2242,45 @@ async function destinationReceiveFinalize(runtime: Runtime, send: boolean) {
     },
     verifyReceivePostState
   );
-  const finalizeStage = await prepareSolanaStage(
-    runtime,
-    {
-      command: "destination-receive-finalize",
-      instructions: [
-        { label: "verify_cctp_mint", instruction: settlement.verify },
-        { label: "finalize_fill", instruction: settlement.finalize },
-      ],
-      signers: [{ role: "permissionless payer", keypair: runtime.payer }],
-      addresses: {
-        route: settlement.values.route.toBase58(),
-        routeVault: settlement.values.routeVault.toBase58(),
-        verifiedFill: verifiedFillPda(settlement.nonce).toBase58(),
-        fillReceipt: settlement.fillReceipt.toBase58(),
-      },
-      amount: settlement.values.destination.amount,
-      recipient: settlement.values.routeVault.toBase58(),
-    },
-    (signature) => {
-      updateRuntimeState(runtime, (state) => ({
-        ...state,
-        destination: {
-          ...state.destination,
-          solanaFinalizeSignature: signature,
+  const prepareFinalize = () =>
+    prepareSolanaStage(
+      runtime,
+      {
+        command: "destination-receive-finalize",
+        instructions: [
+          { label: "verify_cctp_mint", instruction: settlement.verify },
+          { label: "finalize_fill", instruction: settlement.finalize },
+        ],
+        signers: [{ role: "permissionless payer", keypair: runtime.payer }],
+        addresses: {
+          route: settlement.values.route.toBase58(),
+          routeVault: settlement.values.routeVault.toBase58(),
+          verifiedFill: verifiedFillPda(settlement.nonce).toBase58(),
+          fillReceipt: settlement.fillReceipt.toBase58(),
         },
-      }));
-    },
-    async () => verifySettlementPostState(true)
-  );
+        amount: settlement.values.destination.amount,
+        recipient: settlement.values.routeVault.toBase58(),
+      },
+      (signature) => {
+        updateRuntimeState(runtime, (state) => ({
+          ...state,
+          destination: {
+            ...state.destination,
+            solanaFinalizeSignature: signature,
+          },
+        }));
+      },
+      async () => verifySettlementPostState(true)
+    );
   const result = await executeDestinationSettlementWorkflow(
     { send, combinedFits: false, alreadyReceived: false },
     {
-      combined: finalizeStage,
+      combined: receiveStage,
       receive: receiveStage,
-      finalize: finalizeStage,
+      prepareFinalize,
       reportDeferredFinalize: () =>
         console.log(
-          "receive_message simulation succeeded; verify_cctp_mint + finalize_fill is compiled but cannot be simulated until receive_message is confirmed; no transaction sent"
+          "receive_message simulation succeeded; verify_cctp_mint + finalize_fill will be freshly compiled and simulated only after receive_message is confirmed; no transaction sent"
         ),
     }
   );

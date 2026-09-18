@@ -267,7 +267,10 @@ test("destination fallback dry-run reports the state-dependent finalize stage", 
     {
       combined: stage("combined"),
       receive: stage("receive"),
-      finalize: stage("finalize"),
+      prepareFinalize: async () => {
+        events.push("finalize:prepare");
+        return stage("finalize");
+      },
       reportDeferredFinalize: () => events.push("finalize:deferred"),
     }
   );
@@ -276,7 +279,7 @@ test("destination fallback dry-run reports the state-dependent finalize stage", 
   assert.deepEqual(result, { mode: "simulation", finalizeDeferred: true });
 });
 
-test("destination fallback send persists and verifies each transaction before advancing", async () => {
+test("destination fallback prepares finalize only after receive confirmation and verification", async () => {
   const module = await import("../scripts/cctp-mainnet-e2e");
   const events: string[] = [];
   const stage = (name: string) => ({
@@ -295,7 +298,10 @@ test("destination fallback send persists and verifies each transaction before ad
     {
       combined: stage("combined"),
       receive: stage("receive"),
-      finalize: stage("finalize"),
+      prepareFinalize: async () => {
+        events.push("finalize:prepare");
+        return stage("finalize");
+      },
       reportDeferredFinalize: () => events.push("finalize:deferred"),
     }
   );
@@ -306,6 +312,7 @@ test("destination fallback send persists and verifies each transaction before ad
     "receive:artifact:receive-signature",
     "receive:confirm:receive-signature",
     "receive:verify",
+    "finalize:prepare",
     "finalize:simulate",
     "finalize:broadcast",
     "finalize:artifact:finalize-signature",
