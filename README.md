@@ -31,7 +31,9 @@ Three core on-chain programs plus a shared crate, plus test-only mocks:
 | `mock-spoke-pool`        | Test-only minimal Across SVM SpokePool mock used by the LiteSVM/Surfpool tests. |
 | `mock-swap`              | Test-only swap target used to exercise the destination verified-CPI engine. |
 
-A source-side deposit is a 2-IX versioned transaction: handler `trigger` followed by either `execute_deposit_across` or `execute_deposit_cctp`. The configured initiator authorizes `trigger`; the owner does not sign. `trigger` spends tokens already held in the SRA vault, and the paired instructions bind each other through the Instructions sysvar so neither can execute in isolation. The transaction requires an ALT-backed path to stay within Solana's packet limit. The destination-side fill follows the same two-instruction pattern (`verify_across_fill` + `finalize_fill`), after which `execute_actions` runs the route's committed actions.
+A source-side deposit is a 2-IX transaction: handler `trigger` followed by either `execute_deposit_across` or `execute_deposit_cctp`. The configured initiator authorizes `trigger`; the owner does not sign. `trigger` spends tokens already held in the SRA vault, and the paired instructions bind each other through the Instructions sysvar so neither can execute in isolation. The destination-side fill follows the same two-instruction pattern (`verify_across_fill` + `finalize_fill`), after which `execute_actions` runs the route's committed actions.
+
+Repository-constructed application and test transactions use native transaction v1 with inline account addresses and explicit `TransactionConfig` compute-unit and loaded-account-data limits. Every supported source and destination shape fits within 4,096 serialized bytes and 64 inline addresses without Address Lookup Tables. The maximum four-`VerifiedCpi` destination envelope remains intentionally invalid and measurable at 6,830 bytes and 139 addresses. Stock Anchor/Solana loader deployment remains the sole repository-controlled legacy transaction exception.
 
 The source route tuple and adapter allow-list are immutable in `SraConfig.handler_data`; the owner can rotate the initiator or toggle the SRA active state with `manage_sra`. Each successful trigger increments one `deposit_nonce` stored on the SRA, shared across source mints and adapters. The protocol fee is deducted from the gross input, while the handler's decimal-normalized slippage floor is evaluated against that gross input. CCTP additionally checks that the worst-case post-CCTP-fee delivery covers the committed output.
 
@@ -124,7 +126,7 @@ cargo test -p sra-handler --test passive_cctp
 cargo test -p sra-handler --test passive_across
 ```
 
-These exercise instruction handlers against an in-process LiteSVM runtime. No validator required, but the program build must run first because the suite loads `target/deploy/*.so` artifacts directly.
+These exercise instruction handlers against an in-process LiteSVM runtime. Repository-constructed application transactions use native v1; dependency-owned `litesvm-token` fixture APIs and `LiteSVM::airdrop` still use internal legacy setup transactions. No validator required, but the program build must run first because the suite loads `target/deploy/*.so` artifacts directly.
 
 **2. Anchor + mocha smoke tests** (runs against a local validator)
 
@@ -149,7 +151,7 @@ NO_DNA=1 cargo test -p sra-handler --test source_e2e_surfpool -- --ignored --noc
 NO_DNA=1 cargo test -p sra-handler --test dest_e2e_surfpool -- --ignored --nocapture
 ```
 
-These suites load the local `sra-handler` and adapter programs at their declared Anchor IDs, then exercise the existing ALT-backed v0 source transaction and destination fill flow against the real Across `svm-spoke` program/state.
+These suites load the local `sra-handler` and adapter programs at their declared Anchor IDs, then exercise native-v1 source and destination application transactions with inline addresses against the real Across `svm-spoke` program/state. Program deployment continues to use the stock Anchor/Solana loader path.
 
 ## Running on localnet
 
@@ -190,7 +192,7 @@ Shared:
 - [x] `sra-common`: PDA seeds, types, ABI encoder, constants, errors
 - [x] Fee administration (`initialize_fee_config`, `set_protocol_fee`, `set_asset_fee_tier`, two-step admin transfer)
 - [x] Foundry golden-vector cross-validation suite
-- [x] ALT-backed source transaction reference path in tests
+- [x] Native-v1 source and destination transactions with inline-address size canaries
 - [x] Destination E2E against real Across via Surfpool
 - [x] Devnet deployment
 - [ ] Security audit

@@ -3,7 +3,9 @@
 //! `fill_relay` or the CCTP v2 `receive_message` — plus the settle leg the
 //! two adapters share and the log assertions that prove the genuine
 //! programs ran. The test binary holds only scenarios; every account,
-//! amount, and wire-crafting decision lives here.
+//! amount, and wire-crafting decision lives here. Repository-constructed
+//! application transactions use native v1 with inline addresses and explicit
+//! `TransactionConfig` resource limits.
 
 use anchor_spl::associated_token::spl_associated_token_account;
 use hex_literal::hex;
@@ -343,9 +345,8 @@ impl SurfpoolDestFixture {
         Ok((signature, logs))
     }
 
-    /// The settle leg both adapters share: `verify_*` + `finalize_fill` as
-    /// one v0 transaction with a real address lookup table and the 400k CU
-    /// budget request.
+    /// The settle leg both adapters share: `verify_*` + `finalize_fill` as one
+    /// native-v1 transaction with inline addresses and a 400k CU limit.
     pub fn submit_settlement(
         &self,
         verify_ix: Instruction,
@@ -481,8 +482,8 @@ impl SurfpoolDestFixture {
         Ok(())
     }
 
-    /// `execute_actions` (payer is the allowed executor) as a v0 transaction
-    /// with a real address lookup table — the shape the SDK submits.
+    /// `execute_actions` (payer is the allowed executor) as a native-v1
+    /// transaction with inline addresses.
     pub fn execute_actions(&self, fill_id: [u8; 32]) -> TestResult<()> {
         let execute_ix = execute_actions_ix(
             &self.payer.pubkey(),
