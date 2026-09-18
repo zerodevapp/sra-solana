@@ -4,7 +4,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{burn, Burn, Mint, Token, TokenAccount};
 
-declare_id!("G5wi3ck6nzmaDQbcoRk39JNCtPoYWPvYd5BV53oaFATT");
+declare_id!("CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe");
 
 #[error_code]
 pub enum MockCctpError {

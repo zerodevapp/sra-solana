@@ -16,7 +16,7 @@ use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
 
-declare_id!("9vGR2dTimYrEswj5fhQQNuTRjqHN2mwby2V77DFr6rTZ");
+declare_id!("48ua4x3ax2gWbtCBfEdwC9hg8V9FYpG2aFcMNeZ8mK6h");
 
 /// Seed for the mock's pool authority — owns the input sink and output reserve.
 pub const POOL_AUTHORITY_SEED: &[u8] = b"pool";
