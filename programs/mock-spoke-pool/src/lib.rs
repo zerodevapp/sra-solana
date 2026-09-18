@@ -5,7 +5,7 @@ use anchor_spl::{
 };
 use solana_keccak_hasher::hash as keccak_hash;
 
-declare_id!("DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru");
+declare_id!("8WY8qMVBf5T1pTAehwAMVvVZNmy1pi2Te9TRQTRaShfF");
 
 const DELEGATE_SEED_PREFIX: &[u8] = b"delegate";
 const DEPOSIT_NOW_FIXED_SERIALIZED_LEN: usize = (32 * 4) + 8 + 32 + 8 + 32 + 4 + 4 + 4;

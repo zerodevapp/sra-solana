@@ -9,7 +9,7 @@ pub mod utils;
 pub use errors::*;
 pub use instructions::*;
 
-declare_id!("2bXAvxF3U4FtWAnJtcL9LDnwM7qnErf3y3m6USLRKpRw");
+declare_id!("HBfktmY2oiAmP1m6baQAy9ACJ9uKuyTFyJtHdVYRBL4");
 
 #[program]
 pub mod sra_cctp_adapter {

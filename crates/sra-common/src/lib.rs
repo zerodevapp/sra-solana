@@ -3,7 +3,7 @@ use anchor_lang::prelude::*;
 // MUST match sra-handler's program ID. All #[account] types in this crate
 // generate Owner::owner() returning this ID — covers both source and destination
 // handler-owned accounts.
-declare_id!("7CChUDvMWCtqWPbtCs74CCAgvuJnyiqpgNYEocNJrno5");
+declare_id!("GqGSLQKCfuz672dmsNuCusgdwzRubm5iFQ6LbGki51Pk");
 
 pub mod abi;
 pub mod constants;
