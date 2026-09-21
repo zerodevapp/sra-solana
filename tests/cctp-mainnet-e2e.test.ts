@@ -69,7 +69,7 @@ function encodeCircleMessage(fields: {
 }
 
 test("strict config parsing rejects unknown fields and unsafe amounts", async () => {
-  const module = await import("../scripts/cctp-mainnet-e2e");
+  const module = await import("../scripts/cctp-mainnet-e2e-utils");
   assert.equal(typeof module.parseCctpConfig, "function");
 
   const parseCctpConfig = module.parseCctpConfig as (value: unknown) => unknown;
@@ -116,7 +116,7 @@ test("strict config parsing rejects unknown fields and unsafe amounts", async ()
 });
 
 test("config rejects fee-bearing or non-finalized CCTP transfers", async () => {
-  const { parseCctpConfig } = await import("../scripts/cctp-mainnet-e2e");
+  const { parseCctpConfig } = await import("../scripts/cctp-mainnet-e2e-utils");
   assert.throws(
     () =>
       parseCctpConfig({
@@ -140,7 +140,7 @@ test("config rejects fee-bearing or non-finalized CCTP transfers", async () => {
 });
 
 test("state parsing validates resumable stage data", async () => {
-  const module = await import("../scripts/cctp-mainnet-e2e");
+  const module = await import("../scripts/cctp-mainnet-e2e-utils");
   assert.equal(typeof module.parseCctpState, "function");
 
   const state = {
@@ -185,7 +185,7 @@ test("state parsing validates resumable stage data", async () => {
 });
 
 test("Iris resumption validates the route and preserves recorded progress", async () => {
-  const module = await import("../scripts/cctp-mainnet-e2e");
+  const module = await import("../scripts/cctp-mainnet-e2e-utils");
   assert.equal(typeof module.mergeIrisAttestation, "function");
   const mintRecipient = "0x" + "00".repeat(12) + "44".repeat(20);
   const response = {
@@ -244,7 +244,7 @@ test("Iris resumption validates the route and preserves recorded progress", asyn
 });
 
 test("persisted Circle message rejects a stale configured recipient", async () => {
-  const module = await import("../scripts/cctp-mainnet-e2e");
+  const module = await import("../scripts/cctp-mainnet-e2e-utils");
   assert.equal(typeof module.validatePersistedCircleMessage, "function");
   const nonce = Buffer.alloc(32, 1);
   const burnToken = Buffer.alloc(32, 2);
@@ -280,7 +280,7 @@ test("persisted Circle message rejects a stale configured recipient", async () =
 });
 
 test("native v1 compilation enforces explicit config and the repository envelope", async () => {
-  const module = await import("../scripts/cctp-mainnet-e2e");
+  const module = await import("../scripts/cctp-mainnet-e2e-utils");
   assert.equal(typeof module.compileNativeV1Transaction, "function");
   const payer = web3.Keypair.generate();
   const transfer = web3.SystemProgram.transfer({
@@ -324,7 +324,7 @@ test("native v1 compilation enforces explicit config and the repository envelope
 });
 
 test("oversized native v1 settlement selects the split fallback", async () => {
-  const module = await import("../scripts/cctp-mainnet-e2e");
+  const module = await import("../scripts/cctp-mainnet-e2e-utils");
   assert.equal(typeof module.selectDestinationSettlementMode, "function");
   const payer = web3.Keypair.generate();
   const oversized = new web3.TransactionInstruction({
@@ -348,7 +348,7 @@ test("oversized native v1 settlement selects the split fallback", async () => {
 });
 
 test("state-changing commands simulate by default and verify after send", async () => {
-  const module = await import("../scripts/cctp-mainnet-e2e");
+  const module = await import("../scripts/cctp-mainnet-e2e-utils");
   assert.equal(typeof module.executeWithSendGate, "function");
   const dryRunEvents: string[] = [];
   const dryRun = await module.executeWithSendGate(false, {
@@ -378,7 +378,7 @@ test("state-changing commands simulate by default and verify after send", async 
 });
 
 test("destination fallback dry-run reports the state-dependent finalize stage", async () => {
-  const module = await import("../scripts/cctp-mainnet-e2e");
+  const module = await import("../scripts/cctp-mainnet-e2e-utils");
   assert.equal(typeof module.executeDestinationSettlementWorkflow, "function");
   const events: string[] = [];
   const stage = (name: string) => ({
@@ -410,7 +410,7 @@ test("destination fallback dry-run reports the state-dependent finalize stage", 
 });
 
 test("destination fallback prepares finalize only after receive confirmation and verification", async () => {
-  const module = await import("../scripts/cctp-mainnet-e2e");
+  const module = await import("../scripts/cctp-mainnet-e2e-utils");
   const events: string[] = [];
   const stage = (name: string) => ({
     simulate: async () => events.push(`${name}:simulate`),
@@ -457,7 +457,7 @@ test("destination fallback prepares finalize only after receive confirmation and
 });
 
 test("destination resumption retries failed finalization without reminting", async () => {
-  const module = await import("../scripts/cctp-mainnet-e2e");
+  const module = await import("../scripts/cctp-mainnet-e2e-utils");
   assert.equal(typeof module.planDestinationResumption, "function");
 
   assert.equal(
@@ -501,7 +501,7 @@ test("destination resumption retries failed finalization without reminting", asy
 });
 
 test("EVM boundary verification rejects mismatched chain and cast signer", async () => {
-  const module = await import("../scripts/cctp-mainnet-e2e");
+  const module = await import("../scripts/cctp-mainnet-e2e-utils");
   assert.equal(typeof module.verifyEvmBoundary, "function");
   const canary = "0x4444444444444444444444444444444444444444";
   const verified = await module.verifyEvmBoundary(
