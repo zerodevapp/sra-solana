@@ -196,6 +196,29 @@ export function bytes32(value: string): Buffer {
   return Buffer.from(value.slice(2), "hex");
 }
 
+export async function retryPostStateRead<T>(
+  read: (minContextSlot?: number) => Promise<T | null>,
+  minContextSlot?: number,
+  attempts = 10,
+  delayMs = 500
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const value = await read(minContextSlot);
+      if (value !== null) return value;
+      lastError = undefined;
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt + 1 < attempts && delayMs > 0) {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
+    }
+  }
+  if (lastError) throw lastError;
+  throw new Error(`post-state account unavailable after ${attempts} attempts`);
+}
+
 export function parseCctpConfig(value: unknown): CctpConfig {
   const config = objectAt(value, "config");
   exactFields(

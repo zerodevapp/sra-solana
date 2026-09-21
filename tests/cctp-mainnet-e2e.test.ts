@@ -377,6 +377,63 @@ test("state-changing commands simulate by default and verify after send", async 
   assert.deepEqual(sent, { mode: "sent", id: "signature" });
 });
 
+test("post-state account reads retry transient RPC lag", async () => {
+  const module = await import("../scripts/cctp-mainnet-e2e-utils");
+  assert.equal(typeof module.retryPostStateRead, "function");
+  const account = { owner: "handler" };
+  let reads = 0;
+  const slots: (number | undefined)[] = [];
+
+  const result = await module.retryPostStateRead(
+    async (minContextSlot) => {
+      slots.push(minContextSlot);
+      reads += 1;
+      if (reads === 1) throw new Error("minimum context slot not reached");
+      return reads === 2 ? null : account;
+    },
+    123_456,
+    3,
+    0
+  );
+
+  assert.equal(result, account);
+  assert.equal(reads, 3);
+  assert.deepEqual(slots, [123_456, 123_456, 123_456]);
+});
+
+test("program-owned verification reads from the finalized confirmation slot", async () => {
+  const module = await import("../scripts/cctp-mainnet-e2e");
+  assert.equal(typeof module.verifyProgramOwnedAccount, "function");
+  const account = web3.Keypair.generate().publicKey;
+  const owner = web3.Keypair.generate().publicKey;
+  const configs: unknown[] = [];
+  let reads = 0;
+  const connection = {
+    getAccountInfo: async (_account: web3.PublicKey, config: unknown) => {
+      configs.push(config);
+      reads += 1;
+      if (reads === 1) throw new Error("minimum context slot not reached");
+      if (reads === 2) return null;
+      return { owner, data: Buffer.alloc(72) };
+    },
+  } as unknown as web3.Connection;
+
+  const info = await module.verifyProgramOwnedAccount(
+    connection,
+    account,
+    owner,
+    "test account",
+    123_456
+  );
+
+  assert(info.owner.equals(owner));
+  assert.deepEqual(configs, [
+    { commitment: "finalized", minContextSlot: 123_456 },
+    { commitment: "finalized", minContextSlot: 123_456 },
+    { commitment: "finalized", minContextSlot: 123_456 },
+  ]);
+});
+
 test("destination fallback dry-run reports the state-dependent finalize stage", async () => {
   const module = await import("../scripts/cctp-mainnet-e2e-utils");
   assert.equal(typeof module.executeDestinationSettlementWorkflow, "function");

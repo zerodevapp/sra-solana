@@ -30,6 +30,7 @@ import {
   parseCctpConfig,
   parseCctpState,
   planDestinationResumption,
+  retryPostStateRead,
   selectDestinationSettlementMode,
   validatePersistedCircleMessage,
   verifyEvmBoundary,
@@ -383,7 +384,7 @@ async function prepareSolanaStage(
   runtime: Runtime,
   plan: SolanaPlan,
   onSignature: (signature: string, lastValidBlockHeight: string) => void,
-  verifyPostState: () => Promise<void>
+  verifyPostState: (minContextSlot: number) => Promise<void>
 ): Promise<CommandStage> {
   const genesis = await runtime.connection.getGenesisHash();
   const evm = await verifyConfiguredEvmBoundary(runtime, false);
@@ -409,6 +410,7 @@ async function prepareSolanaStage(
     `transaction config: computeUnitLimit=${compiled.config.computeUnitLimit} loadedAccountsDataSizeLimit=${compiled.config.loadedAccountsDataSizeLimit}`
   );
   const wire = getBase64EncodedWireTransaction(compiled.transaction);
+  let minContextSlot: number | undefined;
   return {
     simulate: async () => {
       const simulation = await rpc
@@ -452,8 +454,14 @@ async function prepareSolanaStage(
           `transaction failed: ${formatRpcError(confirmation.value.err)}`
         );
       }
+      minContextSlot = confirmation.context.slot;
     },
-    verifyPostState,
+    verifyPostState: async () => {
+      if (minContextSlot === undefined) {
+        throw new Error("transaction confirmation slot is unavailable");
+      }
+      await verifyPostState(minContextSlot);
+    },
   };
 }
 
@@ -462,7 +470,7 @@ async function runSolanaPlan(
   plan: SolanaPlan,
   send: boolean,
   onSignature: (signature: string, lastValidBlockHeight: string) => void,
-  verifyPostState: () => Promise<void>
+  verifyPostState: (minContextSlot: number) => Promise<void>
 ) {
   const stage = await prepareSolanaStage(
     runtime,
@@ -548,17 +556,46 @@ function sourceValues(runtime: Runtime) {
   };
 }
 
-async function verifyProgramOwnedAccount(
+export async function verifyProgramOwnedAccount(
   connection: web3.Connection,
   account: web3.PublicKey,
   owner: web3.PublicKey,
-  label: string
+  label: string,
+  minContextSlot?: number
 ) {
-  const info = await connection.getAccountInfo(account, "finalized");
-  if (!info || !info.owner.equals(owner)) {
+  const info = await retryPostStateRead(
+    (visibleMinContextSlot) =>
+      connection.getAccountInfo(account, {
+        commitment: "finalized",
+        ...(visibleMinContextSlot === undefined
+          ? {}
+          : { minContextSlot: visibleMinContextSlot }),
+      }),
+    minContextSlot
+  );
+  if (!info.owner.equals(owner)) {
     throw new Error(`${label} post-state verification failed for ${account}`);
   }
   return info;
+}
+
+async function tokenAmountAfterConfirmation(
+  connection: web3.Connection,
+  tokenAccount: web3.PublicKey,
+  label: string,
+  minContextSlot: number
+) {
+  const info = await verifyProgramOwnedAccount(
+    connection,
+    tokenAccount,
+    TOKEN_PROGRAM,
+    label,
+    minContextSlot
+  );
+  if (info.data.length < 72) {
+    throw new Error(`${label} token account data is truncated`);
+  }
+  return info.data.readBigUInt64LE(64);
 }
 
 async function tokenAmountOrZero(
@@ -656,30 +693,34 @@ async function sourceSetup(runtime: Runtime, send: boolean) {
         source: { ...runtime.state.source, setupSignature: signature },
       });
     },
-    async () => {
+    async (minContextSlot) => {
       const rootInfo = await verifyProgramOwnedAccount(
         runtime.connection,
         values.addressBookRoot.publicKey,
         HANDLER_PROGRAM,
-        "address-book root"
+        "address-book root",
+        minContextSlot
       );
       const sraInfo = await verifyProgramOwnedAccount(
         runtime.connection,
         values.sraConfig,
         HANDLER_PROGRAM,
-        "SRA config"
+        "SRA config",
+        minContextSlot
       );
       const entryInfo = await verifyProgramOwnedAccount(
         runtime.connection,
         values.addressBookEntry,
         HANDLER_PROGRAM,
-        "address-book entry"
+        "address-book entry",
+        minContextSlot
       );
       await verifyProgramOwnedAccount(
         runtime.connection,
         values.sraVault,
         TOKEN_PROGRAM,
-        "SRA vault"
+        "SRA vault",
+        minContextSlot
       );
       const root = runtime.handler.coder.accounts.decode<{
         owner: web3.PublicKey;
@@ -884,12 +925,13 @@ async function sourceDeposit(runtime: Runtime, send: boolean) {
         },
       });
     },
-    async () => {
+    async (minContextSlot) => {
       const sraInfo = await verifyProgramOwnedAccount(
         runtime.connection,
         values.sraConfig,
         HANDLER_PROGRAM,
-        "SRA config"
+        "SRA config",
+        minContextSlot
       );
       const postSra = runtime.handler.coder.accounts.decode<{
         depositNonce: BN;
@@ -897,23 +939,28 @@ async function sourceDeposit(runtime: Runtime, send: boolean) {
       if (!postSra.depositNonce.eq(preSra.depositNonce.addn(1))) {
         throw new Error("SRA deposit nonce post-state verification failed");
       }
-      const postVault = BigInt(
-        (await runtime.connection.getTokenAccountBalance(values.sraVault)).value
-          .amount
+      const postVault = await tokenAmountAfterConfirmation(
+        runtime.connection,
+        values.sraVault,
+        "SRA vault",
+        minContextSlot
       );
       if (postVault !== preVault - BigInt(source.inputAmount)) {
         throw new Error("SRA vault post-state verification failed");
       }
-      const custody = BigInt(
-        (await runtime.connection.getTokenAccountBalance(values.adapterCustody))
-          .value.amount
+      const custody = await tokenAmountAfterConfirmation(
+        runtime.connection,
+        values.adapterCustody,
+        "adapter custody",
+        minContextSlot
       );
       if (custody !== 0n) throw new Error("adapter custody is not zero");
       await verifyProgramOwnedAccount(
         runtime.connection,
         eventData.publicKey,
         CCTP_MESSAGE_TRANSMITTER,
-        "Circle event account"
+        "Circle event account",
+        minContextSlot
       );
     }
   );
@@ -1123,30 +1170,34 @@ async function destinationSetup(runtime: Runtime, send: boolean) {
         },
       });
     },
-    async () => {
+    async (minContextSlot) => {
       const routeInfo = await verifyProgramOwnedAccount(
         runtime.connection,
         values.route,
         HANDLER_PROGRAM,
-        "destination route"
+        "destination route",
+        minContextSlot
       );
       await verifyProgramOwnedAccount(
         runtime.connection,
         values.routeVault,
         TOKEN_PROGRAM,
-        "route vault"
+        "route vault",
+        minContextSlot
       );
       await verifyProgramOwnedAccount(
         runtime.connection,
         values.executionVault,
         TOKEN_PROGRAM,
-        "execution vault"
+        "execution vault",
+        minContextSlot
       );
       await verifyProgramOwnedAccount(
         runtime.connection,
         values.recipientAta,
         TOKEN_PROGRAM,
-        "recipient ATA"
+        "recipient ATA",
+        minContextSlot
       );
       const route = runtime.handler.coder.accounts.decode<{
         owner: web3.PublicKey;
