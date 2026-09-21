@@ -158,6 +158,14 @@ function integerAt(value: unknown, path: string, min: number, max: number) {
   return value as number;
 }
 
+function irisIntegerAt(value: unknown, path: string, min: number, max: number) {
+  const normalized =
+    typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value)
+      ? Number(value)
+      : value;
+  return integerAt(normalized, path, min, max);
+}
+
 function decimalAt(value: unknown, path: string, positive = false): string {
   const text = stringAt(value, path);
   if (!/^(0|[1-9][0-9]*)$/.test(text) || (positive && text === "0")) {
@@ -190,6 +198,14 @@ function hexBlobAt(value: unknown, path: string): string {
     throw new Error(`${path} must be 0x-prefixed even-length hex`);
   }
   return text;
+}
+
+function irisBytes32At(value: unknown, path: string): string {
+  const text = stringAt(value, path);
+  if (/^0x[0-9a-fA-F]{40}$/.test(text)) {
+    return `0x${"0".repeat(24)}${text.slice(2)}`;
+  }
+  return hexAt(text, path, 32);
 }
 
 export function bytes32(value: string): Buffer {
@@ -501,19 +517,19 @@ export function validateIrisResponse(
     decoded.decodedMessageBody,
     "Iris response.messages[0].decodedMessage.decodedMessageBody"
   );
-  const sourceDomain = integerAt(
+  const sourceDomain = irisIntegerAt(
     decoded.sourceDomain,
     "Iris sourceDomain",
     0,
     4_294_967_295
   );
-  const destinationDomain = integerAt(
+  const destinationDomain = irisIntegerAt(
     decoded.destinationDomain,
     "Iris destinationDomain",
     0,
     4_294_967_295
   );
-  const mintRecipient = hexAt(body.mintRecipient, "Iris mintRecipient", 32);
+  const mintRecipient = irisBytes32At(body.mintRecipient, "Iris mintRecipient");
   const amount = decimalAt(body.amount, "Iris amount", true);
   if (sourceDomain !== expected.sourceDomain) {
     throw new Error(

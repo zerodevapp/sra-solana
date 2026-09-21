@@ -184,10 +184,11 @@ test("state parsing validates resumable stage data", async () => {
   );
 });
 
-test("Iris resumption validates the route and preserves recorded progress", async () => {
+test("Iris V2 normalizes its live response and preserves recorded progress", async () => {
   const module = await import("../scripts/cctp-mainnet-e2e-utils");
   assert.equal(typeof module.mergeIrisAttestation, "function");
-  const mintRecipient = "0x" + "00".repeat(12) + "44".repeat(20);
+  const evmRecipient = "0x" + "44".repeat(20);
+  const mintRecipient = "0x" + "00".repeat(12) + evmRecipient.slice(2);
   const response = {
     messages: [
       {
@@ -195,11 +196,11 @@ test("Iris resumption validates the route and preserves recorded progress", asyn
         message: "0x0102",
         attestation: "0x0304",
         decodedMessage: {
-          sourceDomain: 5,
-          destinationDomain: 3,
+          sourceDomain: "5",
+          destinationDomain: "3",
           nonce: "0x" + "05".repeat(32),
           decodedMessageBody: {
-            mintRecipient,
+            mintRecipient: evmRecipient,
             amount: "1000000",
           },
         },
