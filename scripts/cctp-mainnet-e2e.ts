@@ -98,6 +98,8 @@ export function parseCliArguments(argv: readonly string[]): Readonly<{
   send: boolean;
   direction?: "source" | "destination";
   retry: boolean;
+  keystorePath?: string;
+  passwordFile?: string;
 }> {
   const [commandValue, ...rest] = argv;
   if (!CCTP_COMMANDS.includes(commandValue as CctpCommand)) {
@@ -108,6 +110,8 @@ export function parseCliArguments(argv: readonly string[]): Readonly<{
   let send = false;
   let direction: "source" | "destination" | undefined;
   let retry = false;
+  let keystorePath: string | undefined;
+  let passwordFile: string | undefined;
   for (let index = 0; index < rest.length; index++) {
     const flag = rest[index];
     if (flag === "--send") {
@@ -118,7 +122,15 @@ export function parseCliArguments(argv: readonly string[]): Readonly<{
       retry = true;
       continue;
     }
-    if (!["--config", "--state", "--direction"].includes(flag)) {
+    if (
+      ![
+        "--config",
+        "--state",
+        "--direction",
+        "--keystore",
+        "--password-file",
+      ].includes(flag)
+    ) {
       throw new Error(`unknown flag ${flag}`);
     }
     const value = rest[++index];
@@ -126,12 +138,35 @@ export function parseCliArguments(argv: readonly string[]): Readonly<{
       throw new Error(`${flag} requires a value`);
     if (flag === "--config") configPath = value;
     if (flag === "--state") statePath = value;
+    if (flag === "--keystore") keystorePath = value;
+    if (flag === "--password-file") passwordFile = value;
     if (flag === "--direction") {
       if (value !== "source" && value !== "destination") {
         throw new Error("--direction must be source or destination");
       }
       direction = value;
     }
+  }
+  if (
+    commandValue === "arbitrum-receive" &&
+    send &&
+    (!keystorePath || !passwordFile)
+  ) {
+    throw new Error(
+      "arbitrum-receive --send requires --keystore and --password-file"
+    );
+  }
+  if ((keystorePath === undefined) !== (passwordFile === undefined)) {
+    throw new Error("--keystore and --password-file must be provided together");
+  }
+  if (
+    keystorePath &&
+    commandValue !== "preflight" &&
+    commandValue !== "arbitrum-receive"
+  ) {
+    throw new Error(
+      "wallet flags are only valid for preflight and arbitrum-receive"
+    );
   }
   return {
     command: commandValue as CctpCommand,
@@ -140,6 +175,8 @@ export function parseCliArguments(argv: readonly string[]): Readonly<{
     send,
     direction,
     retry,
+    ...(keystorePath ? { keystorePath } : {}),
+    ...(passwordFile ? { passwordFile } : {}),
   };
 }
 
@@ -166,6 +203,25 @@ type SolanaPlan = Readonly<{
   amount: string;
   recipient: string;
 }>;
+
+type CastWalletOptions = Readonly<{
+  keystorePath?: string;
+  passwordFile?: string;
+}>;
+
+export function castWalletArguments(
+  account: string,
+  wallet: CastWalletOptions
+) {
+  return wallet.keystorePath && wallet.passwordFile
+    ? [
+        "--keystore",
+        wallet.keystorePath,
+        "--password-file",
+        wallet.passwordFile,
+      ]
+    : ["--account", account];
+}
 
 function evmAddressFromBytes32(value: string) {
   if (!/^0x0{24}[0-9a-fA-F]{40}$/.test(value)) {
@@ -289,7 +345,8 @@ function createRuntime(args: ReturnType<typeof parseCliArguments>): Runtime {
 
 async function verifyConfiguredEvmBoundary(
   runtime: Runtime,
-  requireSigner: boolean
+  requireSigner: boolean,
+  wallet: CastWalletOptions = {}
 ) {
   return verifyEvmBoundary(
     {
@@ -309,8 +366,7 @@ async function verifyConfiguredEvmBoundary(
               runCast([
                 "wallet",
                 "address",
-                "--account",
-                runtime.config.arbitrum.account,
+                ...castWalletArguments(runtime.config.arbitrum.account, wallet),
               ]),
           }
         : {}),
@@ -1934,11 +1990,11 @@ async function destinationRecover(
   );
 }
 
-async function preflight(runtime: Runtime) {
+async function preflight(runtime: Runtime, wallet: CastWalletOptions) {
   const source = sourceValues(runtime);
   const destination = destinationValues(runtime);
   const genesis = await runtime.connection.getGenesisHash();
-  const evm = await verifyConfiguredEvmBoundary(runtime, true);
+  const evm = await verifyConfiguredEvmBoundary(runtime, true, wallet);
   if (!("signer" in evm)) throw new Error("cast signer verification failed");
   printSummary(
     runtime,
@@ -1950,7 +2006,7 @@ async function preflight(runtime: Runtime) {
         { role: "initiator", keypair: source.initiator },
         { role: "destination owner", keypair: destination.owner },
         {
-          role: `cast account ${runtime.config.arbitrum.account}`,
+          role: "Arbitrum signer",
           address: evm.signer,
         },
       ],
@@ -2122,8 +2178,19 @@ async function irisWait(
   }
 }
 
+export function sanitizeCastEnvironment(env: NodeJS.ProcessEnv) {
+  const sanitized = { ...env };
+  delete sanitized.ETH_PASSWORD;
+  delete sanitized.ETH_KEYSTORE;
+  delete sanitized.ETH_KEYSTORE_ACCOUNT;
+  return sanitized;
+}
+
 function runCast(args: readonly string[]) {
-  const result = spawnSync("cast", [...args], { encoding: "utf8" });
+  const result = spawnSync("cast", [...args], {
+    encoding: "utf8",
+    env: sanitizeCastEnvironment(process.env),
+  });
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(
@@ -2133,7 +2200,11 @@ function runCast(args: readonly string[]) {
   return result.stdout.trim();
 }
 
-async function arbitrumReceive(runtime: Runtime, send: boolean) {
+async function arbitrumReceive(
+  runtime: Runtime,
+  send: boolean,
+  wallet: CastWalletOptions
+) {
   const stage = runtime.state.source;
   if (stage?.evmTransactionHash) {
     throw new Error(
@@ -2150,7 +2221,7 @@ async function arbitrumReceive(runtime: Runtime, send: boolean) {
     stage.message,
     stage.attestation,
   ];
-  const evm = await verifyConfiguredEvmBoundary(runtime, true);
+  const evm = await verifyConfiguredEvmBoundary(runtime, true, wallet);
   if (!("signer" in evm)) throw new Error("cast signer verification failed");
   const recipient = evmAddressFromBytes32(runtime.config.source.recipient);
   const targetToken = evmAddressFromBytes32(runtime.config.source.targetToken);
@@ -2174,7 +2245,7 @@ async function arbitrumReceive(runtime: Runtime, send: boolean) {
       command: "arbitrum-receive",
       signers: [
         {
-          role: `cast account ${runtime.config.arbitrum.account}`,
+          role: "Arbitrum signer",
           address: evm.signer,
         },
       ],
@@ -2214,8 +2285,7 @@ async function arbitrumReceive(runtime: Runtime, send: boolean) {
       const output = runCast([
         "send",
         ...receiveArgs,
-        "--account",
-        runtime.config.arbitrum.account,
+        ...castWalletArguments(runtime.config.arbitrum.account, wallet),
         "--rpc-url",
         runtime.config.arbitrum.rpcUrl,
         "--json",
@@ -2274,13 +2344,13 @@ async function arbitrumReceive(runtime: Runtime, send: boolean) {
 export async function main(argv = process.argv.slice(2)) {
   const args = parseCliArguments(argv);
   const runtime = createRuntime(args);
-  if (args.command === "preflight") return preflight(runtime);
+  if (args.command === "preflight") return preflight(runtime, args);
   if (args.command === "source-setup") return sourceSetup(runtime, args.send);
   if (args.command === "source-deposit")
     return sourceDeposit(runtime, args.send);
   if (args.command === "iris-wait") return irisWait(runtime, args.direction);
   if (args.command === "arbitrum-receive") {
-    return arbitrumReceive(runtime, args.send);
+    return arbitrumReceive(runtime, args.send, args);
   }
   if (args.command === "destination-setup") {
     return destinationSetup(runtime, args.send);

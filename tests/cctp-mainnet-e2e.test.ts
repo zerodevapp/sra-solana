@@ -720,3 +720,57 @@ test("CLI parsing exposes only the nine CCTP operator commands", async () => {
     /unknown flag --broadcast/
   );
 });
+
+test("Arbitrum sends require explicit isolated keystore credentials", async () => {
+  const module = await import("../scripts/cctp-mainnet-e2e");
+  assert.throws(
+    () => module.parseCliArguments(["arbitrum-receive", "--send"]),
+    /arbitrum-receive --send requires --keystore and --password-file/
+  );
+
+  const parsed = module.parseCliArguments([
+    "arbitrum-receive",
+    "--send",
+    "--keystore",
+    "/keys/cctp-canary",
+    "--password-file",
+    "/tmp/cctp-password",
+  ]);
+  assert.equal(parsed.keystorePath, "/keys/cctp-canary");
+  assert.equal(parsed.passwordFile, "/tmp/cctp-password");
+  assert.deepEqual(module.castWalletArguments("cctp-canary", parsed), [
+    "--keystore",
+    "/keys/cctp-canary",
+    "--password-file",
+    "/tmp/cctp-password",
+  ]);
+  assert.doesNotThrow(() =>
+    module.parseCliArguments([
+      "preflight",
+      "--keystore",
+      "/keys/cctp-canary",
+      "--password-file",
+      "/tmp/cctp-password",
+    ])
+  );
+  assert.throws(
+    () =>
+      module.parseCliArguments([
+        "source-deposit",
+        "--keystore",
+        "/keys/cctp-canary",
+        "--password-file",
+        "/tmp/cctp-password",
+      ]),
+    /wallet flags are only valid for preflight and arbitrum-receive/
+  );
+  assert.deepEqual(
+    module.sanitizeCastEnvironment({
+      PATH: "/bin",
+      ETH_PASSWORD: "/tmp/cctp-password",
+      ETH_KEYSTORE: "/keys/cctp-canary",
+      ETH_KEYSTORE_ACCOUNT: "cctp-canary",
+    }),
+    { PATH: "/bin" }
+  );
+});
