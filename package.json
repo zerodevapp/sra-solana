@@ -4,7 +4,9 @@
     "node": ">=22.12.0"
   },
   "scripts": {
+    "cctp-e2e": "tsx scripts/cctp-mainnet-e2e.ts",
     "fee-config:initialize": "tsx scripts/initialize-fee-config.ts",
+    "test:cctp-e2e": "tsx --test tests/cctp-mainnet-e2e.test.ts",
     "test:deployment-program-ids": "tsx --test tests/deployment-program-ids.test.ts",
     "test:fee-config-v1": "tsx --test tests/initialize-fee-config-v1.test.ts",
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
