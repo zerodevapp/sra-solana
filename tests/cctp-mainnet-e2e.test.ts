@@ -28,6 +28,8 @@ const sampleConfig = {
     account: "cctp-canary",
     canaryAddress: "0x" + "44".repeat(20),
     messageTransmitter: "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+    cctpAdapter: "0x" + "66".repeat(20),
+    cctpAdapterRuntimeHash: "0x" + "77".repeat(32),
   },
   destination: {
     ownerKeypair: "/keys/destination-owner.json",
@@ -156,13 +158,62 @@ test("state parsing validates resumable stage data", async () => {
     },
     destination: {
       evmBurnTransactionHash: "0x" + "07".repeat(32),
+      arbitrumSraAddress: "0x" + "0d".repeat(20),
+      arbitrumSetupAttempts: {
+        deployment: [
+          {
+            hash: "0x" + "0e".repeat(32),
+            senderNonce: "4",
+            submittedBlock: "100",
+          },
+        ],
+        initiator: [
+          {
+            hash: "0x" + "0f".repeat(32),
+            senderNonce: "5",
+            submittedBlock: "101",
+          },
+        ],
+        funding: [
+          {
+            hash: "0x" + "10".repeat(32),
+            senderNonce: "6",
+            submittedBlock: "102",
+          },
+        ],
+      },
+      arbitrumDepositAttempt: {
+        hash: "0x" + "07".repeat(32),
+        senderNonce: "7",
+        submittedBlock: "103",
+      },
+      arbitrumDepositAttemptHistory: [
+        {
+          hash: "0x" + "11".repeat(32),
+          senderNonce: "3",
+          submittedBlock: "99",
+        },
+      ],
+      arbitrumBaselineDepositNonce: "0",
+      arbitrumConfirmedDepositNonce: "1",
+      arbitrumBurnMessage: "0x01020304",
       message: "0x0809",
       attestation: "0x0a0b",
       nonce: "0x" + "0c".repeat(32),
       solanaReceiveSignature: "5Nd1mExampleSignature",
+      solanaReceiveLastValidBlockHeight: "104",
       solanaFinalizeSignature: "6Nd1mExampleSignature",
+      solanaFinalizeLastValidBlockHeight: "105",
       solanaActionsSignature: "7Nd1mExampleSignature",
       solanaRecoverSignature: "8Nd1mExampleSignature",
+      arbitrumRecoveryAttemptHistory: [
+        {
+          hash: "0x" + "12".repeat(32),
+          senderNonce: "8",
+          submittedBlock: "106",
+        },
+      ],
+      solanaRecoverySignatureHistory: ["8Nd1mExampleSignature"],
     },
   };
   assert.deepEqual(module.parseCctpState(state), state);
@@ -182,6 +233,105 @@ test("state parsing validates resumable stage data", async () => {
       }),
     /state\.source\.message must be 0x-prefixed even-length hex/
   );
+  assert.throws(
+    () =>
+      module.parseCctpState({
+        ...state,
+        destination: {
+          ...state.destination,
+          evmBurnTransactionHash: "0x" + "13".repeat(32),
+        },
+      }),
+    /state\.destination\.evmBurnTransactionHash must equal state\.destination\.arbitrumDepositAttempt\.hash/
+  );
+  assert.throws(
+    () =>
+      module.parseCctpState({
+        ...state,
+        destination: {
+          ...state.destination,
+          arbitrumDepositAttempt: {
+            ...state.destination.arbitrumDepositAttempt,
+            senderNonce: "07",
+          },
+        },
+      }),
+    /senderNonce must be a decimal integer/
+  );
+  assert.throws(
+    () =>
+      module.parseCctpState({
+        ...state,
+        destination: {
+          ...state.destination,
+          arbitrumSetupAttempts: {
+            ...state.destination.arbitrumSetupAttempts,
+            unexpected: [],
+          },
+        },
+      }),
+    /state\.destination\.arbitrumSetupAttempts has unknown field unexpected/
+  );
+});
+
+test("reverse state updates preserve the successful source object", async () => {
+  const module = await import("../scripts/cctp-mainnet-e2e-utils");
+  const source = {
+    setupSignature: "3Nd1mExampleSignature",
+    solanaSignature: "4Nd1mExampleSignature",
+    circleEventAccount: "11111111111111111111111111111111",
+    message: "0x0102",
+    attestation: "0x0304",
+    nonce: "0x" + "05".repeat(32),
+    evmTransactionHash: "0x" + "06".repeat(32),
+  };
+  const state = {
+    version: 1 as const,
+    source,
+    destination: {
+      evmBurnTransactionHash: "0x" + "07".repeat(32),
+      arbitrumDepositAttempt: {
+        hash: "0x" + "07".repeat(32),
+        senderNonce: "1",
+        submittedBlock: "100",
+      },
+    },
+  };
+  const response = {
+    messages: [
+      {
+        status: "complete",
+        message: "0x0809",
+        attestation: "0x0a0b",
+        decodedMessage: {
+          sourceDomain: 3,
+          destinationDomain: 5,
+          nonce: "0x" + "0c".repeat(32),
+          decodedMessageBody: {
+            mintRecipient: "0x" + "0d".repeat(32),
+            amount: "1000000",
+          },
+        },
+      },
+    ],
+  };
+  const snapshot = structuredClone(source);
+
+  const updated = module.mergeIrisAttestation(state, "destination", response, {
+    sourceDomain: 3,
+    destinationDomain: 5,
+    mintRecipient: "0x" + "0d".repeat(32),
+    amount: "1000000",
+  });
+
+  assert.deepEqual(state.source, snapshot);
+  assert.deepEqual(updated.source, snapshot);
+  assert.deepEqual(updated.destination, {
+    ...state.destination,
+    message: "0x0809",
+    attestation: "0x0a0b",
+    nonce: "0x" + "0c".repeat(32),
+  });
 });
 
 test("Iris V2 normalizes its live response and preserves recorded progress", async () => {

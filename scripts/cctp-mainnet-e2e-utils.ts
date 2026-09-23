@@ -19,12 +19,19 @@ import {
   type Transaction,
   type V1TransactionConfig,
 } from "@solana/kit";
+import {
+  ARBITRUM_CCTP_DEPLOYMENT,
+  parseEvmDestinationState,
+  type EvmDestinationState,
+} from "./cctp-mainnet-e2e-evm";
 
 export const ARBITRUM_CHAIN_ID = 42161;
-export const ARBITRUM_USDC =
-  "0x000000000000000000000000af88d065e77c8cC2239327C5EDb3A432268e5831";
+export const ARBITRUM_USDC = `0x${"0".repeat(
+  24
+)}${ARBITRUM_CCTP_DEPLOYMENT.usdc.slice(2)}`;
 export const EVM_MESSAGE_TRANSMITTER =
-  "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64";
+  ARBITRUM_CCTP_DEPLOYMENT.messageTransmitter;
+export const CCTP_CANARY_AMOUNT = "1000000";
 
 export const NATIVE_V1_CONFIG: Readonly<V1TransactionConfig> = {
   computeUnitLimit: 400_000,
@@ -60,6 +67,8 @@ export type CctpConfig = Readonly<{
     account: string;
     canaryAddress: string;
     messageTransmitter: string;
+    cctpAdapter: string;
+    cctpAdapterRuntimeHash: string;
   }>;
   destination: Readonly<{
     ownerKeypair: string;
@@ -84,19 +93,7 @@ export type CctpState = Readonly<{
     nonce?: string;
     evmTransactionHash?: string;
   }>;
-  destination?: Readonly<{
-    setupSignature?: string;
-    evmBurnTransactionHash?: string;
-    message?: string;
-    attestation?: string;
-    nonce?: string;
-    solanaReceiveSignature?: string;
-    solanaReceiveLastValidBlockHeight?: string;
-    solanaFinalizeSignature?: string;
-    solanaFinalizeLastValidBlockHeight?: string;
-    solanaActionsSignature?: string;
-    solanaRecoverSignature?: string;
-  }>;
+  destination?: EvmDestinationState;
 }>;
 
 export type IrisExpectation = Readonly<{
@@ -266,7 +263,14 @@ export function parseCctpConfig(value: unknown): CctpConfig {
   const arbitrum = objectAt(config.arbitrum, "config.arbitrum");
   exactFields(
     arbitrum,
-    ["rpcUrl", "account", "canaryAddress", "messageTransmitter"],
+    [
+      "rpcUrl",
+      "account",
+      "canaryAddress",
+      "messageTransmitter",
+      "cctpAdapter",
+      "cctpAdapterRuntimeHash",
+    ],
     "config.arbitrum"
   );
   const destination = objectAt(config.destination, "config.destination");
@@ -350,6 +354,15 @@ export function parseCctpConfig(value: unknown): CctpConfig {
         arbitrum.messageTransmitter,
         "config.arbitrum.messageTransmitter"
       ),
+      cctpAdapter: evmAddressAt(
+        arbitrum.cctpAdapter,
+        "config.arbitrum.cctpAdapter"
+      ),
+      cctpAdapterRuntimeHash: hexAt(
+        arbitrum.cctpAdapterRuntimeHash,
+        "config.arbitrum.cctpAdapterRuntimeHash",
+        32
+      ),
     },
     destination: {
       ownerKeypair: stringAt(
@@ -420,6 +433,29 @@ export function parseCctpConfig(value: unknown): CctpConfig {
       `config.arbitrum.messageTransmitter must be ${EVM_MESSAGE_TRANSMITTER}`
     );
   }
+  if (/^0x0{40}$/i.test(parsed.arbitrum.cctpAdapter)) {
+    throw new Error("config.arbitrum.cctpAdapter must not be the zero address");
+  }
+  if (/^0x0{64}$/i.test(parsed.arbitrum.cctpAdapterRuntimeHash)) {
+    throw new Error(
+      "config.arbitrum.cctpAdapterRuntimeHash must not be the zero hash"
+    );
+  }
+  for (const [path, amount] of [
+    ["config.source.inputAmount", parsed.source.inputAmount],
+    ["config.source.outputAmount", parsed.source.outputAmount],
+    ["config.destination.amount", parsed.destination.amount],
+  ] as const) {
+    if (amount !== CCTP_CANARY_AMOUNT) {
+      throw new Error(`${path} must be ${CCTP_CANARY_AMOUNT}`);
+    }
+  }
+  if (parsed.source.protocolFeeAmount !== "0") {
+    throw new Error("config.source.protocolFeeAmount must be 0");
+  }
+  if (parsed.source.allowedSlippageBps !== 0) {
+    throw new Error("config.source.allowedSlippageBps must be 0");
+  }
   const net =
     BigInt(parsed.source.inputAmount) - BigInt(parsed.source.protocolFeeAmount);
   if (net <= 0n)
@@ -480,19 +516,7 @@ export function parseCctpState(value: unknown): CctpState {
     });
   }
   if (state.destination !== undefined) {
-    result.destination = optionalStage(state.destination, "state.destination", {
-      setupSignature: "string",
-      evmBurnTransactionHash: "hex32",
-      message: "hex",
-      attestation: "hex",
-      nonce: "hex32",
-      solanaReceiveSignature: "string",
-      solanaReceiveLastValidBlockHeight: "string",
-      solanaFinalizeSignature: "string",
-      solanaFinalizeLastValidBlockHeight: "string",
-      solanaActionsSignature: "string",
-      solanaRecoverSignature: "string",
-    });
+    result.destination = parseEvmDestinationState(state.destination);
   }
   return result as CctpState;
 }
