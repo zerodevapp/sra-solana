@@ -264,6 +264,20 @@ test("state parsing validates resumable stage data", async () => {
         ...state,
         destination: {
           ...state.destination,
+          arbitrumDepositAttempt: {
+            ...state.destination.arbitrumDepositAttempt,
+            submittedBlock: "18446744073709551616",
+          },
+        },
+      }),
+    /submittedBlock exceeds u64/
+  );
+  assert.throws(
+    () =>
+      module.parseCctpState({
+        ...state,
+        destination: {
+          ...state.destination,
           arbitrumSetupAttempts: {
             ...state.destination.arbitrumSetupAttempts,
             unexpected: [],

@@ -1,232 +1,5 @@
-type JsonObject = Record<string, unknown>;
-
-export type EvmAttempt = Readonly<{
-  hash: string;
-  senderNonce: string;
-  submittedBlock: string;
-}>;
-
-export type EvmSetupAttempts = Readonly<{
-  deployment?: readonly EvmAttempt[];
-  initiator?: readonly EvmAttempt[];
-  funding?: readonly EvmAttempt[];
-}>;
-
-export type EvmDestinationState = Readonly<{
-  setupSignature?: string;
-  evmBurnTransactionHash?: string;
-  arbitrumSraAddress?: string;
-  arbitrumSetupAttempts?: EvmSetupAttempts;
-  arbitrumDepositAttempt?: EvmAttempt;
-  arbitrumDepositAttemptHistory?: readonly EvmAttempt[];
-  arbitrumBaselineDepositNonce?: string;
-  arbitrumConfirmedDepositNonce?: string;
-  arbitrumBurnMessage?: string;
-  message?: string;
-  attestation?: string;
-  nonce?: string;
-  solanaReceiveSignature?: string;
-  solanaReceiveLastValidBlockHeight?: string;
-  solanaFinalizeSignature?: string;
-  solanaFinalizeLastValidBlockHeight?: string;
-  solanaActionsSignature?: string;
-  solanaRecoverSignature?: string;
-  arbitrumRecoveryAttemptHistory?: readonly EvmAttempt[];
-  solanaRecoverySignatureHistory?: readonly string[];
-}>;
-
-function objectAt(value: unknown, path: string): JsonObject {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${path} must be an object`);
-  }
-  return value as JsonObject;
-}
-
-function knownFields(
-  value: JsonObject,
-  fields: readonly string[],
-  path: string
-) {
-  for (const field of Object.keys(value)) {
-    if (!fields.includes(field)) {
-      throw new Error(`${path} has unknown field ${field}`);
-    }
-  }
-}
-
-function stringAt(value: unknown, path: string) {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`${path} must be a non-empty string`);
-  }
-  return value;
-}
-
-function hexAt(value: unknown, path: string, bytes: number) {
-  const text = stringAt(value, path);
-  if (!new RegExp(`^0x[0-9a-fA-F]{${bytes * 2}}$`).test(text)) {
-    throw new Error(`${path} must be 0x-prefixed ${bytes}-byte hex`);
-  }
-  return text;
-}
-
-function nonzeroHexAt(value: unknown, path: string, bytes: number) {
-  const text = hexAt(value, path, bytes);
-  if (text.toLowerCase() === `0x${"00".repeat(bytes)}`) {
-    throw new Error(`${path} must not be zero`);
-  }
-  return text;
-}
-
-function hexBlobAt(value: unknown, path: string) {
-  const text = stringAt(value, path);
-  if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(text)) {
-    throw new Error(`${path} must be 0x-prefixed even-length hex`);
-  }
-  return text;
-}
-
-function decimalAt(value: unknown, path: string) {
-  const text = stringAt(value, path);
-  if (!/^(0|[1-9][0-9]*)$/.test(text)) {
-    throw new Error(`${path} must be a decimal integer`);
-  }
-  return text;
-}
-
-function attemptAt(value: unknown, path: string): EvmAttempt {
-  const attempt = objectAt(value, path);
-  knownFields(attempt, ["hash", "senderNonce", "submittedBlock"], path);
-  for (const field of ["hash", "senderNonce", "submittedBlock"] as const) {
-    if (!(field in attempt)) throw new Error(`${path}.${field} is required`);
-  }
-  return {
-    hash: nonzeroHexAt(attempt.hash, `${path}.hash`, 32),
-    senderNonce: decimalAt(attempt.senderNonce, `${path}.senderNonce`),
-    submittedBlock: decimalAt(attempt.submittedBlock, `${path}.submittedBlock`),
-  };
-}
-
-function attemptHistoryAt(value: unknown, path: string) {
-  if (!Array.isArray(value)) throw new Error(`${path} must be an array`);
-  return value.map((attempt, index) => attemptAt(attempt, `${path}[${index}]`));
-}
-
-function setupAttemptsAt(value: unknown, path: string): EvmSetupAttempts {
-  const setup = objectAt(value, path);
-  knownFields(setup, ["deployment", "initiator", "funding"], path);
-  const parsed: {
-    deployment?: readonly EvmAttempt[];
-    initiator?: readonly EvmAttempt[];
-    funding?: readonly EvmAttempt[];
-  } = {};
-  for (const stage of ["deployment", "initiator", "funding"] as const) {
-    if (setup[stage] !== undefined) {
-      parsed[stage] = attemptHistoryAt(setup[stage], `${path}.${stage}`);
-    }
-  }
-  return parsed;
-}
-
-function stringHistoryAt(value: unknown, path: string) {
-  if (!Array.isArray(value)) throw new Error(`${path} must be an array`);
-  return value.map((entry, index) => stringAt(entry, `${path}[${index}]`));
-}
-
-export function parseEvmDestinationState(
-  value: unknown,
-  path = "state.destination"
-): EvmDestinationState {
-  const destination = objectAt(value, path);
-  const scalarFields = {
-    setupSignature: "string",
-    evmBurnTransactionHash: "hex32",
-    arbitrumBaselineDepositNonce: "decimal",
-    arbitrumConfirmedDepositNonce: "decimal",
-    arbitrumBurnMessage: "hex",
-    message: "hex",
-    attestation: "hex",
-    nonce: "hex32",
-    solanaReceiveSignature: "string",
-    solanaReceiveLastValidBlockHeight: "decimal",
-    solanaFinalizeSignature: "string",
-    solanaFinalizeLastValidBlockHeight: "decimal",
-    solanaActionsSignature: "string",
-    solanaRecoverSignature: "string",
-  } as const;
-  knownFields(
-    destination,
-    [
-      ...Object.keys(scalarFields),
-      "arbitrumSraAddress",
-      "arbitrumSetupAttempts",
-      "arbitrumDepositAttempt",
-      "arbitrumDepositAttemptHistory",
-      "arbitrumRecoveryAttemptHistory",
-      "solanaRecoverySignatureHistory",
-    ],
-    path
-  );
-  const parsed: Record<string, unknown> = {};
-  for (const [field, kind] of Object.entries(scalarFields)) {
-    if (destination[field] === undefined) continue;
-    parsed[field] =
-      kind === "string"
-        ? stringAt(destination[field], `${path}.${field}`)
-        : kind === "hex32"
-        ? hexAt(destination[field], `${path}.${field}`, 32)
-        : kind === "hex"
-        ? hexBlobAt(destination[field], `${path}.${field}`)
-        : decimalAt(destination[field], `${path}.${field}`);
-  }
-  if (destination.arbitrumSraAddress !== undefined) {
-    parsed.arbitrumSraAddress = nonzeroHexAt(
-      destination.arbitrumSraAddress,
-      `${path}.arbitrumSraAddress`,
-      20
-    );
-  }
-  if (destination.arbitrumSetupAttempts !== undefined) {
-    parsed.arbitrumSetupAttempts = setupAttemptsAt(
-      destination.arbitrumSetupAttempts,
-      `${path}.arbitrumSetupAttempts`
-    );
-  }
-  for (const field of [
-    "arbitrumDepositAttemptHistory",
-    "arbitrumRecoveryAttemptHistory",
-  ] as const) {
-    if (destination[field] !== undefined) {
-      parsed[field] = attemptHistoryAt(destination[field], `${path}.${field}`);
-    }
-  }
-  if (destination.arbitrumDepositAttempt !== undefined) {
-    parsed.arbitrumDepositAttempt = attemptAt(
-      destination.arbitrumDepositAttempt,
-      `${path}.arbitrumDepositAttempt`
-    );
-  }
-  if (destination.solanaRecoverySignatureHistory !== undefined) {
-    parsed.solanaRecoverySignatureHistory = stringHistoryAt(
-      destination.solanaRecoverySignatureHistory,
-      `${path}.solanaRecoverySignatureHistory`
-    );
-  }
-  const burnHash = parsed.evmBurnTransactionHash;
-  const depositAttempt = parsed.arbitrumDepositAttempt as
-    | EvmAttempt
-    | undefined;
-  if (
-    (burnHash !== undefined || depositAttempt !== undefined) &&
-    (typeof burnHash !== "string" ||
-      depositAttempt === undefined ||
-      burnHash.toLowerCase() !== depositAttempt.hash.toLowerCase())
-  ) {
-    throw new Error(
-      `${path}.evmBurnTransactionHash must equal ${path}.arbitrumDepositAttempt.hash`
-    );
-  }
-  return parsed;
-}
+import { keccak_256 } from "@noble/hashes/sha3";
+import { hexBlobAt } from "./cctp-mainnet-e2e-json";
 
 export const ARBITRUM_SRA_DEPLOYMENT = {
   factory: "0x3E2746a51F205357F3915a7d4de38eEf0637b950",
@@ -250,7 +23,6 @@ export type ArbitrumCctpAdapterObservation = Readonly<{
   chainId: bigint;
   address: string;
   code: string;
-  runtimeHash: string;
   handler: string;
   tokenMessenger: string;
   messageTransmitter: string;
@@ -269,6 +41,11 @@ function sameHex(left: string, right: string) {
   return left.toLowerCase() === right.toLowerCase();
 }
 
+function runtimeHash(code: string) {
+  const bytes = Buffer.from(code.slice(2), "hex");
+  return `0x${Buffer.from(keccak_256(bytes)).toString("hex")}`;
+}
+
 export function validateArbitrumCctpAdapter(
   config: ArbitrumAdapterConfig,
   observation: ArbitrumCctpAdapterObservation
@@ -279,10 +56,8 @@ export function validateArbitrumCctpAdapter(
   if (!sameHex(observation.address, config.cctpAdapter)) {
     throw new Error("CCTP adapter address does not match config");
   }
-  if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(observation.code)) {
-    throw new Error("CCTP adapter has no bytecode");
-  }
-  if (!sameHex(observation.runtimeHash, config.cctpAdapterRuntimeHash)) {
+  const code = hexBlobAt(observation.code, "CCTP adapter bytecode");
+  if (!sameHex(runtimeHash(code), config.cctpAdapterRuntimeHash)) {
     throw new Error("CCTP adapter runtime hash does not match config");
   }
   if (!sameHex(observation.handler, ARBITRUM_SRA_DEPLOYMENT.handler)) {

@@ -19,11 +19,21 @@ import {
   type Transaction,
   type V1TransactionConfig,
 } from "@solana/kit";
+import { ARBITRUM_CCTP_DEPLOYMENT } from "./cctp-mainnet-e2e-evm";
 import {
-  ARBITRUM_CCTP_DEPLOYMENT,
-  parseEvmDestinationState,
-  type EvmDestinationState,
-} from "./cctp-mainnet-e2e-evm";
+  decimalAt,
+  exactFields,
+  hexAt,
+  hexBlobAt,
+  integerAt,
+  objectAt,
+  stringAt,
+} from "./cctp-mainnet-e2e-json";
+import { parseCctpState, type CctpState } from "./cctp-mainnet-e2e-state";
+
+export { hexAt, objectAt } from "./cctp-mainnet-e2e-json";
+export { parseCctpState, type CctpState } from "./cctp-mainnet-e2e-state";
+export type { JsonObject } from "./cctp-mainnet-e2e-json";
 
 export const ARBITRUM_CHAIN_ID = 42161;
 export const ARBITRUM_USDC = `0x${"0".repeat(
@@ -81,79 +91,12 @@ export type CctpConfig = Readonly<{
   }>;
 }>;
 
-export type CctpState = Readonly<{
-  version: 1;
-  configPath?: string;
-  source?: Readonly<{
-    setupSignature?: string;
-    solanaSignature?: string;
-    circleEventAccount?: string;
-    message?: string;
-    attestation?: string;
-    nonce?: string;
-    evmTransactionHash?: string;
-  }>;
-  destination?: EvmDestinationState;
-}>;
-
 export type IrisExpectation = Readonly<{
   sourceDomain: number;
   destinationDomain: number;
   mintRecipient: string;
   amount: string;
 }>;
-
-export type JsonObject = Record<string, unknown>;
-
-export function objectAt(value: unknown, path: string): JsonObject {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${path} must be an object`);
-  }
-  return value as JsonObject;
-}
-
-function exactFields(
-  value: JsonObject,
-  fields: readonly string[],
-  path: string
-) {
-  for (const key of Object.keys(value)) {
-    if (!fields.includes(key))
-      throw new Error(`${path} has unknown field ${key}`);
-  }
-  for (const key of fields) {
-    if (!(key in value)) throw new Error(`${path}.${key} is required`);
-  }
-}
-
-function knownFields(
-  value: JsonObject,
-  fields: readonly string[],
-  path: string
-) {
-  for (const key of Object.keys(value)) {
-    if (!fields.includes(key))
-      throw new Error(`${path} has unknown field ${key}`);
-  }
-}
-
-function stringAt(value: unknown, path: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`${path} must be a non-empty string`);
-  }
-  return value;
-}
-
-function integerAt(value: unknown, path: string, min: number, max: number) {
-  if (
-    !Number.isInteger(value) ||
-    (value as number) < min ||
-    (value as number) > max
-  ) {
-    throw new Error(`${path} must be an integer between ${min} and ${max}`);
-  }
-  return value as number;
-}
 
 function irisIntegerAt(value: unknown, path: string, min: number, max: number) {
   const normalized =
@@ -163,38 +106,8 @@ function irisIntegerAt(value: unknown, path: string, min: number, max: number) {
   return integerAt(normalized, path, min, max);
 }
 
-function decimalAt(value: unknown, path: string, positive = false): string {
-  const text = stringAt(value, path);
-  if (!/^(0|[1-9][0-9]*)$/.test(text) || (positive && text === "0")) {
-    throw new Error(
-      `${path} must be a ${positive ? "positive " : ""}decimal integer`
-    );
-  }
-  const parsed = BigInt(text);
-  if (parsed > 18_446_744_073_709_551_615n) {
-    throw new Error(`${path} exceeds u64`);
-  }
-  return text;
-}
-
-export function hexAt(value: unknown, path: string, bytes: number): string {
-  const text = stringAt(value, path);
-  if (!new RegExp(`^0x[0-9a-fA-F]{${bytes * 2}}$`).test(text)) {
-    throw new Error(`${path} must be 0x-prefixed ${bytes}-byte hex`);
-  }
-  return text;
-}
-
 function evmAddressAt(value: unknown, path: string): string {
   return hexAt(value, path, 20);
-}
-
-function hexBlobAt(value: unknown, path: string): string {
-  const text = stringAt(value, path);
-  if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(text)) {
-    throw new Error(`${path} must be 0x-prefixed even-length hex`);
-  }
-  return text;
 }
 
 function irisBytes32At(value: unknown, path: string): string {
@@ -471,54 +384,6 @@ export function parseCctpConfig(value: unknown): CctpConfig {
     );
   }
   return parsed;
-}
-
-function optionalStage(
-  value: unknown,
-  path: string,
-  fields: Readonly<Record<string, "string" | "hex" | "hex32">>
-) {
-  const stage = objectAt(value, path);
-  knownFields(stage, Object.keys(fields), path);
-  const parsed: Record<string, string> = {};
-  for (const [name, kind] of Object.entries(fields)) {
-    if (stage[name] === undefined) continue;
-    parsed[name] =
-      kind === "string"
-        ? stringAt(stage[name], `${path}.${name}`)
-        : kind === "hex32"
-        ? hexAt(stage[name], `${path}.${name}`, 32)
-        : hexBlobAt(stage[name], `${path}.${name}`);
-  }
-  return parsed;
-}
-
-export function parseCctpState(value: unknown): CctpState {
-  const state = objectAt(value, "state");
-  knownFields(
-    state,
-    ["version", "configPath", "source", "destination"],
-    "state"
-  );
-  if (state.version !== 1) throw new Error("state.version must be 1");
-  const result: Record<string, unknown> = { version: 1 };
-  if (state.configPath !== undefined)
-    result.configPath = stringAt(state.configPath, "state.configPath");
-  if (state.source !== undefined) {
-    result.source = optionalStage(state.source, "state.source", {
-      setupSignature: "string",
-      solanaSignature: "string",
-      circleEventAccount: "string",
-      message: "hex",
-      attestation: "hex",
-      nonce: "hex32",
-      evmTransactionHash: "hex32",
-    });
-  }
-  if (state.destination !== undefined) {
-    result.destination = parseEvmDestinationState(state.destination);
-  }
-  return result as CctpState;
 }
 
 export function validateIrisResponse(

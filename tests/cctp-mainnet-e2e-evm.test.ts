@@ -27,7 +27,8 @@ const validConfig = {
     canaryAddress: "0x" + "44".repeat(20),
     messageTransmitter: "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
     cctpAdapter: "0x" + "66".repeat(20),
-    cctpAdapterRuntimeHash: "0x" + "77".repeat(32),
+    cctpAdapterRuntimeHash:
+      "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d",
   },
   destination: {
     ownerKeypair: "/keys/destination-owner.json",
@@ -201,7 +202,6 @@ test("Arbitrum CCTP adapter verification binds code and constructor state", asyn
     chainId: 42161n,
     address: validConfig.arbitrum.cctpAdapter,
     code: "0x6000",
-    runtimeHash: validConfig.arbitrum.cctpAdapterRuntimeHash,
     handler: "0x09bE9c9dd3219e81cA2F41AEF85481f86595f592",
     tokenMessenger: "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
     messageTransmitter: "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
@@ -212,11 +212,14 @@ test("Arbitrum CCTP adapter verification binds code and constructor state", asyn
   };
 
   assert.doesNotThrow(() => validate(validConfig.arbitrum, observation));
+  assert.throws(
+    () => validate(validConfig.arbitrum, { ...observation, code: "0x6001" }),
+    /runtime hash/
+  );
   for (const [field, value, message] of [
     ["chainId", 1n, /chain id/],
     ["address", "0x" + "88".repeat(20), /address/],
     ["code", "0x", /bytecode/],
-    ["runtimeHash", "0x" + "88".repeat(32), /runtime hash/],
     ["handler", "0x" + "88".repeat(20), /handler/],
     ["tokenMessenger", "0x" + "88".repeat(20), /TokenMessenger/],
     ["messageTransmitter", "0x" + "88".repeat(20), /MessageTransmitter/],
