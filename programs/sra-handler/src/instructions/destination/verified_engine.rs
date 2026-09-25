@@ -220,18 +220,21 @@ pub(crate) fn validate_pinned_program(program: &AccountInfo, expected: &Pubkey) 
     Ok(())
 }
 
-/// Validate the supplied per-action accounts against the committed template:
-/// every `Fixed` slot must equal the handler-resolved account; `Free` slots are
-/// unconstrained routing. A mismatched `Destination` is the marquee redirect
-/// attack, so it has its own error.
+pub(crate) struct ResolvedSlotKeys {
+    pub token_program: Pubkey,
+    pub signing_authority: Pubkey,
+    pub source: Pubkey,
+    pub destination: Pubkey,
+    pub output_mint: Pubkey,
+}
+
+/// A Free slot may not alias a Fixed slot (duplicate metas merge privileges) or
+/// carry any route output mint writable.
 pub(crate) fn validate_template_slots(
     slots: &[AccountInfo],
     template: &AccountTemplate,
-    token_program: &Pubkey,
-    scratch_auth: &Pubkey,
-    scratch: &Pubkey,
-    destination: &Pubkey,
-    output_mint: &Pubkey,
+    resolved: &ResolvedSlotKeys,
+    route_output_mints: &[Pubkey],
 ) -> Result<()> {
     require!(
         slots.len() == template.slots.len(),
@@ -239,27 +242,33 @@ pub(crate) fn validate_template_slots(
     );
     for (role, info) in template.slots.iter().zip(slots.iter()) {
         match role {
-            SlotRole::Fixed(FixedRole::TokenProgram) => {
-                require_keys_eq!(info.key(), *token_program, SraError::ActionAccountMismatch);
+            SlotRole::Fixed(fixed_role) => {
+                let expected = match fixed_role {
+                    FixedRole::TokenProgram => resolved.token_program,
+                    FixedRole::SigningAuthority => resolved.signing_authority,
+                    FixedRole::Source => resolved.source,
+                    FixedRole::Destination => resolved.destination,
+                    FixedRole::OutputMint => resolved.output_mint,
+                };
+                let mismatch = if *fixed_role == FixedRole::Destination {
+                    SraError::DestinationNotPinned
+                } else {
+                    SraError::ActionAccountMismatch
+                };
+                require_keys_eq!(info.key(), expected, mismatch);
             }
-            SlotRole::Fixed(FixedRole::SigningAuthority) => {
-                require_keys_eq!(info.key(), *scratch_auth, SraError::ActionAccountMismatch);
+            SlotRole::Free => {
+                require!(
+                    !template.slots.iter().zip(slots).any(|(role, fixed)| {
+                        matches!(role, SlotRole::Fixed(_)) && fixed.key == info.key
+                    }),
+                    SraError::ActionAccountMismatch
+                );
+                require!(
+                    !(info.is_writable && route_output_mints.contains(info.key)),
+                    SraError::ActionAccountMismatch
+                );
             }
-            SlotRole::Fixed(FixedRole::Source) => {
-                require_keys_eq!(info.key(), *scratch, SraError::ActionAccountMismatch);
-            }
-            SlotRole::Fixed(FixedRole::Destination) => {
-                require_keys_eq!(info.key(), *destination, SraError::DestinationNotPinned);
-            }
-            SlotRole::Fixed(FixedRole::OutputMint) => {
-                require_keys_eq!(info.key(), *output_mint, SraError::ActionAccountMismatch);
-            }
-            SlotRole::Free => require!(
-                !template.slots.iter().zip(slots).any(|(role, fixed)| {
-                    matches!(role, SlotRole::Fixed(_)) && fixed.key == info.key
-                }),
-                SraError::ActionAccountMismatch
-            ),
         }
     }
     Ok(())

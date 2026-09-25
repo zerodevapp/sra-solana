@@ -16,7 +16,7 @@ use anchor_lang::solana_program::program_option::COption;
 use anchor_spl::token::ID as TOKEN_PROGRAM_ID;
 use common::*;
 use solana_sdk::{
-    instruction::{AccountMeta, InstructionError},
+    instruction::{AccountMeta, Instruction, InstructionError},
     program_pack::Pack,
     pubkey::Pubkey,
     signature::Keypair,
@@ -26,7 +26,9 @@ use solana_sdk::{
 use sra_common::{
     errors::SraError,
     quote::{action_context_hash, signed_quote_message},
-    types::{CreateRouteParams, ExecutionStatus, MinOut, SolanaAction},
+    types::{
+        CreateRouteParams, ExecutionStatus, MinOut, SlotRole, SolanaAction, VerifiedCpiRuntime,
+    },
 };
 
 const VAULT: u64 = 4_000_000;
@@ -87,6 +89,7 @@ fn signed(quoter: Pubkey) -> MinOut {
 
 struct Staged {
     payer: Keypair,
+    owner: Keypair,
     input_mint: Pubkey,
     output_mint: Pubkey,
     output_token_program: Pubkey,
@@ -220,6 +223,7 @@ fn stage_with_vault_amount(
 
     Staged {
         payer,
+        owner,
         input_mint,
         output_mint,
         output_token_program,
@@ -291,6 +295,128 @@ impl Staged {
         )
         .to_vec()
     }
+}
+
+const SPLIT_IN: u64 = VAULT / 2;
+const SPLIT_OUT: u64 = 1_000_000;
+
+fn with_ignored_free_slot(mut action: SolanaAction) -> SolanaAction {
+    if let SolanaAction::VerifiedCpi {
+        account_template, ..
+    } = &mut action
+    {
+        account_template.slots.push(SlotRole::Free);
+    }
+    action
+}
+
+struct TwoSwaps {
+    s: Staged,
+    output_mint_b: Pubkey,
+    destination_b: Pubkey,
+    pool_output_b: Pubkey,
+}
+
+fn stage_two_swaps(svm: &mut litesvm::LiteSVM, quoter: &Keypair) -> TwoSwaps {
+    let issuer = funded_keypair(svm, SOL);
+    let output_mint_b = create_mint(svm, &issuer, &issuer.pubkey(), DECIMALS);
+    let s = stage(
+        svm,
+        quoter,
+        OutKind::Legacy,
+        |input, output, program, q| {
+            vec![
+                with_ignored_free_slot(verified_cpi(input, output, program, 5_000, signed(q))),
+                with_ignored_free_slot(verified_cpi(
+                    input,
+                    output_mint_b,
+                    program,
+                    5_000,
+                    signed(q),
+                )),
+            ]
+        },
+        true,
+    );
+    let destination_b = create_ata(svm, &s.payer, &s.owner.pubkey(), &output_mint_b);
+    let pool_output_b = create_ata(svm, &s.payer, &s.pool_authority, &output_mint_b);
+    mint_to(
+        svm,
+        &s.payer,
+        &issuer,
+        &output_mint_b,
+        &pool_output_b,
+        POOL_LIQUIDITY,
+    );
+    TwoSwaps {
+        s,
+        output_mint_b,
+        destination_b,
+        pool_output_b,
+    }
+}
+
+impl TwoSwaps {
+    fn metas(&self, a_writes_b: bool, b_writes_a: bool) -> Vec<AccountMeta> {
+        let other_mint = |pubkey, is_writable| AccountMeta {
+            pubkey,
+            is_writable,
+            is_signer: false,
+        };
+        let s = &self.s;
+        let mut metas = s.verified_metas(s.destination);
+        metas.push(other_mint(self.output_mint_b, a_writes_b));
+        metas.extend([
+            AccountMeta::new_readonly(mock_swap::ID, false),
+            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+            AccountMeta::new_readonly(s.scratch_authority, false),
+            AccountMeta::new(s.scratch, false),
+            AccountMeta::new(self.destination_b, false),
+            AccountMeta::new_readonly(self.output_mint_b, false),
+            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+            AccountMeta::new_readonly(s.input_mint, false),
+            AccountMeta::new_readonly(s.pool_authority, false),
+            AccountMeta::new(s.pool_input, false),
+            AccountMeta::new(self.pool_output_b, false),
+            other_mint(s.output_mint, b_writes_a),
+        ]);
+        metas
+    }
+
+    fn quotes(&self, quoter: &Keypair, expiry: i64) -> [Instruction; 2] {
+        let s = &self.s;
+        let message_b = signed_quote_message(
+            &action_context_hash(&s.route, &FILL_ID, 1),
+            &s.input_mint,
+            &self.output_mint_b,
+            SPLIT_IN,
+            SPLIT_OUT,
+            expiry,
+        );
+        [
+            ed25519_quote_ix(quoter, &s.quote_message_at(0, SPLIT_IN, SPLIT_OUT, expiry)),
+            ed25519_quote_ix(quoter, &message_b),
+        ]
+    }
+
+    fn assert_funds_unchanged(&self, svm: &litesvm::LiteSVM) {
+        let s = &self.s;
+        for (account, expected) in [
+            (s.execution_vault, VAULT),
+            (s.scratch, 0),
+            (s.destination, 0),
+            (self.destination_b, 0),
+            (s.pool_input, 0),
+            (s.pool_output, POOL_LIQUIDITY),
+            (self.pool_output_b, POOL_LIQUIDITY),
+        ] {
+            assert_eq!(fetch_token_balance(svm, &account), expected, "{account}");
+        }
+    }
+}
+
+fn split_runtimes(expiry: i64) -> Vec<VerifiedCpiRuntime> {
+    vec![runtime(swap_data(SPLIT_IN, SPLIT_OUT), SPLIT_OUT, expiry); 2]
 }
 
 // --------------------------------------------------------------------------
@@ -595,6 +721,99 @@ fn verified_cpi_free_slot_aliasing_output_mint_rejected() {
     assert_eq!(err, exec_error(SraError::ActionAccountMismatch));
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), VAULT);
     assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+}
+
+#[test]
+fn verified_cpi_writable_output_mint_of_another_action_rejected() {
+    for (a_writes_b, b_writes_a) in [(true, false), (false, true)] {
+        let mut svm = setup_svm();
+        let quoter = Keypair::new();
+        let t = stage_two_swaps(&mut svm, &quoter);
+        let expiry = now(&svm) + 3_600;
+        let [quote_a, quote_b] = t.quotes(&quoter, expiry);
+        let exec = execute_actions_ix_full(
+            &t.s.payer.pubkey(),
+            &t.s.route,
+            FILL_ID,
+            split_runtimes(expiry),
+            &t.s.input_mint,
+            t.metas(a_writes_b, b_writes_a),
+        );
+
+        let err =
+            send_instructions_expect_err(&mut svm, &[quote_a, quote_b, exec], &t.s.payer, &[]);
+        assert_eq!(
+            err,
+            custom_error_at(2, SraError::ActionAccountMismatch),
+            "a_writes_b {a_writes_b}"
+        );
+        t.assert_funds_unchanged(&svm);
+        assert_eq!(status(&svm, &t.s.fill_receipt), ExecutionStatus::Finalized);
+    }
+}
+
+#[test]
+fn retry_writable_output_mint_of_another_action_rejected() {
+    let mut svm = setup_svm();
+    let quoter = Keypair::new();
+    let t = stage_two_swaps(&mut svm, &quoter);
+    seed_fill_receipt_with_status(
+        &mut svm,
+        &t.s.route,
+        FILL_ID,
+        VAULT,
+        ExecutionStatus::ActionsFailed,
+    );
+    let expiry = now(&svm) + 3_600;
+    let [quote_a, quote_b] = t.quotes(&quoter, expiry);
+    let retry = retry_actions_ix_full(
+        &t.s.owner.pubkey(),
+        &t.s.route,
+        FILL_ID,
+        split_runtimes(expiry),
+        &t.s.input_mint,
+        t.metas(false, true),
+    );
+
+    let err = send_instructions_expect_err(
+        &mut svm,
+        &[quote_a, quote_b, retry],
+        &t.s.payer,
+        &[&t.s.owner],
+    );
+    assert_eq!(err, custom_error_at(2, SraError::ActionAccountMismatch));
+    t.assert_funds_unchanged(&svm);
+    assert_eq!(
+        status(&svm, &t.s.fill_receipt),
+        ExecutionStatus::ActionsFailed
+    );
+}
+
+#[test]
+fn verified_cpi_read_only_output_mint_of_another_action_allowed() {
+    let mut svm = setup_svm();
+    let quoter = Keypair::new();
+    let t = stage_two_swaps(&mut svm, &quoter);
+    let expiry = now(&svm) + 3_600;
+    let [quote_a, quote_b] = t.quotes(&quoter, expiry);
+    let exec = execute_actions_ix_full(
+        &t.s.payer.pubkey(),
+        &t.s.route,
+        FILL_ID,
+        split_runtimes(expiry),
+        &t.s.input_mint,
+        t.metas(false, false),
+    );
+
+    send_instructions(&mut svm, &[quote_a, quote_b, exec], &t.s.payer, &[])
+        .expect("read-only access to another action's output mint is routing");
+    assert_eq!(fetch_token_balance(&svm, &t.s.execution_vault), 0);
+    assert_eq!(fetch_token_balance(&svm, &t.s.destination), SPLIT_OUT);
+    assert_eq!(fetch_token_balance(&svm, &t.destination_b), SPLIT_OUT);
+    assert_eq!(
+        status(&svm, &t.s.fill_receipt),
+        ExecutionStatus::ActionsSucceeded
+    );
 }
 
 #[test]
