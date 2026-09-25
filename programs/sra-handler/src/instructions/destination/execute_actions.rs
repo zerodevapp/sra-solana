@@ -35,7 +35,7 @@ use sra_common::types::{
 use super::verified_engine::{
     execute_verified, fixed_slot, mint_is_permissioned, scratch_account_usable,
     token_account_usable, validate_pinned_program, validate_template_slots, verify_signed_quote,
-    TokenBalanceCheck, VerifiedCpiCall,
+    ResolvedSlotKeys, TokenBalanceCheck, VerifiedCpiCall,
 };
 use crate::events::{ActionsExecuted, ActionsFailed};
 
@@ -203,6 +203,13 @@ pub(crate) fn run_committed_actions<'info>(
                 get_associated_token_address(&auth, &expected_mint),
             )
         });
+    let route_output_mints: Vec<Pubkey> = action_config
+        .iter()
+        .filter_map(|action| match action {
+            SolanaAction::VerifiedCpi { output_mint, .. } => Some(*output_mint),
+            SolanaAction::SplTransfer { .. } => None,
+        })
+        .collect();
 
     let now = Clock::get()?.unix_timestamp;
 
@@ -303,11 +310,14 @@ pub(crate) fn run_committed_actions<'info>(
                 validate_template_slots(
                     slots,
                     account_template,
-                    &token_program,
-                    &scratch_auth,
-                    &scratch_account,
-                    &destination,
-                    output_mint,
+                    &ResolvedSlotKeys {
+                        token_program,
+                        signing_authority: scratch_auth,
+                        source: scratch_account,
+                        destination,
+                        output_mint: *output_mint,
+                    },
+                    &route_output_mints,
                 )?;
 
                 // One runtime entry per VerifiedCpi action, consumed in order.
