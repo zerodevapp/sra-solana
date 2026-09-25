@@ -398,6 +398,21 @@ impl TwoSwaps {
             ed25519_quote_ix(quoter, &message_b),
         ]
     }
+
+    fn assert_funds_unchanged(&self, svm: &litesvm::LiteSVM) {
+        let s = &self.s;
+        for (account, expected) in [
+            (s.execution_vault, VAULT),
+            (s.scratch, 0),
+            (s.destination, 0),
+            (self.destination_b, 0),
+            (s.pool_input, 0),
+            (s.pool_output, POOL_LIQUIDITY),
+            (self.pool_output_b, POOL_LIQUIDITY),
+        ] {
+            assert_eq!(fetch_token_balance(svm, &account), expected, "{account}");
+        }
+    }
 }
 
 fn split_runtimes(expiry: i64) -> Vec<VerifiedCpiRuntime> {
@@ -732,6 +747,7 @@ fn verified_cpi_writable_output_mint_of_another_action_rejected() {
             custom_error_at(2, SraError::ActionAccountMismatch),
             "a_writes_b {a_writes_b}"
         );
+        t.assert_funds_unchanged(&svm);
         assert_eq!(status(&svm, &t.s.fill_receipt), ExecutionStatus::Finalized);
     }
 }
@@ -766,6 +782,7 @@ fn retry_writable_output_mint_of_another_action_rejected() {
         &[&t.s.owner],
     );
     assert_eq!(err, custom_error_at(2, SraError::ActionAccountMismatch));
+    t.assert_funds_unchanged(&svm);
     assert_eq!(
         status(&svm, &t.s.fill_receipt),
         ExecutionStatus::ActionsFailed
