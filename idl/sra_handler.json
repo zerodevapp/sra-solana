@@ -4232,7 +4232,7 @@
               {
                 "name": "output_mint",
                 "docs": [
-                  "Fungible receipt the engine balance-diffs (swap output, vault share, LST, …)."
+                  "Fungible token the engine balance-diffs. Passed read-only: the inner call cannot mint it."
                 ],
                 "type": "pubkey"
               },
@@ -4483,7 +4483,7 @@
           {
             "name": "inner_data",
             "docs": [
-              "The inner program's instruction data (relayer-built swap/deposit args)."
+              "The inner program's instruction data (relayer-built args)."
             ],
             "type": "bytes"
           },

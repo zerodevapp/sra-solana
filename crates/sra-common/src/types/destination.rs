@@ -32,7 +32,7 @@ pub enum SolanaAction {
         /// Basis points of the finalized fill amount moved into the scratch source.
         input_bps: u16,
         account_template: AccountTemplate,
-        /// Fungible token the engine balance-diffs; see the read-only note above.
+        /// Fungible token the engine balance-diffs. Passed read-only: the inner call cannot mint it.
         output_mint: Pubkey,
         min_out: MinOut,
         /// Opt-in for issuer-controlled or transfer-restricted Token-2022 output mints.
