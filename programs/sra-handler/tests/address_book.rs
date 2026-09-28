@@ -6,6 +6,7 @@ use solana_sdk::{
     instruction::InstructionError, pubkey::Pubkey, signature::Keypair, signer::Signer,
     transaction::TransactionError,
 };
+use solana_system_interface::program as system_program;
 use sra_common::errors::SraError;
 
 const SAMPLE_DECIMALS: u8 = 6;
@@ -60,6 +61,10 @@ fn initialize_address_book_root_rejects_owner_as_root() {
             InstructionError::Custom(SraError::InvalidAddressBook.into()),
         )
     );
+    let owner_account = svm.get_account(&owner.pubkey()).unwrap();
+    assert_eq!(owner_account.owner, system_program::ID);
+    assert_eq!(owner_account.lamports, SOL);
+    assert!(owner_account.data.is_empty());
 }
 
 #[test]
