@@ -42,7 +42,7 @@ pub enum FixedRole {
     /// The output mint, pinned to the action's committed `output_mint`. The
     /// handler reads its owner (the output token program) and its extensions, so
     /// it can derive the right destination ATA, read a post-fee balance, and gate
-    /// permissioned (Token-2022) outputs.
+    /// permissioned (Token-2022) outputs. Always passed read-only.
     OutputMint,
 }
 

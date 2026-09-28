@@ -187,6 +187,9 @@ fn mock_spoke_pool_close_fill_pda_reclaims_account() {
         "fill_status exists before close"
     );
 
+    let timestamp = now(&svm).max(1);
+    set_time(&mut svm, timestamp);
+
     send_ix(
         &mut svm,
         close_fill_pda_ix(&relayer.pubkey(), &pda),
@@ -200,4 +203,59 @@ fn mock_spoke_pool_close_fill_pda_reclaims_account() {
         after.map(|a| a.lamports == 0).unwrap_or(true),
         "fill_status reclaimed after close"
     );
+}
+
+#[test]
+fn mock_close_requires_recorded_relayer_and_passed_deadline() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 100 * SOL);
+    let relayer = funded_keypair(&mut svm, SOL);
+    let stranger = funded_keypair(&mut svm, SOL);
+    let mint = create_mint(&mut svm, &payer, &payer.pubkey(), 6);
+    let relayer_ata = create_ata(&mut svm, &payer, &relayer.pubkey(), &mint);
+    let recipient = Keypair::new();
+    let recipient_ata = create_ata(&mut svm, &payer, &recipient.pubkey(), &mint);
+    mint_to(&mut svm, &payer, &payer, &mint, &relayer_ata, 1);
+    let relay_hash = [0x91; 32];
+    let deadline = u32::try_from(now(&svm) + 10).unwrap();
+    send_ix(
+        &mut svm,
+        mock_fill_relay_ix(
+            &relayer.pubkey(),
+            &mint,
+            &relayer_ata,
+            &recipient_ata,
+            relay_hash,
+            1,
+            deadline,
+        ),
+        &relayer,
+        &[],
+    )
+    .unwrap();
+    let status = derive_fill_status_pda(&relay_hash).0;
+
+    send_ix(
+        &mut svm,
+        close_fill_pda_ix(&stranger.pubkey(), &status),
+        &stranger,
+        &[],
+    )
+    .expect_err("only recorded relayer may close");
+    send_ix(
+        &mut svm,
+        close_fill_pda_ix(&relayer.pubkey(), &status),
+        &relayer,
+        &[],
+    )
+    .expect_err("deadline must strictly pass");
+
+    set_time(&mut svm, i64::from(deadline) + 1);
+    send_ix(
+        &mut svm,
+        close_fill_pda_ix(&relayer.pubkey(), &status),
+        &relayer,
+        &[],
+    )
+    .expect("recorded relayer closes after deadline");
 }

@@ -185,4 +185,7 @@ pub enum SraError {
 
     #[msg("SRA vault balance is below the requested input amount")]
     InsufficientSourceBalance,
+
+    #[msg("Verified-CPI callee changed scratch token-account control")]
+    ScratchControlChanged,
 }

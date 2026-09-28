@@ -89,6 +89,26 @@ impl PassiveFixture {
         )
     }
 
+    pub fn new_across_with_decimals(
+        svm: &mut LiteSVM,
+        source_decimals: u8,
+        target_decimals: u8,
+        allowed_slippage_bps: u16,
+    ) -> Self {
+        let payer = funded_keypair(svm, 100 * SOL);
+        let source_mint = create_mint(svm, &payer, &payer.pubkey(), source_decimals);
+        Self::build(
+            svm,
+            payer,
+            source_mint,
+            ADAPTER_PROGRAM_ID,
+            allowed_slippage_bps,
+            vec![ADAPTER_PROGRAM_ID],
+            DEFAULT_TARGET_CHAIN_ID,
+            target_decimals,
+        )
+    }
+
     pub fn new_across_with_adapter_policy(
         svm: &mut LiteSVM,
         allowed_slippage_bps: u16,
@@ -104,6 +124,7 @@ impl PassiveFixture {
             allowed_slippage_bps,
             allowed_adapters,
             DEFAULT_TARGET_CHAIN_ID,
+            6,
         )
     }
 
@@ -123,6 +144,7 @@ impl PassiveFixture {
             allowed_slippage_bps,
             allowed_adapters,
             target_chain_id,
+            6,
         )
     }
 
@@ -134,6 +156,7 @@ impl PassiveFixture {
         allowed_slippage_bps: u16,
         allowed_adapters: Vec<Pubkey>,
         target_chain_id: u64,
+        target_decimals: u8,
     ) -> Self {
         let owner = funded_keypair(svm, SOL);
         let initiator = funded_keypair(svm, SOL);
@@ -190,7 +213,7 @@ impl PassiveFixture {
             &source_mint,
             target_chain_id,
             target_token,
-            6,
+            target_decimals,
         );
 
         let accounts = TriggerAccounts::derive(&sra_config, &source_mint, &adapter_program);
@@ -356,6 +379,19 @@ impl PassiveFixture {
     ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
     {
         self.invoke_full(svm, params, vec![], fee_recipient_token_account, None)
+    }
+
+    pub fn invoke_across_with_fee_ata(
+        &self,
+        svm: &mut LiteSVM,
+        params: PrepareParams,
+        fee_recipient_token_account: Option<Pubkey>,
+    ) -> Result<litesvm::types::TransactionMetadata, Box<litesvm::types::FailedTransactionMetadata>>
+    {
+        let across = AcrossDepositParams::from_prepare(&params, Pubkey::new_unique(), 600, 120)
+            .expect("build Across deposit params");
+        let (trigger, execute) = across_pair(self, params, across, fee_recipient_token_account);
+        send_instructions(svm, &[trigger, execute], &self.payer, &[&self.initiator])
     }
 
     /// Builds the normal 2-IX flow, then replaces the account-meta holding

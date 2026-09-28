@@ -116,6 +116,85 @@ fn execute_actions_single_spl_transfer_succeeds() {
 }
 
 #[test]
+fn execute_actions_limits_spending_to_fill_receipt_amount() {
+    let mut svm = setup_svm();
+    let recipient = Pubkey::new_unique();
+    let s = stage(&mut svm, vec![spl(recipient, 10_000)], 1);
+    let failed_fill_id = [8u8; 32];
+    let failed_receipt = seed_fill_receipt_with_status(
+        &mut svm,
+        &s.route,
+        failed_fill_id,
+        AMOUNT,
+        ExecutionStatus::ActionsFailed,
+    );
+    mint_to(
+        &mut svm,
+        &s.payer,
+        &s.payer,
+        &s.mint,
+        &s.execution_vault,
+        AMOUNT,
+    );
+    let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
+
+    let ix = execute_actions_ix(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        &s.mint,
+        &[recipient_ata],
+    );
+    send_ix(&mut svm, ix, &s.payer, &[]).expect("execute_actions should succeed");
+
+    assert_eq!(fetch_token_balance(&svm, &recipient_ata), 1);
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), AMOUNT);
+    assert_eq!(
+        status(&svm, &s.fill_receipt),
+        ExecutionStatus::ActionsSucceeded
+    );
+    assert_eq!(
+        status(&svm, &failed_receipt),
+        ExecutionStatus::ActionsFailed
+    );
+}
+
+#[test]
+fn execute_actions_rejects_vault_balance_below_fill_receipt_amount() {
+    let mut svm = setup_svm();
+    let recipient = Pubkey::new_unique();
+    let s = stage(&mut svm, vec![spl(recipient, 10_000)], 1);
+    seed_fill_receipt_with_status(
+        &mut svm,
+        &s.route,
+        FILL_ID,
+        AMOUNT,
+        ExecutionStatus::Finalized,
+    );
+    let recipient_ata = create_ata(&mut svm, &s.payer, &recipient, &s.mint);
+
+    let ix = execute_actions_ix(
+        &s.payer.pubkey(),
+        &s.route,
+        FILL_ID,
+        &s.mint,
+        &[recipient_ata],
+    );
+    let err = send_ix_expect_err(
+        &mut svm,
+        ix,
+        &s.payer,
+        &[],
+        "execution vault must cover the fill receipt amount",
+    );
+
+    assert_eq!(err, custom_error(SraError::InsufficientVaultBalance));
+    assert_eq!(fetch_token_balance(&svm, &recipient_ata), 0);
+    assert_eq!(fetch_token_balance(&svm, &s.execution_vault), 1);
+    assert_eq!(status(&svm, &s.fill_receipt), ExecutionStatus::Finalized);
+}
+
+#[test]
 fn execute_actions_multiple_all_succeed() {
     let mut svm = setup_svm();
     let r1 = Pubkey::new_unique();
@@ -127,7 +206,7 @@ fn execute_actions_multiple_all_succeed() {
     let ix = execute_actions_ix(&s.payer.pubkey(), &s.route, FILL_ID, &s.mint, &[a1, a2]);
     send_ix(&mut svm, ix, &s.payer, &[]).expect("execute_actions should succeed");
 
-    // 60/40 of the same start-of-run snapshot drains the vault exactly.
+    // 60/40 of the fill amount drains the vault exactly.
     assert_eq!(fetch_token_balance(&svm, &a1), 2_400_000);
     assert_eq!(fetch_token_balance(&svm, &a2), 1_600_000);
     assert_eq!(fetch_token_balance(&svm, &s.execution_vault), 0);
@@ -142,8 +221,6 @@ fn execute_actions_full_bps_sum_floor_dust_stays_staged() {
     let mut svm = setup_svm();
     let r1 = Pubkey::new_unique();
     let r2 = Pubkey::new_unique();
-    // A 100%-summing split that floors on both legs: the dust unit stays
-    // staged past terminal success, swept by any later fill or sibling recovery.
     let s = stage(&mut svm, vec![spl(r1, 6_000), spl(r2, 4_000)], AMOUNT + 1);
     let a1 = create_ata(&mut svm, &s.payer, &r1, &s.mint);
     let a2 = create_ata(&mut svm, &s.payer, &r2, &s.mint);

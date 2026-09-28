@@ -9,7 +9,7 @@ crate-type = ["cdylib", "lib"]
 name = "sra_cctp_adapter"
 
 [features]
-default = []
+default = ["no-idl"]
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []

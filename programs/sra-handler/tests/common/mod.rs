@@ -31,7 +31,7 @@ use solana_signer::Signer;
 use solana_system_interface::program as system_program;
 use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_error::TransactionError;
-use sra_across_adapter::utils::svm_spoke::types::RelayData;
+use sra_across_adapter::{utils::svm_spoke::types::RelayData, AcrossAdapterError};
 use sra_common::{
     abi::u256_from_u64,
     constants::{
@@ -70,12 +70,16 @@ pub fn anchor_error(code: ErrorCode) -> TransactionError {
     TransactionError::InstructionError(0, InstructionError::Custom(code as u32))
 }
 
+pub fn adapter_error(err: AcrossAdapterError) -> TransactionError {
+    TransactionError::InstructionError(0, InstructionError::Custom(err.into()))
+}
+
 /// The `execution_status` of the fill receipt at `fill_receipt`.
 pub fn status(svm: &LiteSVM, fill_receipt: &Pubkey) -> ExecutionStatus {
     fetch_fill_receipt(svm, fill_receipt).execution_status
 }
 
-/// A `SplTransfer` action sending `amount_bps` of the vault snapshot to `recipient`.
+/// A `SplTransfer` action sending `amount_bps` of the fill amount to `recipient`.
 pub fn spl(recipient: Pubkey, amount_bps: u16) -> SolanaAction {
     SolanaAction::SplTransfer {
         recipient,
@@ -83,8 +87,16 @@ pub fn spl(recipient: Pubkey, amount_bps: u16) -> SolanaAction {
     }
 }
 
-/// The mock-swap account template: five pinned slots then relayer routing.
 pub fn mock_swap_template() -> AccountTemplate {
+    mock_swap_template_for_output_program(TOKEN_PROGRAM_ID)
+}
+
+pub fn mock_swap_template_for_output_program(output_token_program: Pubkey) -> AccountTemplate {
+    let output_token_program_role = if output_token_program == TOKEN_PROGRAM_ID {
+        SlotRole::Fixed(FixedRole::TokenProgram)
+    } else {
+        SlotRole::Free
+    };
     AccountTemplate {
         slots: vec![
             SlotRole::Fixed(FixedRole::TokenProgram), // input token program
@@ -92,7 +104,7 @@ pub fn mock_swap_template() -> AccountTemplate {
             SlotRole::Fixed(FixedRole::Source),
             SlotRole::Fixed(FixedRole::Destination),
             SlotRole::Fixed(FixedRole::OutputMint),
-            SlotRole::Free, // output_token_program
+            output_token_program_role,
             SlotRole::Free, // input_mint
             SlotRole::Free, // pool_authority
             SlotRole::Free, // pool_input
@@ -103,9 +115,18 @@ pub fn mock_swap_template() -> AccountTemplate {
 
 /// `inner_data` for the mock swap: pull `in_amount`, deliver `out_amount`.
 pub fn swap_data(in_amount: u64, out_amount: u64) -> Vec<u8> {
+    swap_with_mutation_data(in_amount, out_amount, mock_swap::ScratchMutation::None)
+}
+
+pub fn swap_with_mutation_data(
+    in_amount: u64,
+    out_amount: u64,
+    scratch_mutation: mock_swap::ScratchMutation,
+) -> Vec<u8> {
     mock_swap::instruction::Swap {
         in_amount,
         out_amount,
+        scratch_mutation,
     }
     .data()
 }
@@ -122,6 +143,12 @@ pub fn runtime(inner_data: Vec<u8>, min_amount_out: u64, expiry: i64) -> Verifie
 /// Current on-chain unix timestamp.
 pub fn now(svm: &LiteSVM) -> i64 {
     svm.get_sysvar::<Clock>().unix_timestamp
+}
+
+pub fn set_time(svm: &mut LiteSVM, unix_timestamp: i64) {
+    let mut clock = svm.get_sysvar::<Clock>();
+    clock.unix_timestamp = unix_timestamp;
+    svm.set_sysvar::<Clock>(&clock);
 }
 
 fn program_so_path() -> PathBuf {
@@ -1698,6 +1725,35 @@ pub fn verify_across_fill_ix(
         }
         .to_account_metas(None),
         data: sra_across_adapter::instruction::VerifyAcrossFill {
+            relay_hash,
+            relay_data,
+        }
+        .data(),
+    }
+}
+
+pub fn verify_across_fill_after_close_ix(
+    payer: &Pubkey,
+    owner: &Pubkey,
+    route: &Pubkey,
+    relay_hash: [u8; 32],
+    relay_data: RelayData,
+) -> Instruction {
+    let (fill_status, _) = derive_fill_status_pda(&relay_hash);
+    let (verified_fill, _) = derive_verified_fill_pda(&relay_hash);
+    Instruction {
+        program_id: ADAPTER_PROGRAM_ID,
+        accounts: sra_across_adapter::accounts::VerifyAcrossFillAfterClose {
+            payer: *payer,
+            owner: *owner,
+            fill_status,
+            route: *route,
+            verified_fill,
+            across_program: ACROSS_SPOKE_POOL_ID,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: sra_across_adapter::instruction::VerifyAcrossFillAfterClose {
             relay_hash,
             relay_data,
         }

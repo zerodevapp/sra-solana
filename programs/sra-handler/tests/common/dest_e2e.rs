@@ -259,19 +259,20 @@ impl SurfpoolDestFixture {
         output_amount: u64,
     ) -> TestResult<RelayData> {
         let now = clock_unix_timestamp(&self.rpc)?;
+        let fill_deadline = u32::try_from(now + FILL_DEADLINE_WINDOW_SECS)
+            .map_err(|_| "fill deadline exceeds u32")?;
         Ok(RelayData {
             depositor: Pubkey::new_from_array([0x11; 32]),
             recipient: self.route,
-            exclusive_relayer: Pubkey::default(),
+            exclusive_relayer: self.relayer.pubkey(),
             input_token: Pubkey::new_from_array([0x33; 32]),
             output_token: USDC_MINT,
             input_amount: u256_from_u64(output_amount),
             output_amount,
             origin_chain_id: ORIGIN_CHAIN_ID,
             deposit_id,
-            fill_deadline: u32::try_from(now + FILL_DEADLINE_WINDOW_SECS)
-                .map_err(|_| "fill deadline exceeds u32")?,
-            exclusivity_deadline: 0,
+            fill_deadline,
+            exclusivity_deadline: fill_deadline,
             message: vec![],
         })
     }

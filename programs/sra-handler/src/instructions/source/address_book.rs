@@ -16,6 +16,7 @@ pub struct InitializeAddressBookRoot<'info> {
         init,
         payer = payer,
         space = 8 + AddressBookRoot::INIT_SPACE,
+        constraint = address_book_root.key() != owner.key() @ SraError::InvalidAddressBook,
     )]
     pub address_book_root: Account<'info, AddressBookRoot>,
     pub system_program: Program<'info, System>,

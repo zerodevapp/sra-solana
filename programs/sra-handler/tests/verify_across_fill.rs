@@ -14,11 +14,9 @@ use anchor_lang::error::ErrorCode;
 use common::*;
 use mock_spoke_pool::FillStatus;
 use solana_clock::Clock;
-use solana_instruction_error::InstructionError;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use solana_transaction_error::TransactionError;
 use sra_across_adapter::utils::svm_spoke::types::RelayData;
 use sra_across_adapter::AcrossAdapterError;
 use sra_common::types::ManageRouteParams;
@@ -28,10 +26,6 @@ const OUTPUT_AMOUNT: u64 = 4_000_000;
 /// bound to.
 const SOURCE_CHAIN_ID: u64 = 42_161;
 const FILL_DEADLINE: u32 = 1_900_000_000;
-
-fn adapter_error(err: AcrossAdapterError) -> TransactionError {
-    TransactionError::InstructionError(0, InstructionError::Custom(err.into()))
-}
 
 struct Dest {
     payer: Keypair,
@@ -66,6 +60,40 @@ fn plant_status(svm: &mut litesvm::LiteSVM, relay_hash: [u8; 32], status: FillSt
         &[],
     )
     .expect("mock_fill should succeed");
+}
+
+fn deliver_to_route_vault(
+    svm: &mut litesvm::LiteSVM,
+    dest: &Dest,
+    route_vault: Pubkey,
+    relay_hash: [u8; 32],
+    amount: u64,
+) {
+    let relayer = funded_keypair(svm, SOL);
+    let relayer_ata = create_ata(svm, &relayer, &relayer.pubkey(), &dest.mint);
+    mint_to(
+        svm,
+        &dest.payer,
+        &dest.payer,
+        &dest.mint,
+        &relayer_ata,
+        amount,
+    );
+    send_ix(
+        svm,
+        mock_fill_relay_ix(
+            &relayer.pubkey(),
+            &dest.mint,
+            &relayer_ata,
+            &route_vault,
+            relay_hash,
+            amount,
+            FILL_DEADLINE,
+        ),
+        &relayer,
+        &[],
+    )
+    .expect("fill should succeed");
 }
 
 // --------------------------------------------------------------------------
@@ -121,8 +149,6 @@ fn verify_across_fill_happy_path() {
     assert_eq!(vf.fill_id, relay_hash);
     assert_eq!(vf.mint, dest.mint);
     assert_eq!(vf.amount, OUTPUT_AMOUNT);
-    // Across binds a single exact-fill output amount, so the recorded amount and
-    // the source-committed minimum are the same value.
     assert_eq!(vf.expected_amount, OUTPUT_AMOUNT);
     assert_eq!(vf.source_chain_id, SOURCE_CHAIN_ID);
     assert_eq!(vf.bump, expected_bump);
@@ -199,6 +225,87 @@ fn verify_across_fill_requested_slow_fill_rejected() {
         ),
         adapter_error(AcrossAdapterError::FillNotCompleted)
     );
+}
+
+#[test]
+fn slow_fill_cannot_consume_unrelated_route_liquidity() {
+    let mut svm = setup_svm();
+    let dest = setup_route(&mut svm);
+    let route_vault = derive_ata(&dest.route, &dest.mint);
+
+    let mut unrelated_relay_data =
+        sample_relay_data(dest.route, dest.mint, SOURCE_CHAIN_ID, 3_000_000);
+    unrelated_relay_data.deposit_id = [0x66; 32];
+    deliver_to_route_vault(
+        &mut svm,
+        &dest,
+        route_vault,
+        relay_hash_for(&unrelated_relay_data),
+        3_000_000,
+    );
+    let relay_data = sample_relay_data(dest.route, dest.mint, SOURCE_CHAIN_ID, OUTPUT_AMOUNT);
+    let relay_hash = relay_hash_for(&relay_data);
+    deliver_to_route_vault(&mut svm, &dest, route_vault, relay_hash, 1_000_000);
+    assert_eq!(fetch_token_balance(&svm, &route_vault), OUTPUT_AMOUNT);
+
+    set_time(&mut svm, i64::from(relay_data.exclusivity_deadline) + 1);
+    let ix = verify_across_fill_ix(&dest.payer.pubkey(), &dest.route, relay_hash, relay_data);
+    assert_eq!(
+        send_ix_expect_err(
+            &mut svm,
+            ix,
+            &dest.payer,
+            &[],
+            "ambiguous fill amount must reject",
+        ),
+        adapter_error(AcrossAdapterError::ExecutedAmountUnavailable)
+    );
+
+    assert!(svm
+        .get_account(&derive_verified_fill_pda(&relay_hash).0)
+        .is_none());
+    assert_eq!(fetch_token_balance(&svm, &route_vault), OUTPUT_AMOUNT);
+}
+
+#[test]
+fn verify_across_fill_at_exclusivity_deadline_allowed() {
+    let mut svm = setup_svm();
+    let dest = setup_route(&mut svm);
+    let relay_data = sample_relay_data(dest.route, dest.mint, SOURCE_CHAIN_ID, OUTPUT_AMOUNT);
+    let relay_hash = relay_hash_for(&relay_data);
+    plant_status(&mut svm, relay_hash, FillStatus::Filled);
+    set_time(&mut svm, i64::from(relay_data.exclusivity_deadline));
+
+    send_ix(
+        &mut svm,
+        verify_across_fill_ix(&dest.payer.pubkey(), &dest.route, relay_hash, relay_data),
+        &dest.payer,
+        &[],
+    )
+    .expect("verification at exclusivity deadline should succeed");
+}
+
+#[test]
+fn verify_across_fill_full_lifetime_exclusivity_allows_late_verification() {
+    let mut svm = setup_svm();
+    let dest = setup_route(&mut svm);
+    let mut relay_data = sample_relay_data(dest.route, dest.mint, SOURCE_CHAIN_ID, OUTPUT_AMOUNT);
+    relay_data.exclusivity_deadline = relay_data.fill_deadline;
+    let relay_hash = relay_hash_for(&relay_data);
+    plant_status(&mut svm, relay_hash, FillStatus::Filled);
+    set_time(&mut svm, i64::from(relay_data.fill_deadline) + 1);
+
+    send_ix(
+        &mut svm,
+        verify_across_fill_ix(&dest.payer.pubkey(), &dest.route, relay_hash, relay_data),
+        &dest.payer,
+        &[],
+    )
+    .expect("full-lifetime exclusivity should allow late verification");
+
+    let verified = fetch_verified_fill(&svm, &derive_verified_fill_pda(&relay_hash).0);
+    assert_eq!(verified.amount, OUTPUT_AMOUNT);
+    assert_eq!(verified.expected_amount, OUTPUT_AMOUNT);
 }
 
 // --------------------------------------------------------------------------
@@ -448,6 +555,8 @@ fn verify_across_fill_fill_status_closed_rejected() {
     )
     .expect("mock_fill should succeed");
     let (fill_status_pda, _) = derive_fill_status_pda(&relay_hash);
+    let timestamp = now(&svm).max(1);
+    set_time(&mut svm, timestamp);
     send_ix(
         &mut svm,
         close_fill_pda_ix(&relayer.pubkey(), &fill_status_pda),

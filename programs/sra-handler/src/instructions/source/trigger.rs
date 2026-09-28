@@ -149,7 +149,7 @@ pub fn handler(ctx: Context<Trigger>, args: TriggerArgs) -> Result<()> {
     );
     require!(
         output_satisfies_slippage_floor(
-            params.input_amount,
+            params.net_input_amount()?,
             ctx.accounts.source_mint.decimals,
             decode_output_amount(params.output_amount)?,
             ctx.accounts.address_book_entry.target_decimals,

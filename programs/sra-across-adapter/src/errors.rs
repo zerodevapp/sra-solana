@@ -34,4 +34,13 @@ pub enum AcrossAdapterError {
 
     #[msg("Fill origin chain does not match the route source chain")]
     OriginChainMismatch,
+
+    #[msg("Across fill status account has not been closed")]
+    FillStatusNotClosed,
+
+    #[msg("Across fill deadline has not passed")]
+    FillDeadlineNotPassed,
+
+    #[msg("Across proof does not authenticate the executed output amount")]
+    ExecutedAmountUnavailable,
 }

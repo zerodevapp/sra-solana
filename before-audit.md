@@ -2,7 +2,7 @@
 
 This document orients a security auditor to the `sra-solana` codebase. It describes what the system does, how the on-chain programs are structured, the trust model, the invariants the design leans on, and where to focus review effort. It is self-contained: you should not need any external design docs to start.
 
-> This document is the authoritative audit walkthrough. The repository `README.md` is the matching build/run guide; use the source tree and generated IDLs to resolve any later drift. The passive source trigger, both source adapters, the destination lifecycle, fees, and the action-execution engine are implemented. Owner recovery from the source SRA vault is not yet implemented.
+> This document is the authoritative audit walkthrough. The repository `README.md` is the matching build/run guide; use the source tree and generated IDLs to resolve any later drift. The passive source trigger, both source adapters, owner recovery from the source SRA vault, the destination lifecycle, fees, and the action-execution engine are implemented.
 
 ---
 
@@ -57,7 +57,7 @@ One atomic native-v1 transaction contains handler `trigger` followed immediately
    - Require the SRA to be active and the signer to equal the owner-configured `initiator`; the owner is not a per-deposit signer.
    - Read the immutable route from `SraConfig.handler_data`, require the caller-supplied route fields to match it, verify the chosen adapter is executable and in `allowed_adapters`, and require the enabled address-book entry derived from the stored root, chain, and token.
    - Recompute the protocol fee and assert it equals the caller-attested amount.
-   - Enforce the decimal-normalized slippage floor against the **gross `input_amount`**. The protocol fee is deducted separately before custody handoff.
+   - Enforce the decimal-normalized slippage floor against the **net amount after the protocol fee**.
    - Transfer the fee from the pre-funded SRA vault to the fee recipient, then transfer the net amount from the SRA vault to adapter custody; both transfers are signed by the SRA PDA.
    - Advance the single `SraConfig.deposit_nonce`, shared across source mints and adapters, and emit `DepositTriggered`.
    - **Pin the next instruction:** via the Instructions sysvar, assert the following instruction targets the chosen adapter and has the exact instruction-data hash committed in `TriggerArgs`. Neither instruction can execute alone.
@@ -67,7 +67,7 @@ One atomic native-v1 transaction contains handler `trigger` followed immediately
    - **`execute_deposit_across`:** build the Across `deposit_now` args — the bytes32 routing fields pass through unchanged and the bridged `message` is **empty** — derive the Across delegate PDA, approve custody, and CPI Across `deposit_now`. Timing floors require `fill_deadline_offset ≥ 300s` and `exclusivity_period ≤ fill_deadline_offset`.
    - **`execute_deposit_cctp`:** require the canonical USDC mint, a mapped CCTP destination domain, finality 1000 or 2000, and `net_input_amount - max_fee ≥ output_amount`; then burn the custody balance through CCTP v2 `deposit_for_burn`.
 
-Result: tokens enter the selected bridge and the EVM target flow continues. If the adapter instruction fails, the entire transaction rolls back, including fees, vault transfers, and nonce advancement. If funds have reached an adapter custody account and remain there, that adapter's owner-signed `recover_stuck_custody` can return them. Funds still in the source SRA vault can currently leave only through `trigger`; owner recovery from that vault is not implemented yet.
+Result: tokens enter the selected bridge and the EVM target flow continues. If the adapter instruction fails, the entire transaction rolls back, including fees, vault transfers, and nonce advancement. If funds have reached an adapter custody account and remain there, that adapter's owner-signed `recover_stuck_custody` can return them. The SRA owner can withdraw funds still in the source vault through `recover_source_vault`.
 
 ### 3.2 Destination: EVM → Solana
 
@@ -79,7 +79,7 @@ Result: tokens enter the selected bridge and the EVM target flow continues. If t
 **Fill lifecycle (deterministic; parts are permissionless):**
 
 1. Across fills output tokens into the route vault ATA (external, untrusted).
-2. **`verify_across_fill` (adapter, permissionless)** — read the Across `FillStatusAccount` at its pinned PDA, confirm `Filled`, re-derive the relay hash from supplied relay data (cryptographic binding to the fill), cross-check recipient = route / output token = expected mint / origin chain = source chain, and mint a `VerifiedFill` PDA (`init` → replay-once).
+2. **`verify_across_fill` (adapter, permissionless)** — read the Across `FillStatusAccount` at its pinned PDA, confirm `Filled`, require that the fill amount is unambiguous at verification time, re-derive the relay hash from supplied relay data, cross-check recipient = route / output token = expected mint / origin chain = source chain, and mint a `VerifiedFill` PDA (`init` → replay-once). After the deadline and closure of the status account, `verify_across_fill_after_close` instead requires the route owner's signature.
 3. **`finalize_fill` (handler, permissionless)** — require `!paused`; require the `VerifiedFill`'s owning program is in `allowed_adapters`; deserialize and re-validate every field; move the full verified amount route vault → execution vault (execution authority PDA signs); `init` a `FillReceipt` replay marker with status `Finalized`. **No fee is taken here** — fees are source-side only.
 4. **`execute_actions` (handler, permissionless but executor-gated)** — require an executor in `allowed_executors` and `!paused`; run the committed `action_config` (hash-verified against the route). Two-pass: structural problems (frozen ATA, missing account) soft-fail to `ActionsFailed`; a CPI revert or `min_out` shortfall hard-fails the whole transaction. Success → `ActionsSucceeded`.
 
@@ -115,7 +115,8 @@ The authorization column is the single most important thing to verify against th
 | `set_address_book_entry` | Owner (signs); payer may differ | `root.owner == owner`; `target_token != [0;32]`. |
 | `initialize_sra` | Owner (signs); payer may differ | Immutable route policy and owner are committed to the SRA PDA; configured initiator must be nonzero; initial source vault is created. |
 | `manage_sra` | Owner (signs, `has_one`) | Replaces the initiator and toggles `active`; immutable routing fields and nonce are unchanged. |
-| `trigger` | Configured initiator (signs); fee payer may differ; owner need not sign | `active`; initiator equality; sufficient passive vault balance; stored route equality; executable allow-listed adapter; enabled address-book entry; paired-adapter data hash; recomputed fee; gross-input slippage floor; checked per-SRA nonce increment. |
+| `recover_source_vault` | Owner (signs, `has_one`) | Transfers the source vault balance to the owner's token account. |
+| `trigger` | Configured initiator (signs); fee payer may differ; owner need not sign | `active`; initiator equality; sufficient passive vault balance; stored route equality; executable allow-listed adapter; enabled address-book entry; paired-adapter data hash; recomputed fee; net-input slippage floor; checked per-SRA nonce increment. |
 
 ### 4.2 Destination (handler)
 
@@ -147,7 +148,8 @@ All gated by the `FeeConfig` **admin** (single key, transferable via a two-step 
 | `execute_deposit_across` | Bound to the paired handler instruction | Mutual instruction attestation; Across timing floors; approve custody; CPI Across `deposit_now`. |
 | `execute_deposit_cctp` | Bound to the paired handler instruction | Mutual instruction attestation; canonical USDC; supported domain and finality; worst-case CCTP fee quote; CPI CCTP `deposit_for_burn`. |
 | `recover_stuck_custody` (both source adapters) | SRA owner (signs) | Refund that adapter's stranded custody ATA to the owner; this does not withdraw the source SRA vault. |
-| `verify_across_fill` | **Permissionless** | Read Across fill status (must be `Filled`); re-derive relay hash; cross-check all routing fields and chain ID; mint `VerifiedFill` PDA. |
+| `verify_across_fill` | **Permissionless** | Read Across fill status (must be `Filled`); reject ambiguous slow-fill amounts; re-derive relay hash; cross-check all routing fields and chain ID; mint `VerifiedFill` PDA. |
+| `verify_across_fill_after_close` | Route owner (signs) | After `fill_deadline`, require the canonical status PDA to be System-owned and empty; revalidate the relay and route before minting the ordinary `VerifiedFill`. |
 
 ---
 
@@ -162,7 +164,7 @@ Every stateful account below is a PDA owned by the handler program unless noted.
 | `SraConfig` | `["sra", owner, config_hash, salt]` | `initialize_sra`, `manage_sra`, `trigger` | Immutable: owner, `final_handler`, `handler_data`, salt, bump. Mutable: initiator, active flag, and shared `deposit_nonce`. |
 | Address book root | owner-scoped root account | `initialize_address_book_root` (owner set once) | Namespace for entries. |
 | `AddressBookEntry` | `["address_book", root, source_mint, target_chain_id, target_token]` | `set_address_book_entry` | Enable/disable + `target_decimals`. |
-| SRA vault (ATA) | ATA of `SraConfig` for each source mint | Passive token transfers (in), `trigger` (out) | Pre-funded source custody. No owner-withdraw instruction exists yet. |
+| SRA vault (ATA) | ATA of `SraConfig` for each source mint | Passive token transfers (in), `trigger` and `recover_source_vault` (out) | Pre-funded source custody. |
 
 ### 5.2 Destination-side (handler-owned)
 
@@ -238,7 +240,7 @@ The following properties are the load-bearing destination invariants. Each is a 
   3. no `ProtocolFeeConfig` present → fee 0;
   4. otherwise: per-call override (if `allow_override`) → per-mint asset tier → default bps.
 - **Math:** `fee = floor(amount * bps / 10_000)` via a u128 intermediate. `MAX_FEE_BPS = 1000` (10%) is enforced at config-set time.
-- **Slippage floor:** `trigger` compares `output_amount` against the decimal-normalized floor derived from the **gross `input_amount`**, with checked arithmetic and upward rounding. The fee is not subtracted before this handler check. `MAX_SLIPPAGE_BPS = 10_000` (100%, no effective cap — matches EVM). CCTP separately requires its worst-case delivery, `net_input_amount - max_fee`, to cover `output_amount`.
+- **Slippage floor:** `trigger` compares `output_amount` against the decimal-normalized floor derived from **`input_amount` minus the protocol fee**, with checked arithmetic and upward rounding. `MAX_SLIPPAGE_BPS = 10_000` (100%, no effective cap). CCTP separately requires its worst-case delivery, `net_input_amount - max_fee`, to cover `output_amount`.
 
 Because the sponsor and disabled-fee paths short-circuit *before* the override bounds check, a sponsored deposit can never trip a "fee too high" error — this mirrors the EVM ordering deliberately.
 
@@ -287,12 +289,12 @@ Flagged proactively so they are not mistaken for findings. Some are deliberate S
 - **`initialize_fee_config` is first-caller-wins.** The singleton `FeeConfig` PDA records whatever `admin` signs the first (and only possible) initialization — there is no compiled-in governance key or upgrade-authority check. An attacker who front-runs deployment claims global fee governance permanently: fee recipient, fees up to 10%, sponsorship policy. They cannot alter already-signed deposits (the exact fee is recomputed and matched), but the role is captured. Mitigation is operational: `scripts/initialize-fee-config.ts` must be run immediately after (ideally atomically with) program deployment, and the deployer must verify the resulting `FeeConfig.admin` before any announcement or use. Deployment ordering — not on-chain logic — is the security boundary here.
 
 - **No Across integrator/referral ID** on the source deposit (EVM appends one).
-- **No source-vault owner recovery yet.** Tokens in the source SRA vault can currently leave only through an initiator-authorized `trigger`. Owner recovery is a planned follow-up; the existing adapter `recover_stuck_custody` instructions apply only after funds reach adapter custody.
+- **Across slow fills are not verifiable.** Permissionless verification should occur by `exclusivity_deadline`; later verification requires `exclusivity_deadline >= fill_deadline`.
 - **No oracle fallback** for `min_out` (signed quote is the only path; oracle configs are refused at `create_route`).
 - **Shared execution vault per route.** Concurrent in-flight fills of the same route share one execution vault; recovery always drains the full balance safely, but per-fill accounting can be ambiguous if two fills overlap. The design assumes single-tenant routes (owner == route controller); a pooled/ multi-tenant vault would make the generic verified-CPI action unsafe.
-- **Permissioned Token-2022 output** (permanent-delegate / pausable / default-frozen) can be frozen or clawed back by its issuer; routes must opt in explicitly to accept such mints.
+- **Restricted Token-2022 output** may be frozen, clawed back, vetoed by a transfer hook, or non-transferable; routes must opt in explicitly to accept such mints.
 - **CPI depth.** Solana's ~4–5 level CPI stack is a hard ceiling; deep swap routes plus token-hook accounts can exhaust it.
-- **Closed fill-status account.** If Across lets a relayer close the `FillStatusAccount` after the deadline, on-chain fill verification is no longer possible; a signed relay-attestation fallback is designed but not shipped.
+- **Closed fill-status fallback trust.** `verify_across_fill_after_close` accepts the route owner's signature after the deadline when the canonical status PDA is System-owned and empty. That shape cannot distinguish a closed status account from one that never existed. The owner can attest a fabricated relay and finalize against available route-vault funds, so this path trusts the route owner with that liquidity.
 - **Unsupported maximum verified-CPI envelope.** A destination transaction with four maximum-size `VerifiedCpi` actions is intentionally invalid and machine-measured at 6,830 bytes and 139 addresses, exceeding the native-v1 limits of 4,096 bytes and 64 inline addresses. Supported source and destination shapes remain within both limits without Address Lookup Tables.
 
 ---
@@ -343,7 +345,7 @@ The Rust LiteSVM tests are the source of truth for behaviour; the TS suite is a 
 
 ## 14. Suggested audit focus, in priority order
 
-1. **`VerifiedFill` production and consumption.** `verify_across_fill` in the adapter (relay-hash re-derivation, fill-status pinning, field cross-checks) and `finalize_fill`'s raw-bytes deserialization + adapter-allowlist + full-field re-validation. This is the money boundary.
+1. **`VerifiedFill` production and consumption.** Review both Across verification paths (relay-hash re-derivation, fill-status pinning, amount ambiguity, owner fallback trust) and `finalize_fill`'s raw-bytes deserialization, adapter allowlist, and full-field re-validation. This is the money boundary.
 2. **The verified-CPI engine** (`execute_actions` / `verified_engine`): scratch bounding, authority separation, destination pinning, `min_out` balance-diff, account-template resolution of Free vs Fixed slots, and signed-quote verification. Try to smuggle value out via a hostile account set.
 3. **Replay and state machine.** `FillReceipt` transitions, `init`-not- `init_if_needed`, the no-strand exit paths, and the pause gate coverage.
 4. **Paired-instruction attestation** on the source side — can either half run in isolation, or with a substituted counterpart?

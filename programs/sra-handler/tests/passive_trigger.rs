@@ -482,7 +482,7 @@ fn passive_trigger_rejects_slippage_atomically() {
     let fee_ata = enable_protocol_fee(&mut svm, &fx, 30, false, false);
     let mut params = sample_prepare_params(fx.target_token);
     params.protocol_fee_amount = 3_000;
-    params.output_amount = u256_from_u64(994_999);
+    params.output_amount = u256_from_u64(992_014);
     let (trigger, execute, event) =
         cctp_pair(&fx, params.clone(), cctp_params_for(&params), Some(fee_ata));
     let error = assert_rejected_unchanged(
@@ -491,7 +491,7 @@ fn passive_trigger_rejects_slippage_atomically() {
         &[trigger, execute],
         &[&fx.initiator, &event],
         Some(event.pubkey()),
-        "output below gross slippage floor must reject",
+        "output below post-fee slippage floor must reject",
     );
     assert_sra_error(error, 0, SraError::SlippageExceeded);
 }
