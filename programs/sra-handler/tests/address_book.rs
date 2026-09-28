@@ -6,7 +6,6 @@ use solana_sdk::{
     instruction::InstructionError, pubkey::Pubkey, signature::Keypair, signer::Signer,
     transaction::TransactionError,
 };
-use solana_system_interface::program as system_program;
 use sra_common::errors::SraError;
 
 const SAMPLE_DECIMALS: u8 = 6;
@@ -44,6 +43,7 @@ fn initialize_address_book_root_rejects_owner_as_root() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
     let owner = funded_keypair(&mut svm, SOL);
+    let owner_before = svm.get_account(&owner.pubkey());
 
     let ix = initialize_address_book_root_ix(&payer.pubkey(), &owner.pubkey(), &owner.pubkey());
     let err = send_ix_expect_err(
@@ -54,17 +54,8 @@ fn initialize_address_book_root_rejects_owner_as_root() {
         "owner wallet must not become the address book root",
     );
 
-    assert_eq!(
-        err,
-        TransactionError::InstructionError(
-            0,
-            InstructionError::Custom(SraError::InvalidAddressBook.into()),
-        )
-    );
-    let owner_account = svm.get_account(&owner.pubkey()).unwrap();
-    assert_eq!(owner_account.owner, system_program::ID);
-    assert_eq!(owner_account.lamports, SOL);
-    assert!(owner_account.data.is_empty());
+    assert_eq!(err, custom_error(SraError::InvalidAddressBook));
+    assert_eq!(svm.get_account(&owner.pubkey()), owner_before);
 }
 
 #[test]
