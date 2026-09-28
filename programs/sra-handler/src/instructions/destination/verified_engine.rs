@@ -18,6 +18,7 @@
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
+use anchor_lang::solana_program::program_option::COption;
 use anchor_lang::solana_program::sysvar::instructions as ix_sysvar;
 use anchor_spl::token::{transfer_checked, TransferChecked};
 use anchor_spl::token_2022::spl_token_2022::extension::default_account_state::DefaultAccountState;
@@ -56,8 +57,7 @@ const ED25519_SIGNATURE_LEN: usize = 64;
 // Post-condition trait (the only per-action-type difference)
 // ---------------------------------------------------------------------------
 
-/// The fail-closed outcome gate. The only implementation today is a post-fee
-/// token-balance increase on the route owner's output account.
+/// The fail-closed outcome gate.
 pub(crate) trait PostCheck {
     /// Measure the tracked quantity now (e.g. the output ATA's balance).
     fn observe(&self) -> Result<u128>;
@@ -74,12 +74,11 @@ pub(crate) struct TokenBalanceCheck<'a, 'info> {
 
 impl PostCheck for TokenBalanceCheck<'_, '_> {
     fn observe(&self) -> Result<u128> {
-        // A non-token account at the pinned destination is structural, not soft.
-        // The balance is read post-fee (the landed amount, after any Token-2022
-        // transfer fee was withheld) on the output token program.
         let token = token_account(self.account, &self.token_program)
             .ok_or(error!(SraError::DestinationNotPinned))?;
-        Ok(token.amount as u128)
+        let held =
+            held_amount(self.account.lamports(), &token).ok_or(SraError::ArithmeticOverflow)?;
+        Ok(u128::from(held))
     }
 
     fn assert(&self, pre: u128, post: u128) -> Result<()> {
@@ -348,6 +347,13 @@ fn token_account(info: &AccountInfo, token_program: &Pubkey) -> Option<TokenAcco
         .map(|state| state.base)
 }
 
+fn held_amount(lamports: u64, token: &TokenAccountState) -> Option<u64> {
+    match token.is_native {
+        COption::Some(reserve) => lamports.checked_sub(reserve),
+        COption::None => Some(token.amount),
+    }
+}
+
 fn token_amount(info: &AccountInfo, token_program: &Pubkey) -> Result<u64> {
     token_account(info, token_program)
         .map(|t| t.amount)
@@ -556,6 +562,34 @@ fn parse_ed25519_self_contained(data: &[u8]) -> Option<(Pubkey, &[u8])> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn native_held_amount_is_lamports_above_reserve() {
+        let reserve = 2_039_280;
+        let wsol = |amount| TokenAccountState {
+            amount,
+            is_native: COption::Some(reserve),
+            ..TokenAccountState::default()
+        };
+        let lamports = reserve + 1_000_000;
+
+        assert_eq!(held_amount(lamports, &wsol(0)), Some(1_000_000));
+        assert_eq!(held_amount(lamports, &wsol(1_000_000)), Some(1_000_000));
+        assert_eq!(
+            held_amount(lamports + 500_000, &wsol(1_000_000)),
+            Some(1_500_000)
+        );
+        assert_eq!(held_amount(reserve - 1, &wsol(0)), None);
+    }
+
+    #[test]
+    fn non_native_held_amount_is_token_amount() {
+        let token = TokenAccountState {
+            amount: 90,
+            ..TokenAccountState::default()
+        };
+        assert_eq!(held_amount(u64::MAX, &token), Some(90));
+    }
+
     /// Build a self-contained single-signature ed25519 instruction's data, exactly
     /// as solana's `new_ed25519_instruction_with_signature` does.
     fn ed25519_data(pubkey: &[u8; 32], signature: &[u8; 64], message: &[u8]) -> Vec<u8> {
@@ -643,7 +677,6 @@ mod tests {
 
     // ---- mint_is_permissioned (Token-2022 extension scan) ----
 
-    use anchor_lang::solana_program::program_option::COption;
     use anchor_lang::solana_program::program_pack::Pack;
     use anchor_spl::token_2022::spl_token_2022::extension::non_transferable::NonTransferable;
     use anchor_spl::token_2022::spl_token_2022::extension::pausable::PausableConfig;
