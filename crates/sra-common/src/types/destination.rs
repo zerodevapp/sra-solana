@@ -18,6 +18,12 @@ pub enum SolanaAction {
     /// verifying the post-fee output by balance-diff against `min_out`. Routing
     /// accounts are relayer-supplied (`Free` slots); the value-bearing slots are
     /// pinned by `account_template`.
+    ///
+    /// The output mint is passed read-only and cannot be aliased by a `Free`
+    /// slot, so the inner call must not write to it: swaps and transfers of
+    /// existing receipt tokens work, deposits that mint new receipts abort.
+    /// Routes are immutable, so exclude minting deposits before creating or
+    /// funding one.
     VerifiedCpi {
         /// Pinned program — checked loader-owned-executable + exact pubkey at execution.
         program_id: Pubkey,
@@ -26,7 +32,7 @@ pub enum SolanaAction {
         /// Basis points of the finalized fill amount moved into the scratch source.
         input_bps: u16,
         account_template: AccountTemplate,
-        /// Fungible receipt the engine balance-diffs (swap output, vault share, LST, …).
+        /// Fungible token the engine balance-diffs. Passed read-only: the inner call cannot mint it.
         output_mint: Pubkey,
         min_out: MinOut,
         /// Opt-in for issuer-controlled or transfer-restricted Token-2022 output mints.
@@ -98,7 +104,7 @@ pub struct ManageRouteParams {
 /// verified against the route-committed quoter, so a relayer cannot inflate them.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct VerifiedCpiRuntime {
-    /// The inner program's instruction data (relayer-built swap/deposit args).
+    /// The inner program's instruction data (relayer-built args).
     pub inner_data: Vec<u8>,
     /// The signed quote's minimum acceptable output (the balance-diff floor).
     pub min_amount_out: u64,
