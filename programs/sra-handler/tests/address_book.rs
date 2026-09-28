@@ -39,6 +39,30 @@ fn initialize_address_book_root_happy_path() {
 }
 
 #[test]
+fn initialize_address_book_root_rejects_owner_as_root() {
+    let mut svm = setup_svm();
+    let payer = funded_keypair(&mut svm, 10 * SOL);
+    let owner = funded_keypair(&mut svm, SOL);
+
+    let ix = initialize_address_book_root_ix(&payer.pubkey(), &owner.pubkey(), &owner.pubkey());
+    let err = send_ix_expect_err(
+        &mut svm,
+        ix,
+        &payer,
+        &[&owner],
+        "owner wallet must not become the address book root",
+    );
+
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SraError::InvalidAddressBook.into()),
+        )
+    );
+}
+
+#[test]
 fn set_address_book_entry_happy_path() {
     let mut svm = setup_svm();
     let payer = funded_keypair(&mut svm, 10 * SOL);
