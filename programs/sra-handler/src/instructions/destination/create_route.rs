@@ -33,7 +33,7 @@ pub struct CreateRoute<'info> {
     #[account(address = params.expected_mint)]
     pub expected_mint: Box<Account<'info, Mint>>,
     #[account(
-        init,
+        init_if_needed,
         payer = payer,
         associated_token::mint = expected_mint,
         associated_token::authority = route,
@@ -43,7 +43,7 @@ pub struct CreateRoute<'info> {
     #[account(seeds = [SEED_EXECUTION, route.key().as_ref()], bump)]
     pub execution_authority: UncheckedAccount<'info>,
     #[account(
-        init,
+        init_if_needed,
         payer = payer,
         associated_token::mint = expected_mint,
         associated_token::authority = execution_authority,

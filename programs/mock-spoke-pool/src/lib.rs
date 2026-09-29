@@ -20,6 +20,12 @@ pub enum MockSpokePoolError {
 
     #[msg("Delegate PDA does not match the deposit-now args")]
     InvalidDelegate,
+
+    #[msg("Only the recorded relayer may close the fill status")]
+    NotRelayer,
+
+    #[msg("Fill status can only close after its deadline")]
+    FillDeadlineNotPassed,
 }
 
 #[derive(AnchorSerialize, Clone, Debug, PartialEq, Eq)]
@@ -177,12 +183,14 @@ pub mod mock_spoke_pool {
         Ok(())
     }
 
-    /// Test backdoor: reclaim a fill-status PDA's rent — the relayer-closure race
-    /// the destination adapter must survive. The real program gates this on the
-    /// relayer identity and a passed deadline; the mock omits those access
-    /// controls because the adapter only reads existence/owner/status and never
-    /// closes the account itself.
-    pub fn close_fill_pda(_ctx: Context<CloseFillPda>) -> Result<()> {
+    /// Reclaim a fill-status PDA's rent — the relayer-closure race the
+    /// destination adapter must survive. Mirrors the real program's gates: only
+    /// the recorded relayer, and only strictly after the fill deadline.
+    pub fn close_fill_pda(ctx: Context<CloseFillPda>) -> Result<()> {
+        require!(
+            Clock::get()?.unix_timestamp > i64::from(ctx.accounts.fill_status.fill_deadline),
+            MockSpokePoolError::FillDeadlineNotPassed
+        );
         Ok(())
     }
 }
@@ -246,7 +254,10 @@ pub struct MockFill<'info> {
 
 #[derive(Accounts)]
 pub struct CloseFillPda<'info> {
-    #[account(mut)]
+    #[account(
+        mut,
+        address = fill_status.relayer @ MockSpokePoolError::NotRelayer,
+    )]
     pub signer: Signer<'info>,
     #[account(mut, close = signer)]
     pub fill_status: Box<Account<'info, FillStatusAccount>>,

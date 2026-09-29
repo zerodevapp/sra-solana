@@ -753,7 +753,7 @@ fn lifecycle_verified_cpi_missing_destination_soft_fail_retry_succeed() {
 #[test]
 fn lifecycle_mixed_spl_transfer_and_verified_cpi_in_one_route() {
     // One route, one action_config holding both variants: 30% straight transfer +
-    // 70% swapped, both off the start-of-run snapshot, finalized then executed.
+    // 70% swapped from the fill amount, finalized then executed.
     let mut svm = setup_svm();
     let quoter = Keypair::new();
     let payer = funded_keypair(&mut svm, 100 * SOL);

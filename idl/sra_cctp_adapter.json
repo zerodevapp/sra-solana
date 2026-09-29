@@ -1296,7 +1296,7 @@
               {
                 "name": "amount_bps",
                 "docs": [
-                  "Basis points of the execution vault balance to transfer (e.g., 10000 = 100%)."
+                  "Basis points of the finalized fill amount to transfer (e.g., 10000 = 100%)."
                 ],
                 "type": "u16"
               }
@@ -1322,7 +1322,7 @@
               {
                 "name": "input_bps",
                 "docs": [
-                  "Basis points of the vault moved into the scratch source — the input bound."
+                  "Basis points of the finalized fill amount moved into the scratch source."
                 ],
                 "type": "u16"
               },
@@ -1337,7 +1337,7 @@
               {
                 "name": "output_mint",
                 "docs": [
-                  "Fungible receipt the engine balance-diffs (swap output, vault share, LST, …)."
+                  "Fungible token the engine balance-diffs. Passed read-only: the inner call cannot mint it."
                 ],
                 "type": "pubkey"
               },
@@ -1352,7 +1352,7 @@
               {
                 "name": "allow_permissioned_output",
                 "docs": [
-                  "Opt-in for Token-2022 permissioned (perm-delegate / frozen) output mints."
+                  "Opt-in for issuer-controlled or transfer-restricted Token-2022 output mints."
                 ],
                 "type": "bool"
               }

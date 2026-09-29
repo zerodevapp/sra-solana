@@ -28,19 +28,22 @@ const INNER_DATA_LEN: usize = 256;
 
 struct Dest {
     payer: Keypair,
+    owner: Keypair,
     route: Pubkey,
     route_config_hash: [u8; 32],
     mint: Pubkey,
 }
 
 fn dest() -> Dest {
-    let owner = Pubkey::new_unique();
+    let payer = Keypair::new();
+    let owner = Keypair::new();
     let mint = Pubkey::new_unique();
     let params = sample_create_route_params(mint, [7u8; 32]);
-    let route_config_hash = route_config_hash_for(&owner, &params);
-    let (route, _) = derive_route_pda(&owner, &route_config_hash, &params.salt);
+    let route_config_hash = route_config_hash_for(&owner.pubkey(), &params);
+    let (route, _) = derive_route_pda(&owner.pubkey(), &route_config_hash, &params.salt);
     Dest {
-        payer: Keypair::new(),
+        payer,
+        owner,
         route,
         route_config_hash,
         mint,
@@ -53,6 +56,29 @@ fn verify_finalize_ixs(d: &Dest) -> Vec<Instruction> {
     let (verified_fill, _) = derive_verified_fill_pda(&relay_hash);
     vec![
         verify_across_fill_ix(&d.payer.pubkey(), &d.route, relay_hash, relay_data),
+        finalize_fill_ix(
+            &d.payer.pubkey(),
+            &d.route,
+            d.route_config_hash,
+            &verified_fill,
+            relay_hash,
+            &d.mint,
+        ),
+    ]
+}
+
+fn fallback_finalize_ixs(d: &Dest) -> Vec<Instruction> {
+    let relay_data = sample_relay_data(d.route, d.mint, SOURCE_CHAIN_ID, AMOUNT);
+    let relay_hash = relay_hash_for(&relay_data);
+    let verified_fill = derive_verified_fill_pda(&relay_hash).0;
+    vec![
+        verify_across_fill_after_close_ix(
+            &d.payer.pubkey(),
+            &d.owner.pubkey(),
+            &d.route,
+            relay_hash,
+            relay_data,
+        ),
         finalize_fill_ix(
             &d.payer.pubkey(),
             &d.route,
@@ -131,8 +157,12 @@ fn verified_cpi_ixs(d: &Dest, n: u8) -> Vec<Instruction> {
     ixs
 }
 
-fn build_dest_v1_transaction(d: &Dest, ixs: &[Instruction]) -> VersionedTransaction {
-    build_v1_transaction(&d.payer, &[], ixs, Hash::default(), DEFAULT_V1_CONFIG)
+fn build_dest_v1_transaction(
+    d: &Dest,
+    ixs: &[Instruction],
+    signers: &[&Keypair],
+) -> VersionedTransaction {
+    build_v1_transaction(&d.payer, signers, ixs, Hash::default(), DEFAULT_V1_CONFIG)
         .expect("build destination v1 transaction")
 }
 
@@ -154,16 +184,26 @@ fn assert_v1_shape(
 #[test]
 fn dest_verify_finalize_v1_size() {
     let d = dest();
-    let transaction = build_dest_v1_transaction(&d, &verify_finalize_ixs(&d));
+    let transaction = build_dest_v1_transaction(&d, &verify_finalize_ixs(&d), &[]);
 
     assert_v1_shape("dest verify+finalize v1", &transaction, 954, 14);
+}
+
+#[test]
+fn dest_owner_fallback_finalize_v1_size() {
+    let d = dest();
+    let ixs = fallback_finalize_ixs(&d);
+    let transaction = build_dest_v1_transaction(&d, &ixs, &[&d.owner]);
+
+    assert_v1_shape("dest owner fallback+finalize v1", &transaction, 1_051, 15);
+    assert_eq!(transaction.message.header().num_required_signatures, 2);
 }
 
 #[test]
 fn dest_finalize_plus_max_spl_v1_size() {
     let d = dest();
     let ixs = vec![finalize_only_ix(&d), max_spl_execute_ix(&d)];
-    let transaction = build_dest_v1_transaction(&d, &ixs);
+    let transaction = build_dest_v1_transaction(&d, &ixs, &[]);
 
     assert_v1_shape("dest finalize+max SPL transfers v1", &transaction, 804, 17);
 }
@@ -171,7 +211,7 @@ fn dest_finalize_plus_max_spl_v1_size() {
 #[test]
 fn dest_single_verified_cpi_v1_size() {
     let d = dest();
-    let transaction = build_dest_v1_transaction(&d, &verified_cpi_ixs(&d, 1));
+    let transaction = build_dest_v1_transaction(&d, &verified_cpi_ixs(&d, 1), &[]);
 
     assert_v1_shape("dest single VerifiedCpi v1", &transaction, 2_099, 43);
 }
@@ -181,7 +221,7 @@ fn dest_finalize_plus_single_verified_cpi_v1_size() {
     let d = dest();
     let mut ixs = verified_cpi_ixs(&d, 1);
     ixs.insert(1, finalize_only_ix(&d));
-    let transaction = build_dest_v1_transaction(&d, &ixs);
+    let transaction = build_dest_v1_transaction(&d, &ixs, &[]);
 
     assert_v1_shape(
         "dest finalize+single VerifiedCpi v1",
@@ -230,7 +270,7 @@ fn dest_cctp_verify_finalize_v1_size() {
             &d.mint,
         ),
     ];
-    let transaction = build_dest_v1_transaction(&d, &ixs);
+    let transaction = build_dest_v1_transaction(&d, &ixs, &[]);
 
     assert_v1_shape("dest CCTP verify+finalize v1", &transaction, 1_212, 14);
 }

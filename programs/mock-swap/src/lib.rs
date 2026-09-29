@@ -12,8 +12,9 @@
 //! every real swap into a Token-2022 mint takes.
 
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::{
-    transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
+use anchor_spl::{
+    token::{approve, set_authority, spl_token::instruction::AuthorityType, Approve, SetAuthority},
+    token_interface::{transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked},
 };
 
 declare_id!("48ua4x3ax2gWbtCBfEdwC9hg8V9FYpG2aFcMNeZ8mK6h");
@@ -21,13 +22,26 @@ declare_id!("48ua4x3ax2gWbtCBfEdwC9hg8V9FYpG2aFcMNeZ8mK6h");
 /// Seed for the mock's pool authority — owns the input sink and output reserve.
 pub const POOL_AUTHORITY_SEED: &[u8] = b"pool";
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]
+pub enum ScratchMutation {
+    None,
+    Owner,
+    CloseAuthority,
+    Delegate,
+}
+
 #[program]
 pub mod mock_swap {
     use super::*;
 
     /// Pull `in_amount` of the input mint from `source` into the pool, then
     /// deliver `out_amount` of the output mint from the pool to `destination`.
-    pub fn swap(ctx: Context<Swap>, in_amount: u64, out_amount: u64) -> Result<()> {
+    pub fn swap(
+        ctx: Context<Swap>,
+        in_amount: u64,
+        out_amount: u64,
+        scratch_mutation: ScratchMutation,
+    ) -> Result<()> {
         // Leg 1: pull input from the scratch source. `signing_authority` is a
         // signer because the caller granted it via `invoke_signed`; the privilege
         // propagates to this nested CPI, so no seeds are needed here.
@@ -73,6 +87,43 @@ pub mod mock_swap {
                 out_amount,
                 ctx.accounts.output_mint.decimals,
             )?;
+        }
+
+        match scratch_mutation {
+            ScratchMutation::None => {}
+            ScratchMutation::Owner => set_authority(
+                CpiContext::new(
+                    ctx.accounts.token_program.key(),
+                    SetAuthority {
+                        current_authority: ctx.accounts.signing_authority.to_account_info(),
+                        account_or_mint: ctx.accounts.source.to_account_info(),
+                    },
+                ),
+                AuthorityType::AccountOwner,
+                Some(ctx.accounts.pool_authority.key()),
+            )?,
+            ScratchMutation::CloseAuthority => set_authority(
+                CpiContext::new(
+                    ctx.accounts.token_program.key(),
+                    SetAuthority {
+                        current_authority: ctx.accounts.signing_authority.to_account_info(),
+                        account_or_mint: ctx.accounts.source.to_account_info(),
+                    },
+                ),
+                AuthorityType::CloseAccount,
+                Some(ctx.accounts.pool_authority.key()),
+            )?,
+            ScratchMutation::Delegate => approve(
+                CpiContext::new(
+                    ctx.accounts.token_program.key(),
+                    Approve {
+                        to: ctx.accounts.source.to_account_info(),
+                        delegate: ctx.accounts.pool_authority.to_account_info(),
+                        authority: ctx.accounts.signing_authority.to_account_info(),
+                    },
+                ),
+                1,
+            )?,
         }
 
         Ok(())

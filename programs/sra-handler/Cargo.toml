@@ -9,7 +9,7 @@ crate-type = ["cdylib", "lib"]
 name = "sra_handler"
 
 [features]
-default = []
+default = ["no-idl"]
 init-if-needed = ["anchor-lang/init-if-needed"]
 cpi = ["no-entrypoint"]
 no-entrypoint = []

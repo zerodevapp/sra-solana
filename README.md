@@ -35,7 +35,7 @@ A source-side deposit is a 2-IX transaction: handler `trigger` followed by eithe
 
 Repository-constructed application and test transactions use native transaction v1 with inline account addresses and explicit `TransactionConfig` compute-unit and loaded-account-data limits. Every supported source and destination shape fits within 4,096 serialized bytes and 64 inline addresses without Address Lookup Tables. The maximum four-`VerifiedCpi` destination envelope remains intentionally invalid and measurable at 6,830 bytes and 139 addresses. Stock Anchor/Solana loader deployment remains the sole repository-controlled legacy transaction exception.
 
-The source route tuple and adapter allow-list are immutable in `SraConfig.handler_data`; the owner can rotate the initiator or toggle the SRA active state with `manage_sra`. Each successful trigger increments one `deposit_nonce` stored on the SRA, shared across source mints and adapters. The protocol fee is deducted from the gross input, while the handler's decimal-normalized slippage floor is evaluated against that gross input. CCTP additionally checks that the worst-case post-CCTP-fee delivery covers the committed output.
+The source route tuple and adapter allow-list are immutable in `SraConfig.handler_data`; the owner can rotate the initiator or toggle the SRA active state with `manage_sra`. Each successful trigger increments one `deposit_nonce` stored on the SRA, shared across source mints and adapters. The handler deducts the protocol fee before evaluating the decimal-normalized slippage floor against the net input. CCTP additionally checks that the worst-case post-CCTP-fee delivery covers the committed output.
 
 Current program identities (see `Anchor.toml`):
 
@@ -178,7 +178,7 @@ Source-side handler:
 - [x] CCTP v2 adapter `execute_deposit_cctp`
 - [x] Across adapter `recover_stuck_custody`
 - [x] CCTP v2 adapter `recover_stuck_custody`
-- [ ] Owner recovery from the source SRA vault (not yet implemented)
+- [x] Owner recovery from the source SRA vault
 
 Destination-side handler:
 
@@ -186,6 +186,7 @@ Destination-side handler:
 - [x] `finalize_fill`
 - [x] `execute_actions` / `recover_funds` / `retry_actions`
 - [x] Across adapter `verify_across_fill`
+- [x] Across adapter `verify_across_fill_after_close`
 
 Shared:
 
@@ -213,7 +214,8 @@ yarn lint:fix    # rewrite
 
 - The handler and CCTP adapter are deployed to Solana mainnet for controlled canary testing. The Across adapter ID is configured but not deployed. These identities may rotate before an audited production launch.
 - The TS test harness is intentionally thin — Rust LiteSVM tests are the source of truth for behavioural coverage today.
-- Source-vault funds currently leave only through an initiator-authorized `trigger`. Owner recovery from the source SRA vault is not implemented yet; adapter `recover_stuck_custody` only recovers funds that already reached adapter custody.
+- The SRA owner can withdraw source-vault funds through `recover_source_vault`; adapter `recover_stuck_custody` applies after funds reach adapter custody.
+- Across fills should be verified before `exclusivity_deadline`; later verification requires exclusivity through `fill_deadline`. After a fill-status account closes, the owner-signed fallback cannot distinguish a closed account from one that never existed, so the route owner must be trusted with the route vault's available liquidity.
 - The deployed mainnet programs are unaudited and retain an upgrade authority. **Do not** treat this deployment as production-ready.
 - **Launch checklist — burn upgrade authority.** The programs are designed to be immutable in production, but that cannot be enforced from inside the repo: it is a manual deploy-time step. After the verifiable build is deployed and verified on-chain, finalize each program with `solana program set-upgrade-authority <PROGRAM_ID> --final` and confirm the authority reads `none` before routing value through it.
 

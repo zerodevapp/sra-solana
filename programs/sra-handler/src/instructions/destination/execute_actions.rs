@@ -1,8 +1,8 @@
 //! Destination action execution: run a finalized route's committed `action_config`
 //! against funds staged in its `execution_vault`.
 //!
-//! * `SplTransfer` — exact-matched recipient ATA, a percentage of a start-of-run
-//!   vault snapshot. No third-party CPI.
+//! * `SplTransfer` — exact-matched recipient ATA, a percentage of the finalized
+//!   fill amount. No third-party CPI.
 //! * `VerifiedCpi` — dynamic accounts through the shared engine (scratch-bound
 //!   input, pinned slots, balance-diff `≥ min_out` from a signed quote). Only the
 //!   ed25519 signed-quote source is wired; oracle `min_out` is not yet executable
@@ -34,9 +34,9 @@ use sra_common::types::{
 };
 
 use super::verified_engine::{
-    execute_verified, fixed_slot, mint_is_permissioned, token_account_usable,
-    validate_pinned_program, validate_template_slots, verify_signed_quote, TokenBalanceCheck,
-    VerifiedCpiCall,
+    execute_verified, fixed_slot, mint_is_permissioned, scratch_account_usable,
+    token_account_usable, validate_pinned_program, validate_template_slots, verify_signed_quote,
+    ResolvedSlotKeys, TokenBalanceCheck, VerifiedCpiCall,
 };
 use crate::events::{ActionsExecuted, ActionsFailed};
 
@@ -152,7 +152,7 @@ pub(crate) fn handler<'info>(
         execution_authority_bump: ctx.bumps.execution_authority,
     };
 
-    match run_committed_actions(&accounts, fill_id, &verified_runtimes)? {
+    match run_committed_actions(&accounts, &ctx.accounts.fill_receipt, &verified_runtimes)? {
         ActionOutcome::Succeeded => {
             ctx.accounts.fill_receipt.execution_status = ExecutionStatus::ActionsSucceeded;
             emit!(ActionsExecuted { route, fill_id });
@@ -171,7 +171,7 @@ pub(crate) fn handler<'info>(
 /// after the whole batch; hard-rejects return `Err`. Caller sets the receipt status.
 pub(crate) fn run_committed_actions<'info>(
     accounts: &ActionAccounts<'_, 'info>,
-    fill_id: [u8; 32],
+    fill_receipt: &FillReceipt,
     verified_runtimes: &[VerifiedCpiRuntime],
 ) -> Result<ActionOutcome> {
     let action_config: &[SolanaAction] = &accounts.route.action_config;
@@ -181,9 +181,11 @@ pub(crate) fn run_committed_actions<'info>(
     let expected_mint = accounts.route.expected_mint;
     let token_program = accounts.token_program.key();
     let decimals = accounts.expected_mint.decimals;
-    // Snapshot once (not a shrinking live balance): each amount is a fraction of
-    // this, so a 100%-summing set moves ~the whole vault.
-    let vault_snapshot = accounts.execution_vault.amount;
+    require!(
+        accounts.execution_vault.amount >= fill_receipt.amount,
+        SraError::InsufficientVaultBalance
+    );
+    let fill_amount = fill_receipt.amount;
     // A frozen source vault would abort every movement — fail soft, not hard-abort.
     let source_frozen = accounts.execution_vault.state == AccountState::Frozen;
 
@@ -202,6 +204,13 @@ pub(crate) fn run_committed_actions<'info>(
                 get_associated_token_address(&auth, &expected_mint),
             )
         });
+    let route_output_mints: Vec<Pubkey> = action_config
+        .iter()
+        .filter_map(|action| match action {
+            SolanaAction::VerifiedCpi { output_mint, .. } => Some(*output_mint),
+            SolanaAction::SplTransfer { .. } => None,
+        })
+        .collect();
 
     let now = Clock::get()?.unix_timestamp;
 
@@ -234,7 +243,7 @@ pub(crate) fn run_committed_actions<'info>(
                 } else {
                     plan.push(Planned::Spl {
                         recipient_index: cursor,
-                        amount: vault_amount_for_bps(vault_snapshot, *amount_bps),
+                        amount: fill_amount_for_bps(fill_amount, *amount_bps),
                     });
                 }
                 committed_bps += *amount_bps as u32;
@@ -289,9 +298,6 @@ pub(crate) fn run_committed_actions<'info>(
                         || output_token_program == anchor_spl::token_2022::ID,
                     SraError::ActionAccountMismatch
                 );
-                // Safety gate: never silently custody a permissioned output
-                // (permanent-delegate / pausable / default-frozen) unless the route
-                // explicitly opted in.
                 require!(
                     *allow_permissioned_output || !mint_is_permissioned(output_mint_info)?,
                     SraError::PermissionedOutputNotAllowed
@@ -305,11 +311,14 @@ pub(crate) fn run_committed_actions<'info>(
                 validate_template_slots(
                     slots,
                     account_template,
-                    &token_program,
-                    &scratch_auth,
-                    &scratch_account,
-                    &destination,
-                    output_mint,
+                    &ResolvedSlotKeys {
+                        token_program,
+                        signing_authority: scratch_auth,
+                        source: scratch_account,
+                        destination,
+                        output_mint: *output_mint,
+                    },
+                    &route_output_mints,
                 )?;
 
                 // One runtime entry per VerifiedCpi action, consumed in order.
@@ -318,20 +327,10 @@ pub(crate) fn run_committed_actions<'info>(
                     .ok_or(SraError::ActionAccountMismatch)?;
                 runtime_index += 1;
 
-                // Soft-fail on handler-pinned-account state (recoverable), like SplTransfer.
-                let scratch_info = fixed_slot(slots, account_template, FixedRole::Source)?;
-                let dest_info = fixed_slot(slots, account_template, FixedRole::Destination)?;
-                let scratch_ok = token_account_usable(scratch_info, &token_program, &expected_mint);
-                let dest_ok = token_account_usable(dest_info, &output_token_program, output_mint);
-                if source_frozen || !scratch_ok || !dest_ok {
-                    any_action_would_fail = true;
-                    cursor = end;
-                    continue;
-                }
-
                 // Verify the authorized, unexpired signed quote (hard reject).
-                let input_amount = vault_amount_for_bps(vault_snapshot, *input_bps);
-                let context_hash = action_context_hash(&route_key, &fill_id, action_index as u8);
+                let input_amount = fill_amount_for_bps(fill_amount, *input_bps);
+                let context_hash =
+                    action_context_hash(&route_key, &fill_receipt.fill_id, action_index as u8);
                 let message = signed_quote_message(
                     &context_hash,
                     input_mint,
@@ -348,16 +347,30 @@ pub(crate) fn run_committed_actions<'info>(
                     now,
                 )?;
 
-                plan.push(Planned::Verified {
-                    action_index,
-                    program_index,
-                    slots_start,
-                    slots_len,
-                    input_amount,
-                    min_out: runtime.min_amount_out,
-                    runtime_index: runtime_index - 1,
-                    output_token_program,
-                });
+                // Soft-fail on handler-pinned-account state (recoverable), like SplTransfer.
+                let scratch_info = fixed_slot(slots, account_template, FixedRole::Source)?;
+                let dest_info = fixed_slot(slots, account_template, FixedRole::Destination)?;
+                let scratch_ok = scratch_account_usable(
+                    scratch_info,
+                    &token_program,
+                    &expected_mint,
+                    &scratch_auth,
+                );
+                let dest_ok = token_account_usable(dest_info, &output_token_program, output_mint);
+                if source_frozen || !scratch_ok || !dest_ok {
+                    any_action_would_fail = true;
+                } else {
+                    plan.push(Planned::Verified {
+                        action_index,
+                        program_index,
+                        slots_start,
+                        slots_len,
+                        input_amount,
+                        min_out: runtime.min_amount_out,
+                        runtime_index: runtime_index - 1,
+                        output_token_program,
+                    });
+                }
                 cursor = end;
             }
         }
@@ -465,11 +478,10 @@ pub(crate) fn run_committed_actions<'info>(
     Ok(ActionOutcome::Succeeded)
 }
 
-/// `floor(amount_bps * vault_snapshot / BPS_DENOMINATOR)`. Committed bps sum to
-/// exactly 10_000 (checked at create, re-asserted in pass 1), so the product is
-/// `<= vault_snapshot` (lossless `u64` cast); the floor can leave dust.
-fn vault_amount_for_bps(vault_snapshot: u64, amount_bps: u16) -> u64 {
-    ((vault_snapshot as u128 * amount_bps as u128) / BPS_DENOMINATOR as u128) as u64
+/// Every accepted plan has `amount_bps <= BPS_DENOMINATOR`, so the quotient is
+/// `<= fill_amount` and the `u64` cast is lossless. Division floors and can leave dust.
+fn fill_amount_for_bps(fill_amount: u64, amount_bps: u16) -> u64 {
+    ((fill_amount as u128 * amount_bps as u128) / BPS_DENOMINATOR as u128) as u64
 }
 
 #[cfg(test)]
@@ -477,47 +489,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn vault_amount_for_bps_full() {
-        assert_eq!(vault_amount_for_bps(1_000_000, 10_000), 1_000_000);
+    fn fill_amount_for_bps_full() {
+        assert_eq!(fill_amount_for_bps(1_000_000, 10_000), 1_000_000);
     }
 
     #[test]
-    fn vault_amount_for_bps_half() {
-        assert_eq!(vault_amount_for_bps(1_000_000, 5_000), 500_000);
+    fn fill_amount_for_bps_half() {
+        assert_eq!(fill_amount_for_bps(1_000_000, 5_000), 500_000);
     }
 
     #[test]
-    fn vault_amount_for_bps_zero_bps_is_zero() {
-        assert_eq!(vault_amount_for_bps(1_000_000, 0), 0);
+    fn fill_amount_for_bps_zero_bps_is_zero() {
+        assert_eq!(fill_amount_for_bps(1_000_000, 0), 0);
     }
 
     #[test]
-    fn vault_amount_for_bps_zero_vault_is_zero() {
-        assert_eq!(vault_amount_for_bps(0, 10_000), 0);
+    fn fill_amount_for_bps_zero_amount_is_zero() {
+        assert_eq!(fill_amount_for_bps(0, 10_000), 0);
     }
 
     #[test]
-    fn vault_amount_for_bps_floors() {
+    fn fill_amount_for_bps_floors() {
         // 100 * 3333 / 10000 = 33.33 -> 33 (floor).
-        assert_eq!(vault_amount_for_bps(100, 3_333), 33);
+        assert_eq!(fill_amount_for_bps(100, 3_333), 33);
     }
 
     #[test]
-    fn vault_amount_for_bps_split_floors_leaving_dust() {
-        let snapshot = 1_000_001u64;
-        let a = vault_amount_for_bps(snapshot, 6_000);
-        let b = vault_amount_for_bps(snapshot, 4_000);
+    fn fill_amount_for_bps_split_floors_leaving_dust() {
+        let fill_amount = 1_000_001u64;
+        let a = fill_amount_for_bps(fill_amount, 6_000);
+        let b = fill_amount_for_bps(fill_amount, 4_000);
         assert_eq!(a, 600_000);
         assert_eq!(b, 400_000);
         assert_eq!(
-            snapshot - (a + b),
+            fill_amount - (a + b),
             1,
             "1 base unit of floor dust stays staged"
         );
     }
 
     #[test]
-    fn vault_amount_for_bps_max_vault_full_is_lossless() {
-        assert_eq!(vault_amount_for_bps(u64::MAX, 10_000), u64::MAX);
+    fn fill_amount_for_bps_max_amount_full_is_lossless() {
+        assert_eq!(fill_amount_for_bps(u64::MAX, 10_000), u64::MAX);
     }
 }
