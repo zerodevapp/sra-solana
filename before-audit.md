@@ -192,7 +192,7 @@ There are **three distinct signing authorities** on the destination side — the
 
 | Actor | Trust | Capability |
 | --- | --- | --- |
-| **Owner** | Trusted (per their own SRA/route) | Creates the source SRA and destination route; manages the source initiator/active flag and destination policy; retries or recovers destination execution; recovers adapter custody. Source-vault recovery is not implemented yet. |
+| **Owner** | Trusted (per their own SRA/route) | Creates the source SRA and destination route; manages the source initiator/active flag and destination policy; retries or recovers destination execution; recovers adapter custody and source-vault funds. |
 | **Configured initiator (source)** | Semi-trusted | Can submit `trigger` and move pre-funded SRA-vault value through an allow-listed adapter, choosing amounts and adapter-specific terms within the immutable route, fee, slippage, and pairing constraints. Cannot alter the destination tuple. |
 | **Relayer / filler / executor** | **Untrusted** | Fills via Across, supplies routing accounts for verified CPIs, submits `verify`/`finalize`/`execute`. Constrained entirely by on-chain checks. |
 | **Quoter** | Trusted per-route (address committed in the action) | Signs a `min_amount_out` bound for each verified-CPI action; only the committed quoter's signature is accepted. |
@@ -210,15 +210,17 @@ On the source side, `trigger` may be signed only by the configured initiator, sp
 
 The following properties are the load-bearing destination invariants. Each is a good audit target — try to break it.
 
-1. **Fill authenticity.** A `VerifiedFill` can only correspond to a real Across fill: the `FillStatusAccount` is pinned to the canonical SpokePool, and the relay data is byte-bound to the fill's relay hash.
+1. **Fill and amount authenticity.** A `VerifiedFill` can only correspond to a real Across fill: the `FillStatusAccount` is pinned to the canonical SpokePool, and the relay data is byte-bound to the fill's relay hash. The original output amount is recorded only while slow filling has not become possible or when the relay has no slow-fill window, so `Filled` uniquely implies an exact fast fill.
 2. **Per-route adapter trust.** Only attestations owned by a program in `allowed_adapters` are honored; any other `VerifiedFill` is inert.
 3. **Replay-once at two layers.** `VerifiedFill` (`init` per adapter+relay_hash) and `FillReceipt` (`init` per route+fill_id, never closeable).
 4. **Custody moves are PDA-signed.** Every token move is signed by a handler-controlled PDA (route / execution authority / scratch authority). Relayers supply accounts, never signing authority.
 5. **Action commitment.** Executed actions are *exactly* those committed at `create_route` (hash-checked). A relayer cannot inject, drop, or reorder.
 6. **Redirect resistance.** Static transfers must exact-match `ATA(recipient, expected_mint)`. Verified-CPI outputs are pinned to the owner's ATA.
-7. **CPI containment.** Verified-CPI input is bounded to the scratch account (`input_bps` of the vault), the inner CPI is signed only by the scratch authority (never the execution authority), the output is pinned to the owner's ATA, `min_out` is enforced by post-fee balance diff, and the scratch is swept empty afterward.
+7. **CPI containment.** Verified-CPI input is bounded to the scratch account (`input_bps` of the finalized fill amount), the inner CPI is signed only by the scratch authority (never the execution authority), the output is pinned to the owner's ATA, `min_out` is enforced by post-fee balance diff, and the scratch is swept empty afterward.
 8. **Quote integrity.** `min_out` is quoter-signed over a context hash (route ‖ fill_id ‖ action_index), the chain ID, and an expiry — no cross- fill, cross-action, or cross-chain replay.
-9. **No-strand guarantee.** Every non-terminal state has an exit path, and a committed action config must consume exactly 100% of the staged snapshot, so terminal success leaves at most floor-division dust (swept by any later fill's execution or a sibling receipt's recovery). Funds are never permanently locked by a failed action.
+9. **Post-verification exits and bounded residue.** Every non-terminal state after `VerifiedFill` creation has an exit path, and a committed action config allocates exactly 100% of its receipt's finalized fill amount. Terminal action success can leave per-action floor dust (at most `actions - 1` base units per fill) plus unsolicited vault donations. Later executions are receipt-scoped and do not sweep this residue. `recover_funds` drains the shared vault only while invoked with a receipt in `Finalized` or `ActionsFailed`, so residue remaining after all receipts become terminal has no exit; floor dust is bounded and donations are gifted funds. Funds attributable to a non-terminal receipt are never permanently locked by a failed action. Ambiguous fills rejected before verification are outside this guarantee.
+
+The owner-signed after-close fallback is an exception to item 1's live-status proof; it substitutes owner attestation for historical fill evidence as described in §12.
 
 ---
 
