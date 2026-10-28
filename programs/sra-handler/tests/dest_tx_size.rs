@@ -12,9 +12,10 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
 use sra_common::{
-    constants::{MAX_ACTION_IDXS, MAX_TEMPLATE_SLOTS},
+    constants::{MAX_ACTION_IDXS, MAX_ROUTE_TEMPLATE_SLOTS, MAX_TEMPLATE_SLOTS},
+    errors::SraError,
     quote::{action_context_hash, signed_quote_message},
-    types::{AccountTemplate, FixedRole, MinOut, SlotRole, SolanaAction},
+    types::{validate_action_config, AccountTemplate, FixedRole, MinOut, SlotRole, SolanaAction},
 };
 
 const AMOUNT: u64 = 1_000_000;
@@ -100,7 +101,7 @@ fn max_spl_execute_ix(d: &Dest) -> Instruction {
     execute_actions_ix(&d.payer.pubkey(), &d.route, FILL_ID, &d.mint, &atas)
 }
 
-fn max_template() -> AccountTemplate {
+fn template(len: usize) -> AccountTemplate {
     let mut slots = vec![
         SlotRole::Fixed(FixedRole::TokenProgram),
         SlotRole::Fixed(FixedRole::SigningAuthority),
@@ -108,39 +109,38 @@ fn max_template() -> AccountTemplate {
         SlotRole::Fixed(FixedRole::Destination),
         SlotRole::Fixed(FixedRole::OutputMint),
     ];
-    while slots.len() < MAX_TEMPLATE_SLOTS {
-        slots.push(SlotRole::Free);
-    }
+    slots.resize(len, SlotRole::Free);
     AccountTemplate { slots }
 }
 
-fn verified_cpi_ixs(d: &Dest, n: u8) -> Vec<Instruction> {
+fn verified_cpi_ixs(d: &Dest, template_lens: &[usize]) -> (Vec<Instruction>, Vec<SolanaAction>) {
     let mut ixs = Vec::new();
     let mut action_config = Vec::new();
     let mut runtimes = Vec::new();
     let mut metas = Vec::new();
 
-    for i in 0..n {
+    for (i, &len) in template_lens.iter().enumerate() {
+        let program_id = Pubkey::new_unique();
         let output_mint = Pubkey::new_unique();
         let quoter = Keypair::new();
         action_config.push(SolanaAction::VerifiedCpi {
-            program_id: mock_swap::ID,
+            program_id,
             input_mint: d.mint,
-            input_bps: BPS_TOTAL / n as u16,
-            account_template: max_template(),
+            input_bps: BPS_TOTAL / template_lens.len() as u16,
+            account_template: template(len),
             output_mint,
             min_out: MinOut::SignedQuote {
                 quoter: quoter.pubkey(),
             },
             allow_permissioned_output: false,
         });
-        metas.push(AccountMeta::new_readonly(mock_swap::ID, false));
-        for _ in 0..MAX_TEMPLATE_SLOTS {
+        metas.push(AccountMeta::new_readonly(program_id, false));
+        for _ in 0..len {
             metas.push(AccountMeta::new(Pubkey::new_unique(), false));
         }
         runtimes.push(runtime(vec![0u8; INNER_DATA_LEN], MIN_OUT, EXPIRY));
 
-        let context_hash = action_context_hash(&d.route, &FILL_ID, i);
+        let context_hash = action_context_hash(&d.route, &FILL_ID, i as u8);
         let message =
             signed_quote_message(&context_hash, &d.mint, &output_mint, VAULT, MIN_OUT, EXPIRY);
         ixs.push(ed25519_quote_ix(&quoter, &message));
@@ -154,7 +154,7 @@ fn verified_cpi_ixs(d: &Dest, n: u8) -> Vec<Instruction> {
         &d.mint,
         metas,
     ));
-    ixs
+    (ixs, action_config)
 }
 
 fn build_dest_v1_transaction(
@@ -211,7 +211,8 @@ fn dest_finalize_plus_max_spl_v1_size() {
 #[test]
 fn dest_single_verified_cpi_v1_size() {
     let d = dest();
-    let transaction = build_dest_v1_transaction(&d, &verified_cpi_ixs(&d, 1), &[]);
+    let (ixs, _) = verified_cpi_ixs(&d, &[MAX_TEMPLATE_SLOTS]);
+    let transaction = build_dest_v1_transaction(&d, &ixs, &[]);
 
     assert_v1_shape("dest single VerifiedCpi v1", &transaction, 2_099, 43);
 }
@@ -219,7 +220,7 @@ fn dest_single_verified_cpi_v1_size() {
 #[test]
 fn dest_finalize_plus_single_verified_cpi_v1_size() {
     let d = dest();
-    let mut ixs = verified_cpi_ixs(&d, 1);
+    let (mut ixs, _) = verified_cpi_ixs(&d, &[MAX_TEMPLATE_SLOTS]);
     ixs.insert(1, finalize_only_ix(&d));
     let transaction = build_dest_v1_transaction(&d, &ixs, &[]);
 
@@ -232,9 +233,30 @@ fn dest_finalize_plus_single_verified_cpi_v1_size() {
 }
 
 #[test]
+fn dest_route_template_slot_budget_v1_size() {
+    let d = dest();
+    let mut lens = [MAX_ROUTE_TEMPLATE_SLOTS / MAX_ACTION_IDXS; MAX_ACTION_IDXS];
+    lens[0] += MAX_ROUTE_TEMPLATE_SLOTS % MAX_ACTION_IDXS;
+    let (ixs, action_config) = verified_cpi_ixs(&d, &lens);
+    validate_action_config(&action_config).expect("route at the template-slot budget");
+    let transaction = build_dest_v1_transaction(&d, &ixs, &[]);
+
+    assert_v1_shape(
+        "dest four VerifiedCpi at the route template-slot budget v1",
+        &transaction,
+        4_088,
+        56,
+    );
+}
+
+#[test]
 fn dest_max_verified_cpi_v1_exceeds_limits() {
     let d = dest();
-    let ixs = verified_cpi_ixs(&d, MAX_ACTION_IDXS as u8);
+    let (ixs, action_config) = verified_cpi_ixs(&d, &[MAX_TEMPLATE_SLOTS; MAX_ACTION_IDXS]);
+    assert_eq!(
+        validate_action_config(&action_config).unwrap_err(),
+        SraError::TooManyTemplateSlots.into()
+    );
     let message = compile_v1_message(&d.payer.pubkey(), &ixs, Hash::default(), DEFAULT_V1_CONFIG)
         .expect("compile maximum VerifiedCpi v1 message");
     let accounts = message.account_keys.len();
@@ -244,8 +266,8 @@ fn dest_max_verified_cpi_v1_exceeds_limits() {
     let size = serialized_v1_len(&transaction);
 
     println!("dest four VerifiedCpi v1: {size} bytes, {accounts} accounts");
-    assert_eq!(size, 6_830);
-    assert_eq!(accounts, 139);
+    assert_eq!(size, 6_926);
+    assert_eq!(accounts, 142);
     assert_eq!(message.validate(), Err(MessageError::TooManyAddresses));
     assert!(size > MAX_TRANSACTION_SIZE);
 }

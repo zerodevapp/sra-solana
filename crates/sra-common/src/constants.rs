@@ -23,6 +23,13 @@ pub const MAX_ACTION_IDXS: usize = 4;
 /// new dynamic-CPI template.
 pub const MAX_TEMPLATE_SLOTS: usize = 32;
 
+/// Max account slots summed over a route's `VerifiedCpi` templates. Keeps every
+/// admitted route's `execute_actions` / `retry_actions` transaction, signed and
+/// paid by one key, within the native-v1 limits (4,096 bytes, 64 inline
+/// addresses) when each `VerifiedCpi` carries at most 256 bytes of runtime data,
+/// even if every slot is a distinct account.
+pub const MAX_ROUTE_TEMPLATE_SLOTS: usize = 42;
+
 /// Basis points denominator (100% = 10,000 bps).
 /// Matches EVM `BPS_DENOMINATOR` in Constants.sol.
 pub const BPS_DENOMINATOR: u16 = 10_000;
