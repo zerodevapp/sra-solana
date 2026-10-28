@@ -8,7 +8,9 @@
 
 use anchor_lang::prelude::*;
 
-use crate::constants::{BPS_DENOMINATOR, MAX_ACTION_IDXS, MAX_TEMPLATE_SLOTS};
+use crate::constants::{
+    BPS_DENOMINATOR, MAX_ACTION_IDXS, MAX_ROUTE_TEMPLATE_SLOTS, MAX_TEMPLATE_SLOTS,
+};
 use crate::errors::SraError;
 use crate::types::SolanaAction;
 
@@ -75,6 +77,7 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
         SraError::TooManyActionIdxs
     );
 
+    let mut route_template_slots = 0;
     // u32 sum of ≤ MAX_ACTION_IDXS u16 values cannot overflow.
     let mut total_bps: u32 = 0;
     for action in actions {
@@ -110,6 +113,7 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
                     account_template.slots.len() <= MAX_TEMPLATE_SLOTS,
                     SraError::TooManyTemplateSlots
                 );
+                route_template_slots += account_template.slots.len();
                 // Pin the value-bearing slots so a relayer can't redirect funds,
                 // and the output mint so the handler reads its program/extensions
                 // from a committed account.
@@ -140,13 +144,17 @@ pub fn validate_action_config(actions: &[SolanaAction]) -> Result<()> {
         total_bps == BPS_DENOMINATOR as u32,
         SraError::InvalidActionBpsSum
     );
+    require!(
+        route_template_slots <= MAX_ROUTE_TEMPLATE_SLOTS,
+        SraError::TooManyTemplateSlots
+    );
 
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::constants::MAX_TEMPLATE_SLOTS;
+    use crate::constants::{MAX_ROUTE_TEMPLATE_SLOTS, MAX_TEMPLATE_SLOTS};
     use crate::errors::SraError;
     use crate::types::{
         validate_action_config, AccountTemplate, FixedRole, MinOut, SlotRole, SolanaAction,
@@ -430,6 +438,31 @@ mod tests {
     fn validate_action_config_verified_cpi_template_at_max_accepted() {
         let action = verified_cpi_with_template(pinned_slots_plus_free(MAX_TEMPLATE_SLOTS - 4));
         assert!(validate_action_config(&[action]).is_ok());
+    }
+
+    fn verified_cpis_with_route_slots(total: usize) -> [SolanaAction; 2] {
+        [MAX_TEMPLATE_SLOTS, total - MAX_TEMPLATE_SLOTS].map(|len| {
+            let mut action = verified_cpi_with_template(pinned_slots_plus_free(len - 4));
+            if let SolanaAction::VerifiedCpi { input_bps, .. } = &mut action {
+                *input_bps = 5_000;
+            }
+            action
+        })
+    }
+
+    #[test]
+    fn validate_action_config_route_template_slots_over_budget_rejected() {
+        let actions = verified_cpis_with_route_slots(MAX_ROUTE_TEMPLATE_SLOTS + 1);
+        assert_eq!(
+            validate_action_config(&actions).unwrap_err(),
+            SraError::TooManyTemplateSlots.into()
+        );
+    }
+
+    #[test]
+    fn validate_action_config_route_template_slots_at_budget_accepted() {
+        let actions = verified_cpis_with_route_slots(MAX_ROUTE_TEMPLATE_SLOTS);
+        assert!(validate_action_config(&actions).is_ok());
     }
 
     #[test]

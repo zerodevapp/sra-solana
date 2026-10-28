@@ -107,7 +107,7 @@ pub enum SraError {
     #[msg("Action config field is invalid (zero key or template missing a required fixed slot)")]
     InvalidActionConfig,
 
-    #[msg("VerifiedCpi account template exceeds the maximum slot count")]
+    #[msg("VerifiedCpi account templates exceed the per-action or per-route slot maximum")]
     TooManyTemplateSlots,
 
     #[msg("Adapter already present in the allowlist")]
