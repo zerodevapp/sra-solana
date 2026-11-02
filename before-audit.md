@@ -15,7 +15,7 @@ The defining property: an SRA's routing policy (and, on the destination side, it
 There are two independent flows:
 
 - **Source (Solana → EVM):** tokens accumulate passively in an SRA-owned vault. The configured initiator submits a two-instruction transaction that validates the immutable routing policy, collects the protocol fee, hands net tokens to an allow-listed Across or CCTP v2 adapter, and executes that adapter's deposit. The owner does not sign each trigger. The EVM side then fills and executes — the EVM `sra-stx` contracts are unchanged by this repo.
-- **Destination (EVM → Solana):** Across fills tokens into a route's vault; an adapter attests the fill on-chain, the handler settles it, and an optional action engine runs the committed actions (transfers / verified swaps). Any non-terminal state has a recovery path.
+- **Destination (EVM → Solana):** an Across fill or a CCTP v2 mint delivers tokens into a route's vault; the matching adapter attests the delivery on-chain, the handler settles it, and an optional action engine runs the committed actions (transfers / verified swaps). Any non-terminal state has a recovery path.
 
 This repo is the Solana counterpart to the EVM SRA contracts in the sibling `sra-stx/` tree. The EVM contracts require no changes to interoperate.
 
@@ -27,7 +27,7 @@ This repo is the Solana counterpart to the EVM SRA contracts in the sibling `sra
 | --- | --- | --- | --- |
 | `programs/sra-handler` | On-chain program | **Yes — primary** | Bridge- and target-agnostic. Source passive-vault authorization + policy validation + fee + custody handoff + routing event; destination fill settlement, action execution, recovery; fee administration. |
 | `programs/sra-across-adapter` | On-chain program | **Yes — primary** | Across-specific. Source: build the Across `deposit_now` call (empty message envelope) and CPI into Across. Destination: read the Across fill-status account and mint a `VerifiedFill` attestation. |
-| `programs/sra-cctp-adapter` | On-chain program | **Yes — primary** | CCTP v2-specific source adapter. Validates the domain, finality, and worst-case delivery quote, then burns canonical USDC through CCTP `deposit_for_burn`. |
+| `programs/sra-cctp-adapter` | On-chain program | **Yes — primary** | CCTP v2-specific. Source: validate the domain, finality, and worst-case delivery quote, then burn canonical USDC through CCTP `deposit_for_burn`. Destination: re-verify Circle's attestation over the received message, confirm the executed-mint receipt, and mint a `VerifiedFill` attestation. |
 | `crates/sra-common` | Shared library crate | **Yes** | PDA seeds, shared account and trigger-wire types, constants, errors, the `u256_from_u64` EVM wire-word helper, fee/slippage math, and the signed-quote message layout. Compiled into the handler and adapters. |
 | `programs/mock-cctp` | Test-only program | **No — out of scope** | Minimal CCTP v2 stand-in used by LiteSVM source tests. |
 | `programs/mock-spoke-pool` | Test-only program | **No — out of scope** | Minimal Across SVM SpokePool stand-in used by LiteSVM/Surfpool tests. |
@@ -78,8 +78,10 @@ Result: tokens enter the selected bridge and the EVM target flow continues. If t
 
 **Fill lifecycle (deterministic; parts are permissionless):**
 
-1. Across fills output tokens into the route vault ATA (external, untrusted).
-2. **`verify_across_fill` (adapter, permissionless)** — read the Across `FillStatusAccount` at its pinned PDA, confirm `Filled`, require that the fill amount is unambiguous at verification time, re-derive the relay hash from supplied relay data, cross-check recipient = route / output token = expected mint / origin chain = source chain, and mint a `VerifiedFill` PDA (`init` → replay-once). After the deadline and closure of the status account, `verify_across_fill_after_close` instead requires the route owner's signature.
+1. Across fills output tokens into the route vault ATA, or a relayer submits CCTP `receive_message` and CCTP mints USDC into it (external, untrusted).
+2. **`verify_across_fill` (Across adapter, permissionless)** — read the Across `FillStatusAccount` at its pinned PDA, confirm `Filled`, require that the fill amount is unambiguous at verification time, re-derive the relay hash from supplied relay data, cross-check recipient = route / output token = expected mint / origin chain = source chain, and mint a `VerifiedFill` PDA (`init` → replay-once). After the deadline and closure of the status account, `verify_across_fill_after_close` instead requires the route owner's signature.
+
+   **`verify_cctp_mint` (CCTP adapter, permissionless)** — re-verify Circle's attestation over `keccak256(message)` against the attester set and threshold read from the pinned MessageTransmitter state PDA (a port of Circle's `verify_attestation_signatures`); require the pinned `["used_nonce", nonce]` receipt to exist with `is_used`, proving `receive_message` executed; cross-check the header (version = transmitter version / destination domain = transmitter local domain / nonce = argument / recipient = TokenMessengerMinter) and the burn body (body version 1 / `mint_recipient` = route vault ATA / source domain → route source chain / `fee_executed ≤ max_fee < amount`); and mint a `VerifiedFill` PDA keyed by the CCTP nonce (`init` → replay-once) with `amount = amount − fee_executed` and `expected_amount = amount − max_fee`. `destination_caller` (receive is permissionless) and `hook_data` (carries no funds) are deliberately not checked.
 3. **`finalize_fill` (handler, permissionless)** — require `!paused`; require the `VerifiedFill`'s owning program is in `allowed_adapters`; deserialize and re-validate every field; move the full verified amount route vault → execution vault (execution authority PDA signs); `init` a `FillReceipt` replay marker with status `Finalized`. **No fee is taken here** — fees are source-side only.
 4. **`execute_actions` (handler, permissionless but executor-gated)** — require an executor in `allowed_executors` and `!paused`; run the committed `action_config` (hash-verified against the route). Two-pass: structural problems (frozen ATA, missing account) soft-fail to `ActionsFailed`; a CPI revert or `min_out` shortfall hard-fails the whole transaction. Success → `ActionsSucceeded`.
 
@@ -150,6 +152,7 @@ All gated by the `FeeConfig` **admin** (single key, transferable via a two-step 
 | `recover_stuck_custody` (both source adapters) | SRA owner (signs) | Refund that adapter's stranded custody ATA to the owner; this does not withdraw the source SRA vault. |
 | `verify_across_fill` | **Permissionless** | Read Across fill status (must be `Filled`); reject ambiguous slow-fill amounts; re-derive relay hash; cross-check all routing fields and chain ID; mint `VerifiedFill` PDA. |
 | `verify_across_fill_after_close` | Route owner (signs) | After `fill_deadline`, require the canonical status PDA to be System-owned and empty; revalidate the relay and route before minting the ordinary `VerifiedFill`. |
+| `verify_cctp_mint` | **Permissionless** | Re-verify Circle's attestation against the live attester set and threshold; require the executed `used_nonce` receipt; cross-check domains, nonce, recipient program, route-vault mint recipient, source chain, and fee bounds; mint `VerifiedFill` PDA keyed by the CCTP nonce. |
 
 ---
 
@@ -184,7 +187,7 @@ There are **three distinct signing authorities** on the destination side — the
 | --- | --- | --- |
 | Adapter authority | `["adapter_authority", sra_config]` | Signs custody token moves; not a Borsh account. |
 | Adapter custody (ATA) | ATA under adapter authority | Holds input tokens mid-deposit. |
-| `VerifiedFill` | `["verified_fill", adapter_program_id, fill_id]` | Adapter-minted fill attestation. **The handler reads it as raw bytes** (discriminator + exact layout check), not via an Anchor import, so multiple adapter programs can produce compatible attestations. |
+| `VerifiedFill` | `["verified_fill", adapter_program_id, fill_id]` | Adapter-minted fill attestation; `fill_id` is the Across relay hash or the CCTP message nonce. **The handler reads it as raw bytes** (discriminator + exact layout check), not via an Anchor import, so multiple adapter programs can produce compatible attestations. |
 
 ---
 
@@ -194,10 +197,11 @@ There are **three distinct signing authorities** on the destination side — the
 | --- | --- | --- |
 | **Owner** | Trusted (per their own SRA/route) | Creates the source SRA and destination route; manages the source initiator/active flag and destination policy; retries or recovers destination execution; recovers adapter custody and source-vault funds. |
 | **Configured initiator (source)** | Semi-trusted | Can submit `trigger` and move pre-funded SRA-vault value through an allow-listed adapter, choosing amounts and adapter-specific terms within the immutable route, fee, slippage, and pairing constraints. Cannot alter the destination tuple. |
-| **Relayer / filler / executor** | **Untrusted** | Fills via Across, supplies routing accounts for verified CPIs, submits `verify`/`finalize`/`execute`. Constrained entirely by on-chain checks. |
+| **Relayer / filler / executor** | **Untrusted** | Fills via Across or submits CCTP `receive_message`, supplies routing accounts for verified CPIs, submits `verify`/`finalize`/`execute`. Constrained entirely by on-chain checks. |
 | **Quoter** | Trusted per-route (address committed in the action) | Signs a `min_amount_out` bound for each verified-CPI action; only the committed quoter's signature is accepted. |
 | **Adapter program** | Trusted per SRA/route (must be in `allowed_adapters`) | Receives source net custody and performs the bridge CPI; on destination, mints the `VerifiedFill` proof. A compromised **allow-listed** adapter can take source custody or lie about destination amount/mint/chain — this is the sharpest trust edge. |
 | **Across SpokePool** | Trusted, pinned by constant | Custodies bridged funds; fills routes. |
+| **Circle CCTP v2** (attesters, MessageTransmitter, TokenMessengerMinter) | Trusted, programs pinned by constant | Burns source USDC and mints destination USDC once the attesters sign the message. `verify_cctp_mint` re-checks the attestation against the attester set read at verification time. |
 | **Inner target programs** (swaps, etc.) | **Untrusted** | Run via scratch-bounded CPI with a pinned destination and a balance-diff output floor. |
 
 **Assets at risk:** passively deposited source-vault and adapter-custody balances, the full destination fill amount (in route/execution vaults), and any action input. The most consequential compromise is an allow-listed adapter, followed by a compromised configured initiator for its SRA, a dishonest committed quoter, and weaknesses in verified-CPI account pinning.
@@ -210,9 +214,9 @@ On the source side, `trigger` may be signed only by the configured initiator, sp
 
 The following properties are the load-bearing destination invariants. Each is a good audit target — try to break it.
 
-1. **Fill and amount authenticity.** A `VerifiedFill` can only correspond to a real Across fill: the `FillStatusAccount` is pinned to the canonical SpokePool, and the relay data is byte-bound to the fill's relay hash. The original output amount is recorded only while slow filling has not become possible or when the relay has no slow-fill window, so `Filled` uniquely implies an exact fast fill.
+1. **Fill and amount authenticity.** An Across `VerifiedFill` can only correspond to a real Across fill: the `FillStatusAccount` is pinned to the canonical SpokePool, and the relay data is byte-bound to the fill's relay hash. The original output amount is recorded only while slow filling has not become possible or when the relay has no slow-fill window, so `Filled` uniquely implies an exact fast fill. A CCTP `VerifiedFill` can only correspond to an executed mint into the route vault: the attester signatures bind the message bytes, the pinned `used_nonce` receipt proves `receive_message` ran, and `mint_recipient` must be the route vault ATA. It records the delivered `amount − fee_executed`.
 2. **Per-route adapter trust.** Only attestations owned by a program in `allowed_adapters` are honored; any other `VerifiedFill` is inert.
-3. **Replay-once at two layers.** `VerifiedFill` (`init` per adapter+relay_hash) and `FillReceipt` (`init` per route+fill_id, never closeable).
+3. **Replay-once at two layers.** `VerifiedFill` (`init` per adapter + fill ID: the Across relay hash or the CCTP nonce) and `FillReceipt` (`init` per route+fill_id, never closeable).
 4. **Custody moves are PDA-signed.** Every token move is signed by a handler-controlled PDA (route / execution authority / scratch authority). Relayers supply accounts, never signing authority.
 5. **Action commitment.** Executed actions are *exactly* those committed at `create_route` (hash-checked). A relayer cannot inject, drop, or reorder.
 6. **Redirect resistance.** Static transfers must exact-match `ATA(recipient, expected_mint)`. Verified-CPI outputs are pinned to the owner's ATA.
@@ -229,6 +233,7 @@ The owner-signed after-close fallback is an exception to item 1's live-status pr
 - **Chain ID.** `SOLANA_CHAIN_ID = 34_268_394_551_451` (Across's SVM chain identifier). It is bound into every relay hash and every signed quote. It must match the Across SVM SpokePool's configured chain ID. (An earlier incorrect value was fixed; confirm the constant, not any external doc.)
 - **EVM wire words** (`sra-common/src/abi.rs`). Exposes a single helper, `u256_from_u64`, which produces the big-endian 32-byte word for the Across `output_amount` wire field. There is **no SRA message encoder**: the Across deposit carries an **empty message envelope** (the destination executes via its own instructions, not an EVM callback), while `recipient` is identity-committed in the SRA config hash and transmitted directly as the Across destination recipient.
 - **Across SpokePool** is pinned by `ACROSS_SPOKE_POOL_ID` (`DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru`).
+- **CCTP.** `cctp_domain_for_chain` / `chain_id_for_cctp_domain` map the 12 supported EVM chain IDs to CCTP domains (mainnet only; BNB is omitted because CCTP v2 there is USYC-only). They are scalar `match`es on purpose; see the comment on `cctp_domain_for_chain`. `CCTP_MESSAGE_TRANSMITTER_V2_ID`, `CCTP_TOKEN_MESSENGER_MINTER_V2_ID`, and `USDC_MINT` pin the programs and the source mint. The adapter reads CCTP v2 messages at fixed big-endian offsets (148-byte header, 228-byte burn body, then optional hook data); u64 money fields sit in 32-byte slots whose top 24 bytes must be zero.
 
 ---
 
@@ -268,9 +273,12 @@ The engine locates the ed25519 signature via the Instructions sysvar, verifies i
 | SPL Token / Token-2022 (via `token_interface`) | handler + adapter | `transfer_checked` on all custody moves; Token-2022 supports permissioned/hooked output mints. |
 | Associated Token Program | handler + adapter | Vault/recipient/custody ATA init. |
 | System Program | all | Account allocation. |
-| Across SVM SpokePool | adapter | Source: CPI `deposit_now`. Destination: read the pinned `FillStatusAccount` (no CPI). |
+| Across SVM SpokePool | Across adapter | Source: CPI `deposit_now`. Destination: read the pinned `FillStatusAccount` (no CPI). |
+| Circle CCTP v2 TokenMessengerMinter | CCTP adapter | Source: CPI `deposit_for_burn` (IDL vendored from `circlefin/solana-cctp-contracts@ec16e95`). |
+| Circle CCTP v2 MessageTransmitter | CCTP adapter | Destination: read the pinned state PDA (attester set, threshold, local domain, version) and the `used_nonce` receipt as exact layouts (no CPI). |
 | Untrusted target program | handler (verified-CPI engine) | Dynamic action CPI, contained per §7. |
 | Instructions sysvar | handler + adapter | Paired source/adapter instruction attestation; ed25519 quote location. |
+| `secp256k1_recover` syscall | CCTP adapter | Recover attester addresses from CCTP attestation signatures. |
 
 ---
 
@@ -325,11 +333,12 @@ cargo test -p sra-handler --test manage_sra
 cargo test -p sra-handler --test passive_trigger
 cargo test -p sra-handler --test passive_cctp
 cargo test -p sra-handler --test passive_across
+cargo test -p sra-handler --test verify_cctp_mint
 
 # 2. Anchor + mocha smoke test (asserts the generated client surface).
 NO_DNA=1 anchor test --skip-build --validator legacy
 
-# 3. Surfpool E2E against the real Across svm-spoke (heavier).
+# 3. Surfpool E2E against the real Across svm-spoke and CCTP v2 programs (heavier).
 NO_DNA=1 anchor build --ignore-keys --arch v0
 NO_DNA=1 surfpool start --ci --network mainnet --legacy-anchor-compatibility
 ```
@@ -347,7 +356,7 @@ The Rust LiteSVM tests are the source of truth for behaviour; the TS suite is a 
 
 ## 14. Suggested audit focus, in priority order
 
-1. **`VerifiedFill` production and consumption.** Review both Across verification paths (relay-hash re-derivation, fill-status pinning, amount ambiguity, owner fallback trust) and `finalize_fill`'s raw-bytes deserialization, adapter allowlist, and full-field re-validation. This is the money boundary.
+1. **`VerifiedFill` production and consumption.** Review both Across verification paths (relay-hash re-derivation, fill-status pinning, amount ambiguity, owner fallback trust), `verify_cctp_mint` (attestation re-verification, the `used_nonce` receipt, fixed-offset message parsing), and `finalize_fill`'s raw-bytes deserialization, adapter allowlist, and full-field re-validation. This is the money boundary.
 2. **The verified-CPI engine** (`execute_actions` / `verified_engine`): scratch bounding, authority separation, destination pinning, `min_out` balance-diff, account-template resolution of Free vs Fixed slots, and signed-quote verification. Try to smuggle value out via a hostile account set.
 3. **Replay and state machine.** `FillReceipt` transitions, `init`-not- `init_if_needed`, the no-strand exit paths, and the pause gate coverage.
 4. **Paired-instruction attestation** on the source side — can either half run in isolation, or with a substituted counterpart?

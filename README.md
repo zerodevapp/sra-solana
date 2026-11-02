@@ -14,7 +14,7 @@ Solana programs for **Smart Routing Accounts (SRA)** — deterministic-address s
 An SRA is a deterministic PDA whose address commits to its owner, handler, immutable source routing policy, and salt. It:
 
 - Receives tokens passively in handler-owned Solana vaults and lets the configured initiator route them through an allow-listed bridge adapter (Across or CCTP v2).
-- Receives bridged-in tokens on Solana via a fill verifier and runs pre-registered actions on the user's behalf. Protocol fees are taken once on the source side, not on arrival.
+- Receives bridged-in tokens on Solana through an adapter's fill verifier (Across or CCTP v2) and runs pre-registered actions on the user's behalf. Protocol fees are taken once on the source side, not on arrival.
 - Stays bridge-agnostic and target-agnostic at the handler layer — bridge- and EVM-specific encoding lives in adapter programs.
 
 ## Architecture
@@ -25,13 +25,13 @@ Three core on-chain programs plus a shared crate, plus test-only mocks:
 | ------------------------ | ------------------------------------------------------------------------------------------------------ |
 | `sra-handler`            | Bridge- and target-agnostic. Source: passive-vault policy validation, fee collection, adapter custody handoff, and routing-event emission. Destination: fill finalization, action execution, recovery. Also hosts fee administration. |
 | `sra-across-adapter`     | Across-specific. Source: builds the canonical EVM ABI message + CPIs into Across `deposit_now`. Destination: reads `FillStatusAccount` and produces a `VerifiedFill`. |
-| `sra-cctp-adapter`       | CCTP v2-specific. Source: validates the CCTP quote/domain/finality contract and burns canonical USDC through `deposit_for_burn`. |
+| `sra-cctp-adapter`       | CCTP v2-specific. Source: validates the CCTP quote/domain/finality contract and burns canonical USDC through `deposit_for_burn`. Destination: re-verifies Circle's attestation and the executed-mint receipt, then produces a `VerifiedFill`. |
 | `sra-common`             | Shared types, trigger/adapter wire contracts, PDA seeds, constants, errors, and the manual ABI encoder. `declare_id!` matches `sra-handler`'s ID so handler-owned `#[account]` types deserialize correctly across programs. |
 | `mock-cctp`              | Test-only CCTP v2 stand-in used by the LiteSVM source tests. |
 | `mock-spoke-pool`        | Test-only minimal Across SVM SpokePool mock used by the LiteSVM/Surfpool tests. |
 | `mock-swap`              | Test-only swap target used to exercise the destination verified-CPI engine. |
 
-A source-side deposit is a 2-IX transaction: handler `trigger` followed by either `execute_deposit_across` or `execute_deposit_cctp`. The configured initiator authorizes `trigger`; the owner does not sign. `trigger` spends tokens already held in the SRA vault, and the paired instructions bind each other through the Instructions sysvar so neither can execute in isolation. The destination-side fill follows the same two-instruction pattern (`verify_across_fill` + `finalize_fill`), after which `execute_actions` runs the route's committed actions.
+A source-side deposit is a 2-IX transaction: handler `trigger` followed by either `execute_deposit_across` or `execute_deposit_cctp`. The configured initiator authorizes `trigger`; the owner does not sign. `trigger` spends tokens already held in the SRA vault, and the paired instructions bind each other through the Instructions sysvar so neither can execute in isolation. The destination-side fill follows the same two-instruction pattern (`verify_across_fill` or `verify_cctp_mint`, then `finalize_fill`), after which `execute_actions` runs the route's committed actions. `verify_cctp_mint` runs after CCTP `receive_message` has minted USDC into the route vault.
 
 Repository-constructed application and test transactions use native transaction v1 with inline account addresses and explicit `TransactionConfig` compute-unit and loaded-account-data limits. Every supported source and destination shape fits within 4,096 serialized bytes and 64 inline addresses without Address Lookup Tables. `create_route` caps a route's `VerifiedCpi` templates at 42 slots in total, so four actions at the cap with 256 bytes of runtime data each measure 4,088 bytes and 56 addresses; the maximum four-`VerifiedCpi` envelope (6,926 bytes, 142 addresses) is rejected at route creation. Stock Anchor/Solana loader deployment remains the sole repository-controlled legacy transaction exception.
 
@@ -58,7 +58,7 @@ sra-solana/
 ├── programs/
 │   ├── sra-handler/         # Handler program + LiteSVM tests under tests/
 │   ├── sra-across-adapter/  # Across adapter: source deposit + destination fill verification
-│   ├── sra-cctp-adapter/    # CCTP v2 source deposit adapter
+│   ├── sra-cctp-adapter/    # CCTP v2 adapter: source deposit + destination mint verification
 │   ├── mock-cctp/           # Test-only CCTP v2 stand-in
 │   ├── mock-spoke-pool/     # Test-only Across SpokePool mock
 │   └── mock-swap/           # Test-only swap target for the verified-CPI engine
@@ -124,6 +124,9 @@ cargo test -p sra-handler --test manage_sra
 cargo test -p sra-handler --test passive_trigger
 cargo test -p sra-handler --test passive_cctp
 cargo test -p sra-handler --test passive_across
+
+# CCTP destination verification
+cargo test -p sra-handler --test verify_cctp_mint
 ```
 
 These exercise instruction handlers against an in-process LiteSVM runtime. Repository-constructed application transactions use native v1; dependency-owned `litesvm-token` fixture APIs and `LiteSVM::airdrop` still use internal legacy setup transactions. No validator required, but the program build must run first because the suite loads `target/deploy/*.so` artifacts directly.
@@ -137,7 +140,7 @@ NO_DNA=1 anchor test --skip-build --validator legacy
 
 The current TS suite (`tests/sra-handler.ts`) is a smoke test that asserts the generated IDL/client surface — most coverage lives in the Rust LiteSVM tests.
 
-**3. Surfpool E2E** (real Across paths, heavier)
+**3. Surfpool E2E** (real Across and CCTP v2 paths, heavier)
 
 ```bash
 NO_DNA=1 anchor build --ignore-keys --arch v0
@@ -151,7 +154,7 @@ NO_DNA=1 cargo test -p sra-handler --test source_e2e_surfpool -- --ignored --noc
 NO_DNA=1 cargo test -p sra-handler --test dest_e2e_surfpool -- --ignored --nocapture
 ```
 
-These suites load the local `sra-handler` and adapter programs at their declared Anchor IDs, then exercise native-v1 source and destination application transactions with inline addresses against the real Across `svm-spoke` program/state. Program deployment continues to use the stock Anchor/Solana loader path.
+These suites load the local `sra-handler` and adapter programs at their declared Anchor IDs, then exercise native-v1 source and destination application transactions with inline addresses against the real Across `svm-spoke` and CCTP v2 programs/state. Program deployment continues to use the stock Anchor/Solana loader path.
 
 ## Running on localnet
 
@@ -187,6 +190,7 @@ Destination-side handler:
 - [x] `execute_actions` / `recover_funds` / `retry_actions`
 - [x] Across adapter `verify_across_fill`
 - [x] Across adapter `verify_across_fill_after_close`
+- [x] CCTP v2 adapter `verify_cctp_mint`
 
 Shared:
 
@@ -194,7 +198,7 @@ Shared:
 - [x] Fee administration (`initialize_fee_config`, `set_protocol_fee`, `set_asset_fee_tier`, two-step admin transfer)
 - [x] Foundry golden-vector cross-validation suite
 - [x] Native-v1 source and destination transactions with inline-address size canaries
-- [x] Destination E2E against real Across via Surfpool
+- [x] Destination E2E against real Across and CCTP v2 via Surfpool
 - [x] Devnet deployment
 - [ ] Security audit
 
